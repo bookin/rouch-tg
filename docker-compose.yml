@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: rouch_postgres
+    environment:
+      POSTGRES_DB: rouch
+      POSTGRES_USER: rouch_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rouch_user -d rouch"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rouch_network
+
+  # Qdrant Vector Database
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: rouch_qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT_ALLOW_RECOVERY: "true"
+    networks:
+      - rouch_network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: rouch_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - rouch_network
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rouch_backend
+    environment:
+      DATABASE_URL: postgresql://rouch_user:${POSTGRES_PASSWORD}@postgres:5432/rouch
+      QDRANT_URL: http://qdrant:6333
+      REDIS_URL: redis://redis:6379
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      WEBAPP_URL: ${WEBAPP_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_started
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - ./terms:/app/data/knowledge_base
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    networks:
+      - rouch_network
+
+  # Frontend Mini App
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: rouch_frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - rouch_network
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  redis_data:
+
+networks:
+  rouch_network:
+    driver: bridge
