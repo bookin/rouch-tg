@@ -1,7 +1,8 @@
 """Problem Solver Agent"""
+import logging
 from typing import Dict, Any
 from app.models.user import UserProfile
-from app.knowledge.qdrant_client import QdrantKnowledgeBase
+from app.knowledge.qdrant import QdrantKnowledgeBase
 from app.workflows.problem_flow import ProblemSolverWorkflow
 from app.ai.problem_agent import solve_problem as ai_solve_problem
 
@@ -12,6 +13,7 @@ class ProblemSolverAgent:
     def __init__(self, qdrant: QdrantKnowledgeBase):
         self.qdrant = qdrant
         self.workflow = ProblemSolverWorkflow(qdrant)
+        self.logger = logging.getLogger(__name__)
     
     async def analyze_problem(
         self, 
@@ -36,20 +38,36 @@ class ProblemSolverAgent:
             return {
                 "problem": solution.problem_summary,
                 "root_cause": solution.root_cause,
-                "opposite_action": solution.opposite_action,
+                "imprint_logic": solution.imprint_logic,
+                "stop_action": solution.stop_action,
+                "start_action": solution.start_action,
+                "grow_action": solution.grow_action,
                 "practice_steps": solution.practice_steps,
                 "expected_outcome": solution.expected_outcome,
                 "timeline_days": solution.timeline_days,
-                "related_concepts": [c.get("title", "") for c in concepts]
+                "success_tip": solution.success_tip,
+                "correlations": correlations,
+                "concepts": concepts
             }
             
         except Exception as e:
+            self.logger.error(f"AI Problem Solver failed: {str(e)}", exc_info=True)
             # Fallback to workflow
             result = await self.workflow.solve_problem(user, problem)
+            plan = result.get("solution_plan", {})
             return {
                 "problem": problem,
-                "solution": result["solution_plan"],
-                "related_concepts": result["concepts"]
+                "root_cause": plan.get("message", "Система временно недоступна. Попробуйте позже."),
+                "imprint_logic": "Используется резервный алгоритм анализа.",
+                "stop_action": next((a["description"] for a in plan.get("actions", []) if a["type"] == "stop"), "Прекратите негативные действия"),
+                "start_action": next((a["description"] for a in plan.get("actions", []) if a["type"] == "start"), "Начните позитивные действия"),
+                "grow_action": next((a["description"] for a in plan.get("actions", []) if a["type"] == "track"), "Следите за отпечатками"),
+                "practice_steps": [plan.get("message", "")] if not plan.get("actions") else [a["description"] for a in plan.get("actions", [])],
+                "expected_outcome": "Перемены начнутся с изменением вашего восприятия.",
+                "timeline_days": 30,
+                "success_tip": "Используйте медитацию кофе для усиления результатов.",
+                "correlations": result.get("correlations", []),
+                "concepts": result.get("concepts", [])
             }
     
     async def get_practice_recommendation(

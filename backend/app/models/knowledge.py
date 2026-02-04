@@ -1,5 +1,5 @@
 """Knowledge base models"""
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Dict, Any
 from uuid import uuid4
 
@@ -13,8 +13,7 @@ class KnowledgeItem(BaseModel):
     source: str  # Source file name
     metadata: Dict[str, Any] = Field(default_factory=dict)
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class Correlation(BaseModel):
@@ -28,8 +27,7 @@ class Correlation(BaseModel):
     principle: Optional[str] = None
     source: str = "diamond-correlations-table.md"
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class Quote(BaseModel):
@@ -42,8 +40,7 @@ class Quote(BaseModel):
     tags: list = Field(default_factory=list)  # For searching
     source: str
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class Concept(BaseModel):
@@ -55,5 +52,4 @@ class Concept(BaseModel):
     category: str  # 'emptiness', 'imprints', 'correlations', etc.
     source: str
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

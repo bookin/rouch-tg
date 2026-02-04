@@ -5,7 +5,7 @@ Run: python -m app.knowledge.init_knowledge
 import asyncio
 from pathlib import Path
 from app.knowledge.loader import KnowledgeLoader
-from app.knowledge.qdrant_client import QdrantKnowledgeBase
+from app.knowledge.qdrant import QdrantKnowledgeBase
 from app.config import get_settings
 
 

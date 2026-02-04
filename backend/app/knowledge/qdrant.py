@@ -9,14 +9,15 @@ from app.knowledge.cache_decorator import cache_quote, cache_correlation
 from datetime import datetime
 import hashlib
 import random
+import uuid
 
 
 class QdrantKnowledgeBase:
     """Manages knowledge base in Qdrant vector database"""
     
     def __init__(self, url: str):
-        self.client = QdrantClient(url=url)
         settings = get_settings()
+        self.client = QdrantClient(url=url, api_key=settings.QDRANT_API_KEY)
         self.vector_size = settings.QDRANT_COLLECTION_SIZE
         
     async def index_knowledge(self, items: List[KnowledgeItem]):
@@ -47,8 +48,8 @@ class QdrantKnowledgeBase:
         # Recreate collection
         try:
             self.client.delete_collection(collection_name=name)
-        except:
-            pass
+        except Exception as e:
+            print(e)
         
         self.client.create_collection(
             collection_name=name,
@@ -84,11 +85,12 @@ class QdrantKnowledgeBase:
         """
         Create a stable point id for Qdrant.
 
-        Qdrant supports string ids; we use a deterministic sha1 of (type/source/content)
-        to avoid collisions and make indexing repeatable.
+        Qdrant supports unsigned integers or UUIDs. We use uuid.uuid5 to generate
+        a deterministic UUID from (type/source/content) to avoid collisions
+        and make indexing repeatable.
         """
         base = f"{item.type}|{item.source}|{item.content}"
-        return hashlib.sha1(base.encode("utf-8")).hexdigest()
+        return str(uuid.uuid5(uuid.NAMESPACE_OID, base))
 
     @cache_correlation()
     async def search_correlation(self, problem: str, limit: int = 3) -> List[Dict[str, Any]]:
@@ -97,9 +99,9 @@ class QdrantKnowledgeBase:
         try:
             vector = await embed_text(problem)
             
-            results = self.client.search(
+            results = self.client.query_points(
                 collection_name="correlations",
-                query_vector=vector,
+                query=vector,
                 limit=limit
             )
             
@@ -110,7 +112,7 @@ class QdrantKnowledgeBase:
                     "solution": hit.payload["metadata"].get("solution", ""),
                     "score": hit.score
                 }
-                for hit in results
+                for hit in results.points
             ]
         except Exception as e:
             print(f"Error searching correlations: {e}")
@@ -124,11 +126,11 @@ class QdrantKnowledgeBase:
             if focus_area:
                 # Search by focus area
                 vector = await embed_text(focus_area)
-                results = self.client.search(
+                results = self.client.query_points(
                     collection_name="quotes",
-                    query_vector=vector,
+                    query=vector,
                     limit=1
-                )
+                ).points
             else:
                 # Deterministic "random" quote of the day without relying on Qdrant offsets
                 points, _ = self.client.scroll(
@@ -171,11 +173,11 @@ class QdrantKnowledgeBase:
         try:
             vector = await embed_text(need)
             
-            results = self.client.search(
+            results = self.client.query_points(
                 collection_name="practices",
-                query_vector=vector,
+                query=vector,
                 limit=limit * 2  # Get more to filter
-            )
+            ).points
             
             practices = []
             for hit in results:
@@ -210,9 +212,9 @@ class QdrantKnowledgeBase:
         try:
             vector = await embed_text(query)
             
-            results = self.client.search(
+            results = self.client.query_points(
                 collection_name="concepts",
-                query_vector=vector,
+                query=vector,
                 limit=limit
             )
             
@@ -224,7 +226,7 @@ class QdrantKnowledgeBase:
                     "source": hit.payload["source"],
                     "score": hit.score
                 }
-                for hit in results
+                for hit in results.points
             ]
             
         except Exception as e:

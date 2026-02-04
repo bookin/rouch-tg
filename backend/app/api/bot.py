@@ -14,7 +14,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
-bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
+from app.mock_bot import MockBot
+
+settings = get_settings()
+
+if settings.TELEGRAM_ENABLED:
+    bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
+else:
+    bot = MockBot()
 dp = Dispatcher()
 router = Router()
 
@@ -99,7 +106,7 @@ async def cmd_today(message: Message):
     from app.database import AsyncSessionLocal
     from app.crud import get_user_by_telegram_id
     from app.agents.daily_manager import DailyManagerAgent
-    from app.knowledge.qdrant_client import QdrantKnowledgeBase
+    from app.knowledge.qdrant import QdrantKnowledgeBase
     from app.config import get_settings
     from datetime import datetime
     

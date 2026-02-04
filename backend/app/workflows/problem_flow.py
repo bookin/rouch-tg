@@ -1,6 +1,6 @@
 """Problem solver workflow"""
 from typing import Dict, Any, List
-from app.knowledge.qdrant_client import QdrantKnowledgeBase
+from app.knowledge.qdrant import QdrantKnowledgeBase
 from app.models.user import UserProfile
 
 

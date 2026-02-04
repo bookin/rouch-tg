@@ -13,7 +13,7 @@ from app.database import check_db_connection
 from app.cache import init_cache, close_cache
 from app.scheduler.daily_messages import MessageScheduler
 from app.agents.daily_manager import DailyManagerAgent
-from app.knowledge.qdrant_client import QdrantKnowledgeBase
+from app.knowledge.qdrant import QdrantKnowledgeBase
 
 
 settings = get_settings()
@@ -37,11 +37,13 @@ async def lifespan(app: FastAPI):
         print("✅ Redis cache initialized")
         
         # Start Telegram bot in background
-        bot_task = asyncio.create_task(start_bot())
-        print("✅ Telegram bot started")
+        if settings.TELEGRAM_ENABLED:
+            bot_task = asyncio.create_task(start_bot())
+            print("✅ Telegram bot started")
+        else:
+            print("⚠️  Running in No-Telegram Mode (Mock Bot active)")
         
         # Start scheduler for daily messages
-        settings = get_settings()
         qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
         daily_manager = DailyManagerAgent(qdrant)
         scheduler = MessageScheduler(daily_manager, bot)

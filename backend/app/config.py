@@ -2,7 +2,7 @@
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
-from typing import List
+from typing import List, Optional
 
 
 class Settings(BaseSettings):
@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     
     # Qdrant Vector Database
     QDRANT_URL: str = Field(default="http://localhost:6333", description="Qdrant URL")
+    QDRANT_API_KEY: Optional[str] = Field(default=None, description="Qdrant API Key")
     QDRANT_COLLECTION_SIZE: int = Field(default=384, description="Vector embedding size")
     
     # Redis Cache
@@ -34,16 +35,19 @@ class Settings(BaseSettings):
     REDIS_CORRELATION_CACHE_TTL: int = Field(default=7200, description="Correlation cache TTL (2h)")
     
     # Telegram Bot
+    TELEGRAM_ENABLED: bool = Field(default=True, description="Enable Telegram integration (disable for local dev)")
     TELEGRAM_BOT_TOKEN: str = Field(default="", description="Telegram Bot API token")
     TELEGRAM_RATE_LIMIT: int = Field(default=30, description="Max messages per second")
     TELEGRAM_MESSAGE_DELAY: float = Field(default=0.05, description="Delay between messages (seconds)")
     WEBAPP_URL: str = Field(default="http://localhost:5173", description="Telegram Mini App URL")
     
     # AI / LLM
-    GROQ_API_KEY: str = Field(default="", description="Groq API key")
-    GROQ_MODEL: str = Field(default="llama-3.1-70b-versatile", description="Groq model name")
-    GROQ_TEMPERATURE: float = Field(default=0.7, ge=0.0, le=2.0, description="LLM temperature")
-    GROQ_MAX_TOKENS: int = Field(default=2048, description="Max tokens in response")
+    AI_PROVIDER: str = Field(default="groq", description="AI provider: groq, openai, gemini, ollama")
+    AI_API_KEY: str = Field(default="", description="AI provider API key")
+    AI_MODEL: str = Field(default="llama-3.1-70b-versatile", description="AI model name")
+    AI_TEMPERATURE: float = Field(default=0.7, ge=0.0, le=2.0, description="LLM temperature")
+    AI_MAX_TOKENS: int = Field(default=2048, description="Max tokens in response")
+    AI_BASE_URL: Optional[str] = Field(default=None, description="Custom base URL for AI provider (e.g., Ollama)")
     
     # Knowledge Base
     KNOWLEDGE_BASE_PATH: str = Field(default="data/knowledge_base", description="Path to knowledge base files")
@@ -81,7 +85,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = Field(default="INFO", description="Logging level")
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", "../.env"),
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore"

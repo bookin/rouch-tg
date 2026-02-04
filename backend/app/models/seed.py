@@ -1,5 +1,5 @@
 """Seed and practice models"""
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 from uuid import uuid4
@@ -29,8 +29,7 @@ class Seed(BaseModel):
     estimated_maturation_days: int = 21  # 14-30 days typically
     strength_multiplier: float = 1.0  # Calculated from factors above
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class Practice(BaseModel):
@@ -50,8 +49,7 @@ class Practice(BaseModel):
     # From knowledge base
     source: Optional[str] = None  # e.g., 'yoga-concepts.md'
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class Habit(BaseModel):
@@ -75,8 +73,7 @@ class Habit(BaseModel):
     user_restrictions: List[str] = Field(default_factory=list)
     is_active: bool = True
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class HabitCompletion(BaseModel):
@@ -91,5 +88,4 @@ class HabitCompletion(BaseModel):
     duration_actual: Optional[int] = None  # actual minutes
     notes: Optional[str] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

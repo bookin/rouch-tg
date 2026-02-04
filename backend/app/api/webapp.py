@@ -69,10 +69,14 @@ class ProblemSolveRequest(BaseModel):
 class ProblemSolveResponse(BaseModel):
     problem: str
     root_cause: Optional[str] = None
-    opposite_action: Optional[str] = None
+    imprint_logic: Optional[str] = None
+    stop_action: Optional[str] = None
+    start_action: Optional[str] = None
+    grow_action: Optional[str] = None
     practice_steps: list[str] = []
     expected_outcome: Optional[str] = None
     timeline_days: Optional[int] = None
+    success_tip: Optional[str] = None
     correlations: list[dict] = []
     concepts: list[dict] = []
 
@@ -191,7 +195,7 @@ async def get_me(user: UserProfile = Depends(get_current_user)):
 )
 async def get_daily_actions(user: UserProfile = Depends(get_current_user)):
     """Get 4 daily actions"""
-    from app.knowledge.qdrant_client import QdrantKnowledgeBase
+    from app.knowledge.qdrant import QdrantKnowledgeBase
     from app.agents.daily_manager import DailyManagerAgent
     from app.config import get_settings
     
@@ -252,7 +256,7 @@ async def get_daily_actions(user: UserProfile = Depends(get_current_user)):
 )
 async def get_daily_quote(user: UserProfile = Depends(get_current_user)):
     """Get quote for the day"""
-    from app.knowledge.qdrant_client import QdrantKnowledgeBase
+    from app.knowledge.qdrant import QdrantKnowledgeBase
     from app.config import get_settings
     
     try:
@@ -353,7 +357,7 @@ async def solve_problem_endpoint(
 ):
     """Solve user's problem using correlations + AI (fallback to workflow)."""
     from app.config import get_settings
-    from app.knowledge.qdrant_client import QdrantKnowledgeBase
+    from app.knowledge.qdrant import QdrantKnowledgeBase
     from app.agents.problem_solver import ProblemSolverAgent
 
     settings = get_settings()
@@ -366,12 +370,16 @@ async def solve_problem_endpoint(
     return ProblemSolveResponse(
         problem=payload.problem,
         root_cause=result.get("root_cause"),
-        opposite_action=result.get("opposite_action"),
+        imprint_logic=result.get("imprint_logic"),
+        stop_action=result.get("stop_action"),
+        start_action=result.get("start_action"),
+        grow_action=result.get("grow_action"),
         practice_steps=result.get("practice_steps") or [],
         expected_outcome=result.get("expected_outcome"),
         timeline_days=result.get("timeline_days"),
+        success_tip=result.get("success_tip"),
         correlations=result.get("correlations") or [],
-        concepts=result.get("related_concepts") or result.get("concepts") or [],
+        concepts=result.get("concepts") or [],
     ).model_dump()
 
 @router.get("/partners", response_model=PartnersResponse)
@@ -468,7 +476,7 @@ async def create_partner_endpoint(
 @router.get("/practices")
 async def get_practices(user: UserProfile = Depends(get_current_user)):
     """Get available practices"""
-    from app.knowledge.qdrant_client import QdrantKnowledgeBase
+    from app.knowledge.qdrant import QdrantKnowledgeBase
     from app.config import get_settings
     
     try:

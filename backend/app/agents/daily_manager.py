@@ -2,9 +2,9 @@
 from typing import Dict, Any
 from pydantic import BaseModel
 from app.models.user import UserProfile
-from app.knowledge.qdrant_client import QdrantKnowledgeBase
+from app.knowledge.qdrant import QdrantKnowledgeBase
 from app.workflows.daily_flow import DailyFlowWorkflow
-from app.ai.groq_agent import generate_morning_message, generate_evening_message
+from app.ai import generate_morning_message, generate_evening_message
 
 
 class ManagerPersonality(BaseModel):

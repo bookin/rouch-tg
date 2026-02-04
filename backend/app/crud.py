@@ -38,12 +38,29 @@ async def create_user(db: AsyncSession, telegram_id: int, first_name: str, usern
     return user
 
 
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+
 async def get_or_create_user(db: AsyncSession, telegram_id: int, first_name: str, username: str = None) -> UserDB:
-    """Get existing user or create new one"""
-    user = await get_user_by_telegram_id(db, telegram_id)
-    if not user:
-        user = await create_user(db, telegram_id, first_name, username)
-    return user
+    """Get existing user or create new one atomically"""
+    stmt = pg_insert(UserDB).values(
+        telegram_id=telegram_id,
+        first_name=first_name,
+        username=username,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow()
+    ).on_conflict_do_update(
+        index_elements=['telegram_id'],
+        set_={
+            'first_name': first_name,
+            'username': username,
+            'updated_at': datetime.utcnow()
+        }
+    )
+    
+    await db.execute(stmt)
+    await db.flush()
+    return await get_user_by_telegram_id(db, telegram_id)
 
 
 async def get_active_users(db: AsyncSession, morning_enabled: bool = None, evening_enabled: bool = None) -> List[UserDB]:

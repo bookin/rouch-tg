@@ -1,8 +1,8 @@
 """Daily morning and evening workflows"""
 from typing import Dict, Any, List
 from app.models.user import UserProfile
-from app.knowledge.qdrant_client import QdrantKnowledgeBase
-from app.ai.groq_agent import generate_morning_message, generate_evening_message
+from app.knowledge.qdrant import QdrantKnowledgeBase
+from app.ai import generate_morning_message, generate_evening_message
 from app.database import AsyncSessionLocal
 from app.models.db_models import SeedDB, PartnerActionDB
 from sqlalchemy import select, func

@@ -1,9 +1,8 @@
-"""Groq AI Agent using Pydantic AI"""
+"""Daily AI Agent using Pydantic AI"""
 from typing import Optional
 from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.models.groq import GroqModel
-from app.config import get_settings
+from app.ai.models import get_model
 
 
 class MessageContext(BaseModel):
@@ -23,26 +22,21 @@ class DailyMessage(BaseModel):
     closing: str
 
 
-def create_groq_agent() -> Agent[MessageContext, DailyMessage]:
+def create_daily_agent() -> Agent[MessageContext, DailyMessage]:
     """
-    Create Pydantic AI agent with Groq model
+    Create Pydantic AI agent with configured model
     
     Returns:
         Configured Agent instance
     """
-    settings = get_settings()
-    
-    # Initialize Groq model
-    model = GroqModel(
-        model_name=settings.GROQ_MODEL,
-        api_key=settings.GROQ_API_KEY
-    )
+    # Initialize configured model
+    model = get_model()
     
     # Create agent with proper typing
     agent = Agent(
         model=model,
         deps_type=MessageContext,
-        result_type=DailyMessage,
+        output_type=DailyMessage,
         system_prompt=(
             "Ты - мудрый кармический менеджер, основанный на философии Diamond Cutter. "
             "Твоя задача - помогать людям улучшать жизнь через понимание кармы и правильные действия. "
@@ -78,12 +72,12 @@ def create_groq_agent() -> Agent[MessageContext, DailyMessage]:
 _agent: Optional[Agent] = None
 
 
-def get_groq_agent() -> Agent[MessageContext, DailyMessage]:
+def get_daily_agent() -> Agent[MessageContext, DailyMessage]:
     """Get or create global agent instance"""
     global _agent
     
     if _agent is None:
-        _agent = create_groq_agent()
+        _agent = create_daily_agent()
     
     return _agent
 
@@ -106,7 +100,7 @@ async def generate_morning_message(
     Returns:
         Structured morning message
     """
-    agent = get_groq_agent()
+    agent = get_daily_agent()
     
     context = MessageContext(
         user_name=user_name,
@@ -123,7 +117,7 @@ async def generate_morning_message(
     )
     
     result = await agent.run(prompt, deps=context)
-    return result.data
+    return result.output
 
 
 async def generate_evening_message(
@@ -142,7 +136,7 @@ async def generate_evening_message(
     Returns:
         Structured evening message
     """
-    agent = get_groq_agent()
+    agent = get_daily_agent()
     
     context = MessageContext(
         user_name=user_name,
@@ -159,4 +153,4 @@ async def generate_evening_message(
     )
     
     result = await agent.run(prompt, deps=context)
-    return result.data
+    return result.output

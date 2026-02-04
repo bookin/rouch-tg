@@ -2,8 +2,7 @@
 from typing import Optional
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.models.groq import GroqModel
-from app.config import get_settings
+from app.ai.models import get_model
 
 
 class ProblemContext(BaseModel):
@@ -16,32 +15,41 @@ class ProblemContext(BaseModel):
 
 class ProblemSolution(BaseModel):
     """Structured problem solution"""
-    problem_summary: str
-    root_cause: str
-    opposite_action: str
-    practice_steps: list[str]
-    expected_outcome: str
-    timeline_days: int = 30
+    problem_summary: str = Field(description="Краткое описание проблемы")
+    root_cause: str = Field(description="Кармическая причина (что создало проблему)")
+    imprint_logic: str = Field(description="Объяснение механизма: как именно этот отпечаток создает эту реальность")
+    
+    # 3-step action plan
+    stop_action: str = Field(description="Что нужно ПРЕКРАТИТЬ делать (устранение негативного отпечатка)")
+    start_action: str = Field(description="Что нужно НАЧАТЬ делать (противоположное действие)")
+    grow_action: str = Field(description="Как 'поливать' семена (радость, кофе-медитация, системный подход)")
+    
+    practice_steps: list[str] = Field(description="Конкретный пошаговый план на 30 дней")
+    expected_outcome: str = Field(description="Ожидаемый результат через 30-90 дней")
+    timeline_days: int = Field(default=30, description="Срок до первых результатов")
+    success_tip: str = Field(description="Совет для ускорения результата (коэффициент усиления)")
 
 
 def create_problem_agent() -> Agent[ProblemContext, ProblemSolution]:
     """Create problem-solving agent"""
-    settings = get_settings()
     
-    model = GroqModel(
-        model_name=settings.GROQ_MODEL,
-        api_key=settings.GROQ_API_KEY
-    )
+    model = get_model()
     
     agent = Agent(
         model=model,
         deps_type=ProblemContext,
-        result_type=ProblemSolution,
+        output_type=ProblemSolution,
         system_prompt=(
-            "Ты - эксперт по кармическим корреляциям из Diamond Cutter. "
-            "Твоя задача - найти кармическую причину проблемы и предложить 'противоположное действие'. "
-            "Используй знания из базы корреляций. "
-            "Всегда давай конкретные практические шаги."
+            "Ты - эксперт по кармическому менеджменту системы Diamond Cutter (Геше Майкл Роуч). "
+            "Твоя задача - проанализировать проблему пользователя и дать глубокое решение, основанное на системе 'отпечатков' (seeds). "
+            "\n\nМетодология:\n"
+            "1. Идентифицируй КОРЕНЬ: какой негативный отпечаток из прошлого создал эту ситуацию сейчас. "
+            "2. Объясни ЛОГИКУ: как именно 'мир из меня' работает в этом случае (механизм проекции). "
+            "3. Решение 'STOP-START-GROW':\n"
+            "   - STOP: что именно нужно перестать делать, чтобы не 'подпитывать' плохой отпечаток.\n"
+            "   - START: какое противоположное действие создаст нужный результат.\n"
+            "   - GROW: как правильно радоваться и 'поливать' семена (медитация кофе).\n"
+            "\nИспользуй предоставленные корреляции и концепции как основу, но расширяй их глубоким пониманием системы."
         ),
     )
     
@@ -110,11 +118,13 @@ async def solve_problem(
     )
     
     prompt = (
-        "Проанализируй проблему используя корреляции и концепции. "
-        "Определи кармическую причину (что пользователь делал неправильно). "
-        "Предложи 'противоположное действие' - что нужно делать вместо этого. "
-        "Создай конкретный план на 30 дней."
+        "Проанализируй проблему пользователя, используя корреляции и концепции.\n"
+        "1. Объясни кармическую причину (root_cause).\n"
+        "2. Раскрой механизм imprint_logic (почему это работает именно так).\n"
+        "3. Сформулируй STOP, START и GROW действия.\n"
+        "4. Составь план шагов и дай совет по ускорению (success_tip).\n"
+        "Будь вдохновляющим, но очень точным в кармической логике."
     )
     
     result = await agent.run(prompt, deps=context)
-    return result.data
+    return result.output

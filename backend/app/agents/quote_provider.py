@@ -1,6 +1,6 @@
 """Quote Provider Agent"""
 from typing import Dict, Any, Optional
-from app.knowledge.qdrant_client import QdrantKnowledgeBase
+from app.knowledge.qdrant import QdrantKnowledgeBase
 
 
 class QuoteProvider:
