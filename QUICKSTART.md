@@ -48,7 +48,7 @@ make init-knowledge
 Откройте в браузере:
 - Backend API: http://localhost:8000
 - API docs: http://localhost:8000/docs
-- Frontend: http://localhost:5173
+- Frontend: http://localhost:5180
 
 ## Шаг 5: Настройка Telegram Mini App
 
@@ -83,8 +83,15 @@ make down
 # Перезапустить
 make restart
 
-# Полная очистка и пересборка
-make clean
+# Очистка данных (PostgreSQL + Qdrant)
+make clean-data
+
+# Полная очистка и пересборка с нуля
+make full-reset
+
+# Миграции
+make migrate-up
+make migrate-create m="message"
 ```
 
 ## Разработка
@@ -127,7 +134,7 @@ npm run dev
 
 ## Дальнейшие шаги
 
-1. Настройте БД миграции (Alembic) - TODO
+1. Настройте БД миграции (Alembic)
 2. Добавьте реальных пользователей и данные
 3. Кастомизируйте Daily Manager под свои нужды
 4. Добавьте свои группы партнёров

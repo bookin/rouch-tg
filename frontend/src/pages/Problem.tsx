@@ -1,11 +1,43 @@
-import { FormEvent, useState } from 'react'
-import { solveProblem } from '../api/client'
+import { FormEvent, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import {
+  solveProblem,
+  updateUserFocus,
+  getProblemsHistory,
+  activateProblem,
+  getPartners,
+  addProblemToCalendar
+} from '../api/client'
 
 export default function Problem() {
+  const navigate = useNavigate()
   const [problem, setProblem] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<any>(null)
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+
+  const [history, setHistory] = useState<any[]>([])
+  const [partners, setPartners] = useState<any[]>([])
+  const [selectedPartners, setSelectedPartners] = useState<string[]>([])
+  const [showHistory, setShowHistory] = useState(false)
+
+  const loadData = async () => {
+    try {
+      const [histData, partData] = await Promise.all([
+        getProblemsHistory(),
+        getPartners()
+      ])
+      setHistory(histData.history || [])
+      setPartners(partData.partners || [])
+    } catch (e) {
+      console.error('Failed to load data', e)
+    }
+  }
+
+  useEffect(() => {
+    loadData()
+  }, [])
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -13,15 +45,73 @@ export default function Problem() {
 
     try {
       setError(null)
+      setSuccess(null)
       setLoading(true)
       const data = await solveProblem(problem.trim())
       setResult(data)
+      await loadData() // Refresh history
     } catch (err: any) {
       setError(err?.message || 'Failed to solve problem')
     } finally {
       setLoading(false)
     }
   }
+
+  const handleActivateHistory = async (h: any) => {
+    try {
+      setLoading(true)
+      await activateProblem(h.id)
+      setResult(h.solution)
+      setProblem(h.problem_text)
+      setSuccess('Проблема активирована! Твой план действий обновлен.')
+      setShowHistory(false)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    } catch (err: any) {
+      setError('Не удалось активировать проблему')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const togglePartner = (id: string) => {
+    setSelectedPartners(prev =>
+      prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]
+    )
+  }
+
+  const handleSetFocus = async () => {
+    if (!result) return;
+    try {
+      setLoading(true);
+      await updateUserFocus(result.problem || problem);
+      setSuccess('Цель успешно установлена! Теперь твой мудрый менеджер будет помогать тебе в её достижении.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err: any) {
+      setError('Не удалось обновить цель');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleStartPractice = () => {
+    if (!result) return;
+    const desc = encodeURIComponent(`STOP: ${result.stop_action}\nSTART: ${result.start_action}`);
+    const parts = selectedPartners.length > 0 ? `&partner_ids=${selectedPartners.join(',')}` : '';
+    navigate(`/journal?description=${desc}${parts}`);
+  };
+
+  const handleAddToCalendar = async () => {
+    if (!result?.practice_steps) return;
+    try {
+      setLoading(true);
+      await addProblemToCalendar(result.practice_steps);
+      setSuccess('План на 30 дней успешно добавлен в твой календарь! 📅');
+    } catch (err) {
+      setError('Не удалось добавить план в календарь');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const renderContent = (text: string) => {
     if (!text) return null;
@@ -35,6 +125,53 @@ export default function Problem() {
       <p style={{ opacity: 0.8, fontSize: '0.9rem', marginBottom: 16 }}>
         Система проанализирует твой запрос через призму кармического менеджмента и предложит конкретный путь исправления ситуации.
       </p>
+
+      {history.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <button
+            onClick={() => setShowHistory(!showHistory)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--tg-theme-button-color, #3390ec)',
+              fontSize: '0.9rem',
+              fontWeight: 600,
+              padding: 0,
+              cursor: 'pointer',
+              marginBottom: 10,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4
+            }}
+          >
+            {showHistory ? '🔼 Скрыть историю' : `📜 Показать историю (${history.length})`}
+          </button>
+
+          {showHistory && (
+            <div style={{ display: 'grid', gap: 8, maxHeight: 200, overflowY: 'auto', padding: 4 }}>
+              {history.map(h => (
+                <div
+                  key={h.id}
+                  onClick={() => handleActivateHistory(h)}
+                  style={{
+                    padding: 12,
+                    borderRadius: 10,
+                    background: h.is_active ? '#e3f2fd' : 'var(--tg-theme-secondary-bg-color, #f5f5f5)',
+                    border: h.is_active ? '1px solid #2196f3' : '1px solid transparent',
+                    cursor: 'pointer',
+                    fontSize: '0.9rem'
+                  }}
+                >
+                  <div style={{ fontWeight: h.is_active ? 700 : 500 }}>{h.problem_text}</div>
+                  <div style={{ fontSize: '0.75rem', opacity: 0.6, marginTop: 4 }}>
+                    {new Date(h.created_at).toLocaleDateString()} {h.is_active && '• Активна'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <form onSubmit={onSubmit} style={{ display: 'grid', gap: 12, marginBottom: 20 }}>
         <textarea
@@ -80,6 +217,12 @@ export default function Problem() {
         </div>
       )}
 
+      {success && (
+        <div style={{ padding: 12, borderRadius: 10, background: '#f0fff0', color: 'darkgreen', marginBottom: 16, border: '1px solid #ccffcc' }}>
+          ✨ {success}
+        </div>
+      )}
+
       {result && (
         <div style={{ display: 'grid', gap: 16 }}>
 
@@ -98,6 +241,65 @@ export default function Problem() {
                 <div style={{ marginTop: 4, fontSize: '0.95rem', lineHeight: '1.4' }}>{result.imprint_logic}</div>
               </div>
             )}
+
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--tg-theme-hint-color, #888)', textTransform: 'uppercase', marginBottom: 8 }}>С кем практиковать (Партнеры)</div>
+              <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8 }}>
+                {partners.length === 0 && <div style={{ fontSize: '0.85rem', opacity: 0.5 }}>У тебя пока нет партнеров</div>}
+                {partners.map(p => (
+                  <div
+                    key={p.id}
+                    onClick={() => togglePartner(p.id)}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: 20,
+                      background: selectedPartners.includes(p.id) ? 'var(--tg-theme-button-color, #3390ec)' : '#eee',
+                      color: selectedPartners.includes(p.id) ? '#fff' : '#666',
+                      fontSize: '0.8rem',
+                      whiteSpace: 'nowrap',
+                      cursor: 'pointer',
+                      transition: '0.2s'
+                    }}
+                  >
+                    {p.name}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 16 }}>
+              <button
+                onClick={handleSetFocus}
+                disabled={loading}
+                style={{
+                  padding: '10px',
+                  borderRadius: 10,
+                  border: '1px solid var(--tg-theme-button-color, #3390ec)',
+                  background: 'none',
+                  color: 'var(--tg-theme-button-color, #3390ec)',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                🎯 Выбрать целью
+              </button>
+              <button
+                onClick={handleStartPractice}
+                style={{
+                  padding: '10px',
+                  borderRadius: 10,
+                  border: 'none',
+                  background: 'var(--tg-theme-button-color, #3390ec)',
+                  color: 'var(--tg-theme-button-text-color, #fff)',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                🌱 В журнал
+              </button>
+            </div>
           </div>
 
           {/* Section: Action Plan STOP-START-GROW */}
@@ -121,21 +323,37 @@ export default function Problem() {
           </div>
 
           {/* Section: Detailed Steps */}
-          {result.practice_steps && result.practice_steps.length > 0 && (
-            <div style={{ background: 'var(--tg-theme-bg-color, #fff)', borderRadius: 16, padding: 16, border: '1px solid var(--tg-theme-secondary-bg-color, #eee)' }}>
-              <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem' }}>📅 План на 30 дней</h3>
-              <div style={{ display: 'grid', gap: 10 }}>
-                {result.practice_steps.map((step: string, i: number) => (
-                  <div key={i} style={{ display: 'flex', gap: 10, fontSize: '0.95rem' }}>
-                    <div style={{ minWidth: 24, height: 24, borderRadius: '50%', background: 'var(--tg-theme-secondary-bg-color, #eee)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', fontWeight: 700 }}>
-                      {i + 1}
-                    </div>
-                    <div>{step}</div>
-                  </div>
-                ))}
-              </div>
+          <div style={{ background: 'var(--tg-theme-bg-color, #fff)', borderRadius: 16, padding: 16, border: '1px solid var(--tg-theme-secondary-bg-color, #eee)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: '1.1rem' }}>📅 План на 30 дней</h3>
+              <button
+                onClick={handleAddToCalendar}
+                disabled={loading}
+                style={{
+                  background: '#e3f2fd',
+                  color: '#2196f3',
+                  border: 'none',
+                  borderRadius: 8,
+                  padding: '6px 12px',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+              >
+                {loading ? '...' : '✍️ В календарь'}
+              </button>
             </div>
-          )}
+            <div style={{ display: 'grid', gap: 10 }}>
+              {result.practice_steps.map((step: string, i: number) => (
+                <div key={i} style={{ display: 'flex', gap: 10, fontSize: '0.95rem' }}>
+                  <div style={{ minWidth: 24, height: 24, borderRadius: '50%', background: 'var(--tg-theme-secondary-bg-color, #eee)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', fontWeight: 700 }}>
+                    {i + 1}
+                  </div>
+                  <div>{step}</div>
+                </div>
+              ))}
+            </div>
+          </div>
 
           {/* Section: Outcome & Tips */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>

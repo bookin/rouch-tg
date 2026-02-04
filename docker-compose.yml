@@ -10,9 +10,9 @@ services:
       POSTGRES_USER: rouch_user
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ./postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U rouch_user -d rouch"]
       interval: 10s
@@ -42,7 +42,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
+      - ./redis_data:/data
     command: redis-server --appendonly yes
     networks:
       - rouch_network
@@ -86,10 +86,10 @@ services:
       #   - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
     container_name: rouch_frontend
     env_file: .env
-    environment:
-      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+#    environment:
+#      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
     ports:
-      - "5173:5173"
+      - "5180:5180"
     depends_on:
       - backend
     volumes:

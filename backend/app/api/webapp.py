@@ -140,6 +140,7 @@ async def get_current_user(
             current_focus=user_db.current_focus,
             created_at=user_db.created_at,
             updated_at=user_db.updated_at,
+            last_onboarding_update=user_db.last_onboarding_update,
         )
 
     parsed_data = validate_telegram_webapp_data(authorization)
@@ -179,6 +180,7 @@ async def get_current_user(
         current_focus=user_db.current_focus,
         created_at=user_db.created_at,
         updated_at=user_db.updated_at,
+        last_onboarding_update=user_db.last_onboarding_update,
     )
 
 
@@ -186,6 +188,35 @@ async def get_current_user(
 async def get_me(user: UserProfile = Depends(get_current_user)):
     """Get current user profile"""
     return user
+
+
+class UpdateFocusRequest(BaseModel):
+    focus: str
+
+
+@router.patch("/me/focus")
+async def update_focus(
+    payload: UpdateFocusRequest,
+    user: UserProfile = Depends(get_current_user)
+):
+    """Update user current focus"""
+    from app.database import AsyncSessionLocal
+    from app.crud import update_user_focus, get_user_by_telegram_id
+    
+    async with AsyncSessionLocal() as db:
+        user_db = await get_user_by_telegram_id(db, user.telegram_id)
+        if not user_db:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        success = await update_user_focus(db, user_db.id, payload.focus)
+        
+        # Clear today's suggestions so they re-generate with new focus
+        from app.crud import clear_today_suggestions
+        await clear_today_suggestions(db, user_db.id)
+        
+        await db.commit()
+        
+        return {"success": success}
 
 
 @router.get(
@@ -204,8 +235,14 @@ async def get_daily_actions(user: UserProfile = Depends(get_current_user)):
         qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
         agent = DailyManagerAgent(qdrant)
         
-        # Generate morning message with actions
-        result = await agent.morning_message(user)
+        # Now passing all needed fields for persistence check
+        result = await agent.morning_message(
+            user_id=user.id,
+            first_name=user.first_name,
+            focus=user.current_focus,
+            streak_days=user.streak_days,
+            total_seeds=user.total_seeds
+        )
         actions = result.get("actions", [])
         
         return {"actions": actions}
@@ -247,6 +284,26 @@ async def get_daily_actions(user: UserProfile = Depends(get_current_user)):
             }
         ]
         return {"actions": actions}
+
+
+class UpdateActionCompletionRequest(BaseModel):
+    completed: bool
+
+
+@router.patch("/daily/actions/{action_id}")
+async def update_action_completion(
+    action_id: str,
+    payload: UpdateActionCompletionRequest,
+    user: UserProfile = Depends(get_current_user)
+):
+    """Toggle daily action completion"""
+    from app.database import AsyncSessionLocal
+    from app.crud import update_daily_suggestion_completion
+    
+    async with AsyncSessionLocal() as db:
+        await update_daily_suggestion_completion(db, action_id, payload.completed)
+        await db.commit()
+        return {"success": True}
 
 
 @router.get(
@@ -350,37 +407,127 @@ async def create_seed_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/problems/history")
+async def get_problems_history(user: UserProfile = Depends(get_current_user)):
+    """Get problem history"""
+    from app.database import AsyncSessionLocal
+    from app.crud import get_user_by_telegram_id, get_problem_history
+    
+    async with AsyncSessionLocal() as db:
+        user_db = await get_user_by_telegram_id(db, user.telegram_id)
+        if not user_db:
+            return {"history": []}
+        
+        history = await get_problem_history(db, user_db.id)
+        return {
+            "history": [
+                {
+                    "id": h.id,
+                    "problem_text": h.problem_text,
+                    "solution": h.solution_json,
+                    "is_active": h.is_active,
+                    "created_at": h.created_at
+                } for h in history
+            ]
+        }
+
+
+@router.post("/problems/{history_id}/activate")
+async def activate_problem(
+    history_id: str,
+    user: UserProfile = Depends(get_current_user)
+):
+    """Make a historical problem active"""
+    from app.database import AsyncSessionLocal
+    from app.crud import get_user_by_telegram_id, set_active_problem, update_user_focus
+    
+    async with AsyncSessionLocal() as db:
+        user_db = await get_user_by_telegram_id(db, user.telegram_id)
+        if not user_db:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        from app.models.db_models import ProblemHistoryDB
+        from sqlalchemy import select
+        res = await db.execute(select(ProblemHistoryDB).where(ProblemHistoryDB.id == history_id))
+        hist = res.scalar_one_or_none()
+        
+        if hist:
+            await set_active_problem(db, user_db.id, history_id)
+            await update_user_focus(db, user_db.id, hist.problem_text)
+            await db.commit()
+            return {"success": True}
+            
+        raise HTTPException(status_code=404, detail="History entry not found")
+
+
+class AddToCalendarRequest(BaseModel):
+    steps: list[str]
+    start_date: Optional[datetime] = None
+
+
+@router.post("/problem/add-to-calendar")
+async def add_problem_to_calendar(
+    payload: AddToCalendarRequest,
+    user: UserProfile = Depends(get_current_user)
+):
+    """Add 30-day plan steps to calendar"""
+    from app.database import AsyncSessionLocal
+    from app.crud import get_user_by_telegram_id
+    from app.models.db_models import PartnerActionDB
+    from datetime import timedelta
+    import uuid
+    
+    async with AsyncSessionLocal() as db:
+        user_db = await get_user_by_telegram_id(db, user.telegram_id)
+        if not user_db:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        start = payload.start_date or datetime.utcnow()
+        
+        actions = []
+        for i in range(30):
+            step_idx = i % len(payload.steps)
+            step_text = payload.steps[step_idx]
+            
+            action = PartnerActionDB(
+                id=str(uuid.uuid4()),
+                user_id=user_db.id,
+                timestamp=start + timedelta(days=i),
+                action=step_text,
+                completed=False
+            )
+            actions.append(action)
+            
+        db.add_all(actions)
+        await db.commit()
+        
+        return {"success": True, "count": len(actions)}
+
 @router.post("/problem/solve", response_model=ProblemSolveResponse)
 async def solve_problem_endpoint(
-    payload: ProblemSolveRequest,
-    user: UserProfile = Depends(get_current_user),
+        payload: ProblemSolveRequest,
+        user: UserProfile = Depends(get_current_user)
 ):
-    """Solve user's problem using correlations + AI (fallback to workflow)."""
-    from app.config import get_settings
-    from app.knowledge.qdrant import QdrantKnowledgeBase
+    """Solve problem using AI agent and knowledge base"""
     from app.agents.problem_solver import ProblemSolverAgent
+    from app.knowledge.qdrant import QdrantKnowledgeBase
+    from app.config import get_settings
+    from app.database import AsyncSessionLocal
+    from app.crud import get_user_by_telegram_id, save_problem_history
 
     settings = get_settings()
     qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
     agent = ProblemSolverAgent(qdrant)
+    solution = await agent.analyze_problem(user, payload.problem)
 
-    result = await agent.analyze_problem(user, payload.problem)
+    # Save to history
+    async with AsyncSessionLocal() as db:
+        user_db = await get_user_by_telegram_id(db, user.telegram_id)
+        if user_db:
+            await save_problem_history(db, user_db.id, payload.problem, solution)
+            await db.commit()
 
-    # Normalize output for frontend
-    return ProblemSolveResponse(
-        problem=payload.problem,
-        root_cause=result.get("root_cause"),
-        imprint_logic=result.get("imprint_logic"),
-        stop_action=result.get("stop_action"),
-        start_action=result.get("start_action"),
-        grow_action=result.get("grow_action"),
-        practice_steps=result.get("practice_steps") or [],
-        expected_outcome=result.get("expected_outcome"),
-        timeline_days=result.get("timeline_days"),
-        success_tip=result.get("success_tip"),
-        correlations=result.get("correlations") or [],
-        concepts=result.get("concepts") or [],
-    ).model_dump()
+    return solution
 
 @router.get("/partners", response_model=PartnersResponse)
 async def get_partners(user: UserProfile = Depends(get_current_user)):
@@ -518,3 +665,87 @@ async def get_habits(user: UserProfile = Depends(get_current_user)):
             return {"habits": habits}
     except Exception:
         return {"habits": []}
+
+
+# =============================================================================
+# Onboarding Endpoints
+# =============================================================================
+
+class OnboardingStepResponse(BaseModel):
+    step: str
+    step_number: int
+    total_steps: int
+    message: str
+    input_type: str
+    options: list
+    field: Optional[str] = None
+    completed: bool = False
+
+
+class OnboardingAnswerRequest(BaseModel):
+    step: str
+    answer: Optional[str] = None
+    answers: Optional[list] = None  # For multi-choice
+
+
+@router.get("/onboarding/start", response_model=OnboardingStepResponse)
+async def start_onboarding(user: UserProfile = Depends(get_current_user)):
+    """Start or resume onboarding flow"""
+    from app.workflows.onboarding import get_step_data, ONBOARDING_STEPS, OnboardingSteps
+    from app.database import AsyncSessionLocal
+    from app.crud import get_user_by_telegram_id
+    
+    async with AsyncSessionLocal() as db:
+        user_db = await get_user_by_telegram_id(db, user.telegram_id)
+        
+        # Check if user already completed onboarding
+        if user_db and user_db.last_onboarding_update:
+            return get_step_data(OnboardingSteps.COMPLETE)
+        
+        # Check current progress based on filled fields
+        # Use sequential checks - stop at first unfinished step
+        current_step = OnboardingSteps.OCCUPATION
+        if user_db:
+            # occupation is "employee" by default, so check if user explicitly set something
+            if not user_db.occupation or user_db.occupation == "employee":
+                current_step = OnboardingSteps.OCCUPATION
+            elif not user_db.available_times or len(user_db.available_times) == 0:
+                current_step = OnboardingSteps.SCHEDULE
+            elif user_db.daily_minutes == 30:  # default value, not explicitly set
+                current_step = OnboardingSteps.DURATION
+            elif not user_db.current_habits or len(user_db.current_habits) == 0:
+                current_step = OnboardingSteps.HABITS
+            elif not user_db.current_focus:
+                current_step = OnboardingSteps.FOCUS
+            else:
+                current_step = OnboardingSteps.PARTNERS
+        
+        return get_step_data(current_step)
+
+
+@router.post("/onboarding/answer", response_model=OnboardingStepResponse)
+async def answer_onboarding(
+    payload: OnboardingAnswerRequest,
+    user: UserProfile = Depends(get_current_user)
+):
+    """Process onboarding step answer and return next step"""
+    from app.workflows.onboarding import get_step_data, get_next_step, ONBOARDING_STEPS, save_onboarding_progress, OnboardingSteps
+    
+    step_info = ONBOARDING_STEPS.get(payload.step)
+    if not step_info:
+        raise HTTPException(status_code=400, detail="Invalid step")
+    
+    # Prepare answer value
+    val = payload.answer
+    if step_info.get("input_type") == "multi_choice":
+        val = payload.answers or []
+    elif step_info.get("input_type") == "text_optional":
+        if val == "skip":
+            val = None
+            
+    # Save using shared logic
+    await save_onboarding_progress(user.telegram_id, payload.step, val)
+    
+    next_step = get_next_step(payload.step)
+    return get_step_data(next_step or OnboardingSteps.COMPLETE)
+

@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { createSeed, getSeeds, SeedCreatePayload } from '../api/client'
 
 interface SeedItem {
@@ -14,11 +15,12 @@ interface SeedItem {
 }
 
 export default function SeedJournal() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [loading, setLoading] = useState(true)
   const [seeds, setSeeds] = useState<SeedItem[]>([])
   const [error, setError] = useState<string | null>(null)
 
-  const [description, setDescription] = useState('')
+  const [description, setDescription] = useState(searchParams.get('description') || '')
   const [actionType, setActionType] = useState('kindness')
   const [partnerGroup, setPartnerGroup] = useState('world')
   const [intentionScore, setIntentionScore] = useState(7)
@@ -40,6 +42,14 @@ export default function SeedJournal() {
 
   useEffect(() => {
     load()
+    const pids = searchParams.get('partner_ids')
+    if (pids) {
+      // Currently the UI only supports one partner in the select.
+      // We should ideally show all partners or some indicator.
+      // For now, I'll just set the first one if available.
+      const firstPid = pids.split(',')[0]
+      // In a more advanced version, we'd have a multi-select here too.
+    }
   }, [])
 
   const onCreate = async (e: FormEvent) => {

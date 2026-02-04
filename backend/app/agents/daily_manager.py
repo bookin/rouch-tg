@@ -60,31 +60,66 @@ class DailyManagerAgent:
             },
         ]
     
-    async def morning_message(self, user: UserProfile) -> Dict[str, Any]:
+    async def morning_message(self, user_id: int, first_name: str, focus: str | None, streak_days: int, total_seeds: int) -> Dict[str, Any]:
         """Generate morning message with quote and daily actions using AI"""
+        from app.database import AsyncSessionLocal
+        from app.crud import get_daily_suggestions, save_daily_suggestions
         
         try:
-            # Generate AI message
-            ai_message = await generate_morning_message(
-                user_name=user.first_name,
-                focus=user.current_focus,
-                streak_days=user.streak_days,
-                total_seeds=user.total_seeds
-            )
-            
-            # Get quote from Qdrant
-            quote = await self.qdrant.get_daily_quote(user.current_focus)
+            now = datetime.utcnow()
+            async with AsyncSessionLocal() as db:
+                # 1. Try to get from database
+                existing_suggestions = await get_daily_suggestions(db, user_id, now)
+                
+                if existing_suggestions:
+                    print(f"📊 Found {len(existing_suggestions)} existing suggestions for user {user_id}")
+                    actions = [
+                        {
+                            "id": s.id,
+                            "group": s.group,
+                            "partner_name": self._get_partner_name(s.group),
+                            "description": s.description,
+                            "why": s.why,
+                            "completed": s.completed
+                        }
+                        for s in existing_suggestions
+                    ]
+                else:
+                    # 2. Generate new if not found
+                    print(f"🪄 Generating NEW suggestions for user {user_id}")
+                    ai_message = await generate_morning_message(
+                        user_name=first_name,
+                        focus=focus,
+                        streak_days=streak_days,
+                        total_seeds=total_seeds
+                    )
+                    
+                    templates = self._action_templates()
+                    to_save = []
+                    for template, action_text in zip(templates, ai_message.actions[:4]):
+                        to_save.append({
+                            "group": template["group"],
+                            "description": action_text,
+                            "why": template["why"]
+                        })
+                    
+                    saved_objs = await save_daily_suggestions(db, user_id, to_save)
+                    await db.commit()
+                    
+                    actions = [
+                        {
+                            "id": s.id,
+                            "group": s.group,
+                            "partner_name": self._get_partner_name(s.group),
+                            "description": s.description,
+                            "why": s.why,
+                            "completed": s.completed
+                        }
+                        for s in saved_objs
+                    ]
 
-            templates = self._action_templates()
-            actions: list[dict[str, Any]] = []
-            for template, action_text in zip(templates, ai_message.actions[:4]):
-                actions.append(
-                    {
-                        **template,
-                        "description": action_text,
-                        "completed": False,
-                    }
-                )
+            # Get quote from Qdrant
+            quote = await self.qdrant.get_daily_quote(focus)
             
             # Format message
             message = (
@@ -237,6 +272,16 @@ class DailyManagerAgent:
             "message": self._get_encouragement(mood, seeds_today)
         }
     
+    def _get_partner_name(self, group: str) -> str:
+        """Helper to get display name for group"""
+        names = {
+            "colleagues": "Коллега",
+            "clients": "Клиент",
+            "suppliers": "Поставщик",
+            "world": "Мир"
+        }
+        return names.get(group, "Партнер")
+
     def _get_encouragement(self, mood: str, seeds_count: int) -> str:
         """Get appropriate encouragement based on mood"""
         

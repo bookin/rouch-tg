@@ -1,7 +1,7 @@
 import axios from 'axios'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-
+const API_URL = import.meta.env.VITE_API_URL || ''
+console.log('API URL:', API_URL)
 // Create axios instance
 export const api = axios.create({
   baseURL: API_URL,
@@ -25,6 +25,11 @@ api.interceptors.request.use((config) => {
 })
 
 // API methods
+export const getUser = async () => {
+  const response = await api.get('/api/me')
+  return response.data
+}
+
 export const getCalendarData = async (startDate: Date, endDate: Date) => {
   const response = await api.get('/api/calendar/data', {
     params: {
@@ -52,6 +57,11 @@ export const getDailyQuote = async () => {
 
 export const getDailyActions = async () => {
   const response = await api.get('/api/daily/actions')
+  return response.data
+}
+
+export const toggleDailyAction = async (id: string, completed: boolean) => {
+  const response = await api.patch(`/api/daily/actions/${id}`, { completed })
   return response.data
 }
 
@@ -106,5 +116,25 @@ export const getHabits = async () => {
 
 export const solveProblem = async (problem: string) => {
   const response = await api.post('/api/problem/solve', { problem })
+  return response.data
+}
+
+export const updateUserFocus = async (focus: string) => {
+  const response = await api.patch('/api/me/focus', { focus })
+  return response.data
+}
+
+export const getProblemsHistory = async () => {
+  const response = await api.get('/api/problems/history')
+  return response.data
+}
+
+export const activateProblem = async (id: string) => {
+  const response = await api.post(`/api/problems/${id}/activate`)
+  return response.data
+}
+
+export const addProblemToCalendar = async (steps: string[]) => {
+  const response = await api.post('/api/problem/add-to-calendar', { steps })
   return response.data
 }

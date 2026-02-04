@@ -43,6 +43,8 @@ class UserDB(Base):
     seeds = relationship("SeedDB", back_populates="user", lazy="selectin")
     habits = relationship("HabitDB", back_populates="user", lazy="selectin")
     partners = relationship("PartnerDB", back_populates="user", lazy="selectin")
+    problem_history = relationship("ProblemHistoryDB", back_populates="user", lazy="selectin")
+    daily_suggestions = relationship("DailySuggestionDB", back_populates="user", lazy="selectin")
 
 
 class SeedDB(Base):
@@ -166,7 +168,7 @@ class PartnerActionDB(Base):
     __tablename__ = "partner_actions"
     
     id = Column(String, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     partner_id = Column(String, ForeignKey("partners.id", ondelete="SET NULL"), nullable=True)
     partner_name = Column(String, nullable=True)
     seed_id = Column(String, ForeignKey("seeds.id"), nullable=True)
@@ -174,6 +176,38 @@ class PartnerActionDB(Base):
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
     action = Column(Text, nullable=False)
     completed = Column(Boolean, default=False, index=True)
+
+
+class ProblemHistoryDB(Base):
+    """Problem history database model"""
+    __tablename__ = "problem_history"
+    
+    id = Column(String, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    problem_text = Column(Text, nullable=False)
+    solution_json = Column(JSON, nullable=False)
+    is_active = Column(Boolean, default=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    
+    # Relationships
+    user = relationship("UserDB", back_populates="problem_history")
+
+
+class DailySuggestionDB(Base):
+    """Daily AI suggestion database model"""
+    __tablename__ = "daily_suggestions"
+    
+    id = Column(String, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    group = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    why = Column(Text, nullable=False)
+    completed = Column(Boolean, default=False, index=True)
+    date = Column(DateTime, default=datetime.utcnow, index=True)
+    seed_id = Column(String, ForeignKey("seeds.id", ondelete="SET NULL"), nullable=True)
+    
+    # Relationships
+    user = relationship("UserDB", back_populates="daily_suggestions")
 
 # LangGraph Checkpoint Tables
 class LangGraphCheckpointDB(Base):

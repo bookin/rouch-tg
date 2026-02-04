@@ -227,7 +227,7 @@ curl http://localhost:8000/
 curl http://localhost:8000/docs
 
 # Frontend
-open http://localhost:5173
+open http://localhost:5180
 
 # PostgreSQL
 docker-compose exec postgres psql -U rouch_user -d rouch -c "\dt"

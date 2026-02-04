@@ -5,7 +5,7 @@
 ### 1. Проверка окружения
 - [ ] Docker установлен и запущен
 - [ ] Docker Compose v2+ установлен
-- [ ] Порты 5432, 6333, 6379, 8000, 5173 свободны
+- [ ] Порты 5433, 6333, 6379, 8000, 5180 свободны
 - [ ] Файл `.env` создан и заполнен
 
 ### 2. Проверка конфигурации `.env`
@@ -322,8 +322,8 @@ docker-compose exec backend ls -la data/knowledge_base
 # Проверить nginx
 docker-compose logs frontend
 
-# Проверить что порт 5173 доступен
-curl http://localhost:5173
+# Проверить что порт 5180 доступен
+curl http://localhost:5180
 ```
 
 ### Mini App белый экран

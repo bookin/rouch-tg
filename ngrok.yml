@@ -1,0 +1,13 @@
+version: 3
+
+agent:
+  authtoken: 2zCtuMhcPZuaLdRwhlARosn8aJ5_3GDXUNMfdvDigcDNp9Hv7
+
+endpoints:
+  - name: frontend
+    url: correct-ray-whole.ngrok-free.app
+    upstream:
+      url: http://localhost:5180
+    metadata: "rouch frontend"
+
+# ngrok start --config ngrok.yml frontend

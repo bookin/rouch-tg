@@ -1,13 +1,24 @@
 """Telegram Bot handlers"""
+import asyncio
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, WebAppInfo, KeyboardButton, ReplyKeyboardMarkup, ErrorEvent, BotCommand
+from aiogram.filters import Command, CommandStart, StateFilter
+from aiogram.types import (
+    Message, WebAppInfo, KeyboardButton, ReplyKeyboardMarkup, 
+    ErrorEvent, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton,
+    CallbackQuery, ReplyKeyboardRemove
+)
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.exceptions import TelegramAPIError
 import logging
 from app.config import get_settings
-
+from app.workflows.onboarding import (
+    ONBOARDING_STEPS, 
+    OnboardingSteps, 
+    get_next_step, 
+    get_step_data,
+    save_onboarding_progress
+)
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -15,8 +26,6 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 from app.mock_bot import MockBot
-
-settings = get_settings()
 
 if settings.TELEGRAM_ENABLED:
     bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
@@ -51,14 +60,44 @@ class ActionState(StatesGroup):
     waiting_for_action_id = State()
 
 
+class OnboardingState(StatesGroup):
+    """States for onboarding flow"""
+    occupation = State()
+    schedule = State()
+    duration = State()
+    habits = State()
+    restrictions = State()
+    focus = State()
+    partners = State()
+
+
+class ProblemState(StatesGroup):
+    """States for problem solving"""
+    waiting_for_description = State()
+
+
+# Map generic steps to FSM states
+STEP_STATE_MAP = {
+    OnboardingSteps.OCCUPATION: OnboardingState.occupation,
+    OnboardingSteps.SCHEDULE: OnboardingState.schedule,
+    OnboardingSteps.DURATION: OnboardingState.duration,
+    OnboardingSteps.HABITS: OnboardingState.habits,
+    OnboardingSteps.RESTRICTIONS: OnboardingState.restrictions,
+    OnboardingSteps.FOCUS: OnboardingState.focus,
+    OnboardingSteps.PARTNERS: OnboardingState.partners,
+}
+
+
 @router.message(CommandStart())
-async def cmd_start(message: Message):
+async def cmd_start(message: Message, state: FSMContext):
     """Handle /start command"""
     from app.database import AsyncSessionLocal
     from app.crud import get_or_create_user
     
     user = message.from_user
     logger.info(f"User {user.id} ({user.first_name}) started bot")
+    
+    await state.clear()
     
     try:
         # Get or create user in database
@@ -71,12 +110,34 @@ async def cmd_start(message: Message):
             )
             await db.commit()
             
-            is_new = user_db.created_at == user_db.updated_at
-            logger.info(f"User {user.id}: {'created' if is_new else 'existing'}")
-    
+            # Check if onboarding is needed
+            needs_onboarding = not user_db.last_onboarding_update
+            
+            if needs_onboarding:
+                keyboard = ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="🚀 Начать знакомство")]],
+                    resize_keyboard=True,
+                    one_time_keyboard=True
+                )
+                
+                welcome_text = (
+                    f"Привет, {user.first_name}! 👋\n\n"
+                    "Я твой кармический менеджер. Чтобы составить персональный план, "
+                    "мне нужно узнать о тебе чуть больше.\n\n"
+                    "Это займет всего минуту!"
+                )
+                await message.answer(welcome_text, reply_markup=keyboard)
+                return
+
     except Exception as e:
         logger.error(f"Error creating user: {e}", exc_info=True)
     
+    # Standard welcome for existing users
+    await show_main_menu(message)
+
+
+async def show_main_menu(message: Message):
+    """Show main menu with app button"""
     keyboard = ReplyKeyboardMarkup(
         keyboard=[[
             KeyboardButton(
@@ -87,17 +148,406 @@ async def cmd_start(message: Message):
         resize_keyboard=True
     )
     
-    welcome_text = (
-        f"Привет, {user.first_name}! Я твой кармический менеджер 🧙‍♂️\n\n"
-        "Я помогу тебе:\n"
-        "🌱 Сажать и отслеживать кармические семена\n"
-        "🧘 Практиковать медитацию и этику\n"
-        "👥 Работать с 4 группами партнёров\n"
-        "💎 Применять мудрость Diamond Cutter\n\n"
-        "Открой приложение, чтобы начать:"
+    text = (
+        "С возвращением! 🧘\n\n"
+        "Твой план и практики ждут тебя в приложении."
     )
     
-    await message.answer(welcome_text, reply_markup=keyboard)
+    await message.answer(text, reply_markup=keyboard)
+
+
+# =============================================================================
+# Onboarding Handlers
+# =============================================================================
+
+@router.message(F.text == "🚀 Начать знакомство")
+async def start_onboarding_flow(message: Message, state: FSMContext):
+    """Start onboarding process"""
+    current_step = OnboardingSteps.OCCUPATION
+    await state.set_state(STEP_STATE_MAP[current_step])
+    
+    step_data = get_step_data(current_step)
+    
+    kb = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=opt["label"])] for opt in step_data["options"]],
+        resize_keyboard=True
+    )
+    
+    await message.answer(step_data["message"], reply_markup=kb)
+
+
+@router.message(OnboardingState.occupation)
+async def process_occupation(message: Message, state: FSMContext):
+    """Process occupation answer"""
+    current_step = OnboardingSteps.OCCUPATION
+    step_data = get_step_data(current_step)
+    
+    # Find selected option id
+    selected_id = next((opt["id"] for opt in step_data["options"] if opt["label"] == message.text), "other")
+    
+    # Save using shared logic
+    await save_onboarding_progress(message.from_user.id, current_step, selected_id)
+    await state.update_data(occupation=selected_id)
+    
+    # Move to next step
+    next_step_name = get_next_step(current_step)
+    next_step_data = get_step_data(next_step_name)
+    
+    await state.set_state(STEP_STATE_MAP[next_step_name])
+    
+    # For multi-choice using inline keyboard to allow multiple selections
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=opt["label"], callback_data=f"sched_{opt['id']}")]
+        for opt in next_step_data["options"]
+    ] + [[InlineKeyboardButton(text="✅ Готово", callback_data="sched_done")]])
+    
+    await message.answer(next_step_data["message"], reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("sched_"))
+async def process_schedule_selection(callback: CallbackQuery, state: FSMContext):
+    """Handle schedule selection (multi-choice)"""
+    action = callback.data.split("_")[1]
+    
+    data = await state.get_data()
+    current_selection = data.get("available_times", [])
+    
+    if action == "done":
+        if not current_selection:
+            await callback.answer("Выбери хотя бы один вариант", show_alert=True)
+            return
+        
+        # Save using shared logic
+        await save_onboarding_progress(callback.from_user.id, OnboardingSteps.SCHEDULE, current_selection)
+        
+        await callback.message.delete()
+        
+        next_step_name = get_next_step(OnboardingSteps.SCHEDULE)
+        next_step_data = get_step_data(next_step_name)
+        
+        await state.set_state(STEP_STATE_MAP[next_step_name])
+        
+        kb = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text=opt["label"])] for opt in next_step_data["options"]],
+            resize_keyboard=True
+        )
+        await callback.message.answer(next_step_data["message"], reply_markup=kb)
+        return
+
+    # Toggle selection
+    if action in current_selection:
+        current_selection.remove(action)
+    else:
+        current_selection.append(action)
+    
+    await state.update_data(available_times=current_selection)
+    
+    # Update keyboard visualization
+    step_data = get_step_data(OnboardingSteps.SCHEDULE)
+    new_kb = []
+    for opt in step_data["options"]:
+        label = opt["label"]
+        if opt["id"] in current_selection:
+            label = "✅ " + label
+        new_kb.append([InlineKeyboardButton(text=label, callback_data=f"sched_{opt['id']}")])
+    
+    new_kb.append([InlineKeyboardButton(text="✅ Готово", callback_data="sched_done")])
+    
+    await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=new_kb))
+    await callback.answer()
+
+
+@router.message(OnboardingState.duration)
+async def process_duration(message: Message, state: FSMContext):
+    """Process duration answer"""
+    current_step = OnboardingSteps.DURATION
+    step_data = get_step_data(current_step)
+    
+    selected_id = next((opt["id"] for opt in step_data["options"] if opt["label"] == message.text), "30")
+    
+    # Save using shared logic
+    await save_onboarding_progress(message.from_user.id, current_step, int(selected_id))
+    await state.update_data(daily_minutes=int(selected_id))
+    
+    next_step_name = get_next_step(current_step)
+    next_step_data = get_step_data(next_step_name)
+    
+    await state.set_state(STEP_STATE_MAP[next_step_name])
+    
+    # Multi-choice for habits
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=opt["label"], callback_data=f"habit_{opt['id']}")]
+        for opt in next_step_data["options"]
+    ] + [[InlineKeyboardButton(text="✅ Готово", callback_data="habit_done")]])
+    
+    await message.answer(next_step_data["message"], reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("habit_"))
+async def process_habit_selection(callback: CallbackQuery, state: FSMContext):
+    """Handle habits selection"""
+    action = callback.data.split("_")[1]
+    
+    data = await state.get_data()
+    current_selection = data.get("current_habits", [])
+    
+    if action == "done":
+        # Save using shared logic
+        await save_onboarding_progress(callback.from_user.id, OnboardingSteps.HABITS, current_selection)
+        
+        await callback.message.delete()
+        
+        next_step_name = get_next_step(OnboardingSteps.HABITS)
+        next_step_data = get_step_data(next_step_name)
+        
+        await state.set_state(STEP_STATE_MAP[next_step_name])
+        
+        kb = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text=opt["label"])] for opt in next_step_data["options"]],
+            resize_keyboard=True
+        )
+        await callback.message.answer(next_step_data["message"], reply_markup=kb)
+        return
+
+    # Toggle selection
+    if action in current_selection:
+        current_selection.remove(action)
+    else:
+        # Handle "none" exclusive selection
+        if action == "none":
+            current_selection = ["none"]
+        elif "none" in current_selection:
+            current_selection.remove("none")
+            current_selection.append(action)
+        else:
+            current_selection.append(action)
+    
+    await state.update_data(current_habits=current_selection)
+    
+    # Update keyboard
+    step_data = get_step_data(OnboardingSteps.HABITS)
+    new_kb = []
+    for opt in step_data["options"]:
+        label = opt["label"]
+        if opt["id"] in current_selection:
+            label = "✅ " + label
+        new_kb.append([InlineKeyboardButton(text=label, callback_data=f"habit_{opt['id']}")])
+    
+    new_kb.append([InlineKeyboardButton(text="✅ Готово", callback_data="habit_done")])
+    
+    await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=new_kb))
+    await callback.answer()
+
+
+@router.message(OnboardingState.restrictions)
+async def process_restrictions(message: Message, state: FSMContext):
+    """Process restrictions answer"""
+    current_step = OnboardingSteps.RESTRICTIONS
+    
+    text = message.text
+    value = None if text == "➡️ Пропустить" else text
+    
+    # Save using shared logic
+    await save_onboarding_progress(message.from_user.id, current_step, value)
+    await state.update_data(physical_restrictions=value)
+    
+    next_step_name = get_next_step(current_step)
+    next_step_data = get_step_data(next_step_name)
+    
+    await state.set_state(STEP_STATE_MAP[next_step_name])
+    
+    kb = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=opt["label"])] for opt in next_step_data["options"]],
+        resize_keyboard=True
+    )
+    
+    await message.answer(next_step_data["message"], reply_markup=kb)
+
+
+@router.message(OnboardingState.focus)
+async def process_focus(message: Message, state: FSMContext):
+    """Process focus answer"""
+    current_step = OnboardingSteps.FOCUS
+    step_data = get_step_data(current_step)
+    
+    selected_id = next((opt["id"] for opt in step_data["options"] if opt["label"] == message.text), "other")
+    
+    # Save using shared logic
+    await save_onboarding_progress(message.from_user.id, current_step, selected_id)
+    await state.update_data(current_focus=selected_id)
+    
+    next_step_name = get_next_step(current_step)
+    next_step_data = get_step_data(next_step_name)
+    
+    await state.set_state(STEP_STATE_MAP[next_step_name])
+    
+    kb = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=opt["label"])] for opt in next_step_data["options"]],
+        resize_keyboard=True
+    )
+    
+    await message.answer(next_step_data["message"], reply_markup=kb)
+
+
+@router.message(OnboardingState.partners)
+async def process_partners_confirm(message: Message, state: FSMContext):
+    """Finalize onboarding"""
+    # Save partner step (mark as complete)
+    await save_onboarding_progress(message.from_user.id, OnboardingSteps.PARTNERS, "continue")
+    
+    await state.clear()
+    
+    # Show completion message
+    step_data = get_step_data(OnboardingSteps.COMPLETE)
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗣 Рассказать о проблеме", callback_data="start_problem_flow")],
+        [InlineKeyboardButton(text="📱 Открыть приложение", web_app=WebAppInfo(url=settings.WEBAPP_URL))]
+    ])
+    
+    await message.answer(step_data["message"], reply_markup=kb)
+
+
+# =============================================================================
+# Problem Solving Flow
+# =============================================================================
+
+@router.callback_query(F.data == "start_problem_flow")
+async def start_problem_flow(callback: CallbackQuery, state: FSMContext):
+    """Start problem solving dialog"""
+    await state.set_state(ProblemState.waiting_for_description)
+    
+    await callback.message.answer(
+        "Опиши свою текущую проблему или ситуацию, которую хочешь разрешить.\n\n"
+        "Например: 'Мало денег, долги', 'Конфликты с партнером', 'Нет энергии'..."
+    )
+    await callback.answer()
+
+
+@router.message(ProblemState.waiting_for_description)
+async def process_problem_description(message: Message, state: FSMContext):
+    """Analyze problem using Agent"""
+    from app.knowledge.qdrant import QdrantKnowledgeBase
+    from app.agents.problem_solver import ProblemSolverAgent
+    from app.database import AsyncSessionLocal
+    from app.crud import get_user_by_telegram_id
+    
+    problem_text = message.text
+    
+    # Show typing status
+    await bot.send_chat_action(chat_id=message.chat.id, action="typing")
+    
+    try:
+        # Initialize Agent
+        qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
+        agent = ProblemSolverAgent(qdrant)
+        
+        async with AsyncSessionLocal() as db:
+            user_db = await get_user_by_telegram_id(db, message.from_user.id)
+            if not user_db:
+                await message.answer("Пользователь не найден.")
+                return
+                
+            # Convert DB model to Pydantic for Agent
+            from app.models.user import UserProfile
+            user_profile = UserProfile.model_validate(user_db)
+            
+            # Analyze
+            solution = await agent.analyze_problem(user_profile, problem_text)
+            
+            # Save solution in state to use later if user confirms
+            await state.update_data(
+                pending_solution=solution,
+                problem_text=problem_text
+            )
+            
+            # Format response
+            response_text = (
+                f"🧐 **Анализ ситуации:**\n\n"
+                f"**Корень проблемы:** {solution.get('root_cause')}\n\n"
+                f"🌱 **Как это работает (семена):**\n{solution.get('imprint_logic')}\n\n"
+                f"🛑 **Что прекратить (Stop):** {solution.get('stop_action')}\n"
+                f"🚀 **Что начать (Start):** {solution.get('start_action')}\n"
+            )
+            
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🎯 Выбрать целью", callback_data="confirm_goal")],
+                [InlineKeyboardButton(text="📱 Открыть приложение", web_app=WebAppInfo(url=settings.WEBAPP_URL))]
+            ])
+            
+            await message.answer(response_text, parse_mode="Markdown", reply_markup=kb)
+            
+    except Exception as e:
+        logger.error(f"Error analyzing problem: {e}", exc_info=True)
+        await message.answer("Не удалось проанализировать проблему. Попробуй позже.")
+        await state.clear()
+
+
+@router.callback_query(F.data == "confirm_goal")
+async def confirm_goal_selection(callback: CallbackQuery, state: FSMContext):
+    """Set problem as current focus and show daily plan"""
+    from app.database import AsyncSessionLocal
+    from app.crud import update_user_focus, save_problem_history, set_active_problem, clear_today_suggestions, get_user_by_telegram_id
+    from app.knowledge.qdrant import QdrantKnowledgeBase
+    
+    data = await state.get_data()
+    solution = data.get("pending_solution")
+    problem_text = data.get("problem_text")
+    
+    if not solution or not problem_text:
+        await callback.answer("Данные устарели. Начни заново.", show_alert=True)
+        return
+        
+    try:
+        async with AsyncSessionLocal() as db:
+            user_db = await get_user_by_telegram_id(db, callback.from_user.id)
+            if user_db:
+                # 1. Save history
+                history = await save_problem_history(db, user_db.id, problem_text, solution)
+                
+                # 2. Set Active
+                await set_active_problem(db, user_db.id, history.id)
+                
+                # 3. Update Focus
+                await update_user_focus(db, user_db.id, problem_text)
+                
+                # 4. Clear old suggestions so they regenerate
+                await clear_today_suggestions(db, user_db.id)
+                
+                await db.commit()
+                
+                await callback.message.edit_text(
+                    f"🎯 Цель активирована: **{problem_text}**\n\n"
+                    "Теперь твой план на день будет настроен на решение этой задачи.",
+                    parse_mode="Markdown"
+                )
+                
+                # Get Daily Quote and encourage to open app
+                qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
+                quote = await qdrant.get_daily_quote(problem_text)
+                
+                quote_text = (
+                    f"📜 **Мудрость дня:**\n\n"
+                    f"_{quote['text']}_\n\n"
+                    f"Открой приложение, чтобы увидеть свои 4 действия на сегодня! 👇"
+                )
+                
+                kb = ReplyKeyboardMarkup(
+                    keyboard=[[
+                        KeyboardButton(
+                            text="📱 Открыть приложение",
+                            web_app=WebAppInfo(url=settings.WEBAPP_URL)
+                        )
+                    ]],
+                    resize_keyboard=True
+                )
+                
+                await callback.message.answer(quote_text, parse_mode="Markdown", reply_markup=kb)
+                await state.clear()
+                
+    except Exception as e:
+        logger.error(f"Error setting goal: {e}", exc_info=True)
+        await callback.answer("Ошибка при сохранении цели", show_alert=True)
 
 
 @router.message(Command("today"))
@@ -129,16 +579,26 @@ async def cmd_today(message: Message):
                 id=user_db.id,
                 telegram_id=user_db.telegram_id,
                 first_name=user_db.first_name,
+                username=user_db.username,
                 occupation=user_db.occupation or "employee",
                 available_times=user_db.available_times or [],
-                daily_minutes=30
+                daily_minutes=user_db.daily_minutes or 30,
+                current_focus=user_db.current_focus,
+                streak_days=user_db.streak_days,
+                total_seeds=user_db.total_seeds
             )
             
             # Use agent to generate actions
             qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
             agent = DailyManagerAgent(qdrant)
             
-            morning_msg = await agent.morning_message(user_profile)
+            morning_msg = await agent.morning_message(
+                user_id=user_profile.id,
+                first_name=user_profile.first_name,
+                focus=user_profile.current_focus,
+                streak_days=user_profile.streak_days,
+                total_seeds=user_profile.total_seeds
+            )
             actions = morning_msg.get("actions", [])
             
             if actions:
@@ -341,6 +801,69 @@ async def cmd_app(message: Message):
     await message.answer("Открывай:", reply_markup=keyboard)
 
 
+@router.message(Command("reset"))
+async def cmd_reset(message: Message):
+    """Reset user progress with confirmation"""
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Да, стереть всё", callback_data="reset_confirm"),
+            InlineKeyboardButton(text="❌ Нет, оставить", callback_data="reset_cancel")
+        ]
+    ])
+    
+    await message.answer(
+        "🗑 **Сброс всех данных**\n\n"
+        "Ты действительно хочешь удалить весь свой прогресс, историю посаженных семян и настройки? "
+        "Это вернет тебя к самому началу пути, как чистый лист.\n\n"
+        "Как в «Кармическом менеджменте»: иногда, чтобы создать что-то новое, нужно полностью очистить пространство от старого. "
+        "Но помни, что все накопленные заслуги (семена) в системе тоже исчезнут (хотя в карме они останутся навсегда 😉).\n\n"
+        "Уверен?",
+        reply_markup=kb,
+        parse_mode="Markdown"
+    )
+
+
+@router.callback_query(F.data == "reset_cancel")
+async def reset_cancel(callback: CallbackQuery):
+    """Cancel reset"""
+    await callback.message.edit_text("Фух! Всё осталось на своих местах. Продолжаем сеять разумное, доброе, вечное! 🌱")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "reset_confirm")
+async def reset_confirm(callback: CallbackQuery, state: FSMContext):
+    """Confirm reset"""
+    from app.database import AsyncSessionLocal
+    from app.crud import get_user_by_telegram_id, reset_user_progress
+    
+    try:
+        async with AsyncSessionLocal() as db:
+            user_db = await get_user_by_telegram_id(db, callback.from_user.id)
+            
+            if user_db:
+                await reset_user_progress(db, user_db.id)
+                await db.commit()
+                
+                # Clear state
+                await state.clear()
+                
+                await callback.message.edit_text(
+                    "✨ **Полная перезагрузка**\n\n"
+                    "Все данные очищены. Ты снова в начале пути, но теперь с опытом!\n"
+                    "Чтобы начать заново, нажми /start",
+                    parse_mode="Markdown"
+                )
+            else:
+                await callback.message.edit_text("Пользователь не найден. Нажми /start")
+                
+    except Exception as e:
+        logger.error(f"Error resetting user: {e}", exc_info=True)
+        await callback.message.edit_text("Произошла ошибка при сбросе данных. Попробуй позже.")
+        
+    await callback.answer()
+
+
 # Register router
 dp.include_router(router)
 
@@ -360,6 +883,7 @@ async def start_bot():
             BotCommand(command="today", description="📋 Действия на сегодня"),
             BotCommand(command="seed", description="🌱 Записать семя"),
             BotCommand(command="done", description="✅ Отметить выполнение"),
+            BotCommand(command="reset", description="🔄 Сброс прогресса"),
         ]
         await bot.set_my_commands(commands)
         logger.info("Bot commands menu set successfully")

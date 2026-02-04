@@ -143,7 +143,7 @@ EVENING_MINUTE=0
 # ===========================================
 # CORS Settings
 # ===========================================
-CORS_ORIGINS=["http://localhost:5173","https://your-domain.com"]
+CORS_ORIGINS=["http://localhost:5180","https://your-domain.com"]
 
 # ... и еще 30+ настроек
 ```
@@ -395,7 +395,7 @@ MORNING_ENABLED=false
 
 ```env
 # Development
-CORS_ORIGINS=["http://localhost:5173","http://localhost:3000"]
+CORS_ORIGINS=["http://localhost:5180","http://localhost:3000"]
 
 # Production
 CORS_ORIGINS=["https://rouch.app","https://www.rouch.app"]

@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = Field(default="", description="Telegram Bot API token")
     TELEGRAM_RATE_LIMIT: int = Field(default=30, description="Max messages per second")
     TELEGRAM_MESSAGE_DELAY: float = Field(default=0.05, description="Delay between messages (seconds)")
-    WEBAPP_URL: str = Field(default="http://localhost:5173", description="Telegram Mini App URL")
+    WEBAPP_URL: str = Field(default="http://localhost:5180", description="Telegram Mini App URL")
     
     # AI / LLM
     AI_PROVIDER: str = Field(default="groq", description="AI provider: groq, openai, gemini, ollama")
@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     
     # CORS Settings
     CORS_ORIGINS: List[str] = Field(
-        default=["http://localhost:5173", "http://localhost:3000"],
+        default=["http://localhost:5180", "http://localhost:3000"],
         description="Allowed CORS origins"
     )
     CORS_ALLOW_CREDENTIALS: bool = Field(default=True, description="Allow credentials in CORS")

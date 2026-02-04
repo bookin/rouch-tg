@@ -7,7 +7,8 @@ from uuid import uuid4
 
 from app.models.db_models import (
     UserDB, SeedDB, PartnerDB, PartnerGroupDB,
-    HabitDB, HabitCompletionDB, PartnerActionDB
+    HabitDB, HabitCompletionDB, PartnerActionDB,
+    ProblemHistoryDB, DailySuggestionDB
 )
 from app.models.user import UserProfile
 from app.models.seed import Seed
@@ -218,3 +219,187 @@ async def increment_user_seeds_count(db: AsyncSession, user_id: int):
         user.total_seeds += 1
         user.updated_at = datetime.utcnow()
         await db.flush()
+
+
+async def update_user_focus(db: AsyncSession, user_id: int, focus: str) -> bool:
+    """Update user's current focus area"""
+    result = await db.execute(
+        select(UserDB).where(UserDB.id == user_id)
+    )
+    user = result.scalar_one_or_none()
+    if user:
+        user.current_focus = focus
+        user.updated_at = datetime.utcnow()
+        await db.flush()
+        return True
+    return False
+
+
+async def save_problem_history(db: AsyncSession, user_id: int, problem_text: str, solution_json: dict) -> ProblemHistoryDB:
+    """Save problem solution to history"""
+    history = ProblemHistoryDB(
+        id=str(uuid4()),
+        user_id=user_id,
+        problem_text=problem_text,
+        solution_json=solution_json,
+        is_active=True
+    )
+    # Deactivate others
+    from sqlalchemy import update
+    await db.execute(
+        update(ProblemHistoryDB)
+        .where(ProblemHistoryDB.user_id == user_id)
+        .values(is_active=False)
+    )
+    db.add(history)
+    await db.flush()
+    await db.refresh(history)
+    return history
+
+
+async def get_problem_history(db: AsyncSession, user_id: int, limit: int = 20) -> List[ProblemHistoryDB]:
+    """Get user's problem history"""
+    result = await db.execute(
+        select(ProblemHistoryDB)
+        .where(ProblemHistoryDB.user_id == user_id)
+        .order_by(ProblemHistoryDB.created_at.desc())
+        .limit(limit)
+    )
+    return result.scalars().all()
+
+
+async def set_active_problem(db: AsyncSession, user_id: int, history_id: str) -> bool:
+    """Set a specific problem as active and deactivate others"""
+    from sqlalchemy import update
+    # 1. Deactivate all
+    await db.execute(
+        update(ProblemHistoryDB)
+        .where(ProblemHistoryDB.user_id == user_id)
+        .values(is_active=False)
+    )
+    # 2. Activate one
+    result = await db.execute(
+        update(ProblemHistoryDB)
+        .where(ProblemHistoryDB.user_id == user_id, ProblemHistoryDB.id == history_id)
+        .values(is_active=True)
+    )
+    await db.flush()
+    return result.rowcount > 0
+
+
+async def get_daily_suggestions(db: AsyncSession, user_id: int, date: datetime) -> List[DailySuggestionDB]:
+    """Get AI suggestions for a specific user and date"""
+    day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = date.replace(hour=23, minute=59, second=59, microsecond=999)
+    
+    result = await db.execute(
+        select(DailySuggestionDB)
+        .where(
+            DailySuggestionDB.user_id == user_id,
+            DailySuggestionDB.date >= day_start,
+            DailySuggestionDB.date <= day_end
+        )
+        .order_by(DailySuggestionDB.group.asc())
+    )
+    return result.scalars().all()
+
+
+async def save_daily_suggestions(db: AsyncSession, user_id: int, suggestions: List[dict]):
+    """Save newly generated AI suggestions"""
+    objs = [
+        DailySuggestionDB(
+            id=str(uuid4()),
+            user_id=user_id,
+            group=s["group"],
+            description=s["description"],
+            why=s["why"],
+            completed=False,
+            date=datetime.utcnow()
+        )
+        for s in suggestions
+    ]
+    db.add_all(objs)
+    await db.flush()
+    return objs
+
+
+async def update_daily_suggestion_completion(db: AsyncSession, suggestion_id: str, completed: bool):
+    """Update completion status of a daily suggestion"""
+    from sqlalchemy import update
+    await db.execute(
+        update(DailySuggestionDB)
+        .where(DailySuggestionDB.id == suggestion_id)
+        .values(completed=completed)
+    )
+    await db.flush()
+
+
+async def clear_today_suggestions(db: AsyncSession, user_id: int):
+    """Delete all suggestions for today (e.g. when focus changes)"""
+    from sqlalchemy import delete
+    # today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    await db.execute(
+        delete(DailySuggestionDB)
+        .where(
+            DailySuggestionDB.user_id == user_id
+        )
+    )
+    await db.flush()
+
+
+async def reset_user_progress(db: AsyncSession, user_id: int):
+    """Reset all user progress and delete related data"""
+    from sqlalchemy import delete
+    
+    # 1. Delete related records
+    # Note: Order matters due to Foreign Keys if cascades aren't set everywhere
+    
+    # Dependent on Habits
+    await db.execute(delete(HabitCompletionDB).where(HabitCompletionDB.user_id == user_id))
+    
+    # Dependent on Partners/Seeds
+    await db.execute(delete(PartnerActionDB).where(PartnerActionDB.user_id == user_id))
+    
+    # Main entities
+    await db.execute(delete(DailySuggestionDB).where(DailySuggestionDB.user_id == user_id))
+    await db.execute(delete(ProblemHistoryDB).where(ProblemHistoryDB.user_id == user_id))
+    await db.execute(delete(HabitDB).where(HabitDB.user_id == user_id))
+    
+    # Seeds can be linked to partners, but we delete seeds first to be safe or set null
+    # Seeds have partner_id foreign key.
+    await db.execute(delete(SeedDB).where(SeedDB.user_id == user_id))
+    
+    # Partners and Groups
+    await db.execute(delete(PartnerDB).where(PartnerDB.user_id == user_id))
+    await db.execute(delete(PartnerGroupDB).where(PartnerGroupDB.user_id == user_id))
+    
+    # 2. Reset User Fields
+    result = await db.execute(
+        select(UserDB).where(UserDB.id == user_id)
+    )
+    user = result.scalar_one_or_none()
+    
+    if user:
+        # Onboarding
+        user.occupation = "employee"
+        user.available_times = []
+        user.daily_minutes = 30
+        user.current_habits = []
+        user.physical_restrictions = None
+        
+        # Progress
+        user.streak_days = 0
+        user.total_seeds = 0
+        user.completed_practices = 0
+        
+        # Settings
+        user.current_focus = None
+        
+        # Timestamps
+        user.last_onboarding_update = None
+        user.last_morning_message = None
+        user.last_evening_message = None
+        
+        user.updated_at = datetime.utcnow()
+        
+    await db.flush()

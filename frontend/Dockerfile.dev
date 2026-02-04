@@ -11,6 +11,6 @@ RUN npm install
 # Copy source code (though it will be overridden by volume in docker-compose)
 COPY . .
 
-EXPOSE 5173
+EXPOSE 5180
 
 CMD ["npm", "run", "dev"]
