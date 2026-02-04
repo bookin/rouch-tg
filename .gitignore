@@ -48,3 +48,6 @@ Thumbs.db
 
 # Alembic
 alembic/versions/*.pyc
+
+/postgres_data
+/redis_data
