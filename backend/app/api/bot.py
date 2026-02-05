@@ -74,6 +74,7 @@ class OnboardingState(StatesGroup):
 class ProblemState(StatesGroup):
     """States for problem solving"""
     waiting_for_description = State()
+    waiting_for_clarification = State()
 
 
 # Map generic steps to FSM states
@@ -412,6 +413,21 @@ async def process_partners_confirm(message: Message, state: FSMContext):
 # Problem Solving Flow
 # =============================================================================
 
+@router.message(Command("solver"))
+async def cmd_solver(message: Message, state: FSMContext):
+    """Start problem solving dialog"""
+    try:
+        await state.set_state(ProblemState.waiting_for_description)
+
+        await message.answer(
+            "Опиши свою текущую проблему или ситуацию, которую хочешь разрешить.\n\n"
+            "Например: 'Мало денег, долги', 'Конфликты с партнером', 'Нет энергии'..."
+        )
+        logger.info(f"User {message.from_user.id} started resolving action")
+    except Exception as e:
+        logger.error(f"Error in cmd_done: {e}", exc_info=True)
+        await message.answer("Произошла ошибка. Попробуй еще раз.")
+
 @router.callback_query(F.data == "start_problem_flow")
 async def start_problem_flow(callback: CallbackQuery, state: FSMContext):
     """Start problem solving dialog"""
@@ -430,7 +446,7 @@ async def process_problem_description(message: Message, state: FSMContext):
     from app.knowledge.qdrant import QdrantKnowledgeBase
     from app.agents.problem_solver import ProblemSolverAgent
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id
+    from app.crud import get_user_by_telegram_id, save_problem_history
     
     problem_text = message.text
     
@@ -454,14 +470,48 @@ async def process_problem_description(message: Message, state: FSMContext):
             
             # Analyze
             solution = await agent.analyze_problem(user_profile, problem_text)
+
+            # Если агент просит уточнения и дал 1–3 вопроса — переходим в режим уточнения
+            needs_clarification = bool(solution.get("needs_clarification")) and bool(solution.get("clarifying_questions"))
+            if needs_clarification:
+                questions: list[str] = solution.get("clarifying_questions", [])[:3]
+
+                await state.update_data(
+                    original_problem_text=problem_text,
+                    clarification_questions=questions,
+                )
+                await state.set_state(ProblemState.waiting_for_clarification)
+
+                questions_lines = [f"{idx}) {q}" for idx, q in enumerate(questions, start=1)]
+                questions_block = "\n".join(questions_lines) if questions_lines else ""
+
+                text = (
+                    "Хочу дать максимально точный кармический план, поэтому сначала задам несколько уточняющих вопросов:\n\n"
+                    f"{questions_block}\n\n"
+                    "Ответь одним сообщением (можно по пунктам), и я уточню анализ."
+                )
+
+                await message.answer(text)
+                return
+
+            # Иначе — работаем как раньше и сразу показываем анализ
             
-            # Save solution in state to use later if user confirms
+            # Save to DB immediately as inactive
+            history = await save_problem_history(
+                db, 
+                user_db.id, 
+                problem_text, 
+                solution, 
+                is_active=False
+            )
+            await db.commit()
+            
             await state.update_data(
                 pending_solution=solution,
-                problem_text=problem_text
+                problem_text=problem_text,
+                history_id=history.id
             )
             
-            # Format response
             response_text = (
                 f"🧐 **Анализ ситуации:**\n\n"
                 f"**Корень проблемы:** {solution.get('root_cause')}\n\n"
@@ -487,12 +537,13 @@ async def process_problem_description(message: Message, state: FSMContext):
 async def confirm_goal_selection(callback: CallbackQuery, state: FSMContext):
     """Set problem as current focus and show daily plan"""
     from app.database import AsyncSessionLocal
-    from app.crud import update_user_focus, save_problem_history, set_active_problem, clear_today_suggestions, get_user_by_telegram_id
+    from app.crud import update_user_focus, set_active_problem, clear_today_suggestions, get_user_by_telegram_id, save_problem_history
     from app.knowledge.qdrant import QdrantKnowledgeBase
     
     data = await state.get_data()
     solution = data.get("pending_solution")
     problem_text = data.get("problem_text")
+    history_id = data.get("history_id")
     
     if not solution or not problem_text:
         await callback.answer("Данные устарели. Начни заново.", show_alert=True)
@@ -502,16 +553,18 @@ async def confirm_goal_selection(callback: CallbackQuery, state: FSMContext):
         async with AsyncSessionLocal() as db:
             user_db = await get_user_by_telegram_id(db, callback.from_user.id)
             if user_db:
-                # 1. Save history
-                history = await save_problem_history(db, user_db.id, problem_text, solution)
+                # 1. Activate problem (or create if missing for some reason)
+                if history_id:
+                    await set_active_problem(db, user_db.id, history_id)
+                else:
+                    # Fallback for old state or if history_id missing
+                    history = await save_problem_history(db, user_db.id, problem_text, solution, is_active=True)
+                    history_id = history.id
                 
-                # 2. Set Active
-                await set_active_problem(db, user_db.id, history.id)
-                
-                # 3. Update Focus
+                # 2. Update Focus
                 await update_user_focus(db, user_db.id, problem_text)
                 
-                # 4. Clear old suggestions so they regenerate
+                # 3. Clear old suggestions so they regenerate
                 await clear_today_suggestions(db, user_db.id)
                 
                 await db.commit()
@@ -548,6 +601,79 @@ async def confirm_goal_selection(callback: CallbackQuery, state: FSMContext):
     except Exception as e:
         logger.error(f"Error setting goal: {e}", exc_info=True)
         await callback.answer("Ошибка при сохранении цели", show_alert=True)
+
+
+@router.message(ProblemState.waiting_for_clarification)
+async def process_problem_clarification(message: Message, state: FSMContext):
+    """Get clarification answers and run final analysis"""
+    from app.knowledge.qdrant import QdrantKnowledgeBase
+    from app.agents.problem_solver import ProblemSolverAgent
+    from app.database import AsyncSessionLocal
+    from app.crud import get_user_by_telegram_id, save_problem_history
+
+    clarification_text = (message.text or "").strip()
+    data = await state.get_data()
+    original_problem = data.get("original_problem_text") or data.get("problem_text") or clarification_text
+
+    combined_problem = (
+        f"{original_problem}\n\n"
+        f"Уточнения пользователя:\n{clarification_text}"
+    )
+
+    # Show typing status
+    await bot.send_chat_action(chat_id=message.chat.id, action="typing")
+
+    try:
+        qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
+        agent = ProblemSolverAgent(qdrant)
+
+        async with AsyncSessionLocal() as db:
+            user_db = await get_user_by_telegram_id(db, message.from_user.id)
+            if not user_db:
+                await message.answer("Пользователь не найден.")
+                await state.clear()
+                return
+
+            from app.models.user import UserProfile
+            user_profile = UserProfile.model_validate(user_db)
+
+            solution = await agent.analyze_problem(user_profile, combined_problem)
+
+            # Save to DB immediately as inactive
+            history = await save_problem_history(
+                db, 
+                user_db.id, 
+                combined_problem, 
+                solution, 
+                is_active=False
+            )
+            await db.commit()
+
+            await state.update_data(
+                pending_solution=solution,
+                problem_text=combined_problem,
+                history_id=history.id
+            )
+
+            response_text = (
+                f"🧐 **Уточнённый анализ ситуации:**\n\n"
+                f"**Корень проблемы:** {solution.get('root_cause')}\n\n"
+                f"🌱 **Как это работает (семена):**\n{solution.get('imprint_logic')}\n\n"
+                f"🛑 **Что прекратить (Stop):** {solution.get('stop_action')}\n"
+                f"🚀 **Что начать (Start):** {solution.get('start_action')}\n"
+            )
+
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🎯 Выбрать целью", callback_data="confirm_goal")],
+                [InlineKeyboardButton(text="📱 Открыть приложение", web_app=WebAppInfo(url=settings.WEBAPP_URL))]
+            ])
+
+            await message.answer(response_text, parse_mode="Markdown", reply_markup=kb)
+
+    except Exception as e:
+        logger.error(f"Error analyzing clarified problem: {e}", exc_info=True)
+        await message.answer("Не удалось проанализировать проблему. Попробуй позже.")
+        await state.clear()
 
 
 @router.message(Command("today"))
@@ -871,26 +997,44 @@ dp.include_router(router)
 async def start_bot():
     """Start the bot"""
     logger.info("Starting Telegram bot...")
+    retry_delay = 5
     try:
-        # Get bot info
-        bot_info = await bot.get_me()
-        logger.info(f"Bot @{bot_info.username} started successfully")
-        
-        # Set bot commands menu
-        commands = [
-            BotCommand(command="start", description="🏠 Начать работу с ботом"),
-            BotCommand(command="app", description="📱 Открыть приложение"),
-            BotCommand(command="today", description="📋 Действия на сегодня"),
-            BotCommand(command="seed", description="🌱 Записать семя"),
-            BotCommand(command="done", description="✅ Отметить выполнение"),
-            BotCommand(command="reset", description="🔄 Сброс прогресса"),
-        ]
-        await bot.set_my_commands(commands)
-        logger.info("Bot commands menu set successfully")
-        
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-    except Exception as e:
-        logger.error(f"Failed to start bot: {e}", exc_info=True)
+        while True:
+            try:
+                # Get bot info
+                bot_info = await bot.get_me()
+                logger.info(f"Bot @{bot_info.username} started successfully")
+
+                # Set bot commands menu
+                commands = [
+                    BotCommand(command="start", description="🏠 Начать работу с ботом"),
+                    BotCommand(command="app", description="📱 Открыть приложение"),
+                    BotCommand(command="solver", description="💭 Решить проблему"),
+                    BotCommand(command="today", description="📋 Действия на сегодня"),
+                    BotCommand(command="seed", description="🌱 Записать семя"),
+                    BotCommand(command="done", description="✅ Отметить выполнение"),
+                    BotCommand(command="reset", description="🔄 Сброс прогресса"),
+                ]
+                await bot.set_my_commands(commands)
+                logger.info("Bot commands menu set successfully")
+
+                await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+                logger.warning(
+                    "Bot polling stopped without explicit cancellation, restarting in %s seconds",
+                    retry_delay,
+                )
+            except asyncio.CancelledError:
+                # Прекращаем цикл при остановке сервера/приложения
+                raise
+            except Exception as e:
+                logger.error(
+                    f"Bot polling failed with error: {e}. Restarting in {retry_delay} seconds...",
+                    exc_info=True,
+                )
+
+            await asyncio.sleep(retry_delay)
+    except asyncio.CancelledError:
+        logger.info("Bot polling task cancelled, stopping bot loop")
         raise
 
 

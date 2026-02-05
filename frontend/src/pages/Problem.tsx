@@ -21,6 +21,11 @@ export default function Problem() {
   const [partners, setPartners] = useState<any[]>([])
   const [selectedPartners, setSelectedPartners] = useState<string[]>([])
   const [showHistory, setShowHistory] = useState(false)
+  // Режим уточняющих вопросов (Q&A), если агенту не хватает ясности
+  const [needsClarification, setNeedsClarification] = useState(false)
+  const [clarifyingQuestions, setClarifyingQuestions] = useState<string[]>([])
+  const [clarificationText, setClarificationText] = useState('')
+  const [initialProblem, setInitialProblem] = useState('')
 
   const loadData = async () => {
     try {
@@ -47,11 +52,49 @@ export default function Problem() {
       setError(null)
       setSuccess(null)
       setLoading(true)
-      const data = await solveProblem(problem.trim())
-      setResult(data)
-      await loadData() // Refresh history
+      const currentProblem = problem.trim()
+      const data = await solveProblem(currentProblem)
+
+      // Если агент просит уточнения и дал 1–3 вопроса — переходим в режим уточнения
+      if (data?.needs_clarification && Array.isArray(data.clarifying_questions) && data.clarifying_questions.length > 0) {
+        setNeedsClarification(true)
+        setClarifyingQuestions(data.clarifying_questions.slice(0, 3))
+        setClarificationText('')
+        setInitialProblem(currentProblem)
+        setResult(null)
+      } else {
+        setResult(data)
+        await loadData() // Refresh history только для финальных решений
+      }
     } catch (err: any) {
       setError(err?.message || 'Failed to solve problem')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const onClarificationSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!clarificationText.trim()) return
+
+    try {
+      setError(null)
+      setSuccess(null)
+      setLoading(true)
+
+      const baseProblem = initialProblem || problem.trim()
+      const combinedProblem = `${baseProblem}\n\nУточнения пользователя:\n${clarificationText.trim()}`
+
+      const data = await solveProblem(combinedProblem)
+
+      // Второй заход считаем финальным, даже если агент снова попросит уточнения
+      setResult(data)
+      setNeedsClarification(false)
+      setClarifyingQuestions([])
+      setClarificationText('')
+      await loadData()
+    } catch (err: any) {
+      setError(err?.message || 'Не удалось обработать уточнения')
     } finally {
       setLoading(false)
     }
@@ -125,6 +168,87 @@ export default function Problem() {
       <p style={{ opacity: 0.8, fontSize: '0.9rem', marginBottom: 16 }}>
         Система проанализирует твой запрос через призму кармического менеджмента и предложит конкретный путь исправления ситуации.
       </p>
+
+      <div
+        style={{
+          marginBottom: 16,
+          padding: 12,
+          borderRadius: 12,
+          background: 'var(--tg-theme-secondary-bg-color, #f5f5f5)',
+          fontSize: '0.8rem',
+          lineHeight: 1.4,
+        }}
+      >
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>ℹ️ Как работает консультант</div>
+        <ul style={{ margin: 0, paddingLeft: 18 }}>
+          <li>основывается на принципах Diamond Cutter и Karmic Management;</li>
+          <li>использует векторную базу знаний (корреляции, правила, практики) из книг и конспектов;</li>
+          <li>анализирует запрос с помощью языковой модели через PydanticAI-агента;</li>
+          <li>не заменяет врача, юриста или психолога, а даёт кармическую оптику и план действий.</li>
+        </ul>
+      </div>
+
+      {needsClarification && clarifyingQuestions.length > 0 && (
+        <form
+          onSubmit={onClarificationSubmit}
+          style={{
+            marginBottom: 20,
+            padding: 16,
+            borderRadius: 16,
+            background: 'var(--tg-theme-secondary-bg-color, #f5f5f5)',
+            border: '1px solid rgba(0,0,0,0.05)',
+          }}
+        >
+          <h3 style={{ margin: '0 0 10px 0', fontSize: '1rem' }}>🧐 Нужно чуть больше деталей</h3>
+          <p style={{ margin: '0 0 10px 0', fontSize: '0.9rem', opacity: 0.8 }}>
+            Ответь одним сообщением на вопросы ниже — так система сможет точнее увидеть корень проблемы.
+          </p>
+
+          <ol style={{ paddingLeft: 18, margin: '0 0 12px 0', fontSize: '0.9rem' }}>
+            {clarifyingQuestions.map((q, idx) => (
+              <li key={idx} style={{ marginBottom: 4 }}>{q}</li>
+            ))}
+          </ol>
+
+          <textarea
+            value={clarificationText}
+            onChange={(e) => setClarificationText(e.target.value)}
+            placeholder="Напиши свои ответы одним сообщением..."
+            rows={4}
+            style={{
+              marginTop: 8,
+              width: '100%',
+              padding: 10,
+              borderRadius: 10,
+              border: '1px solid var(--tg-theme-hint-color, #bbb)',
+              fontSize: '0.95rem',
+              resize: 'none',
+              outline: 'none',
+              background: 'var(--tg-theme-bg-color, #fff)',
+              color: 'var(--tg-theme-text-color, #000)',
+            }}
+          />
+
+          <button
+            type="submit"
+            disabled={loading}
+            style={{
+              marginTop: 10,
+              padding: '10px 16px',
+              borderRadius: 10,
+              border: 'none',
+              background: 'var(--tg-theme-button-color, #3390ec)',
+              color: 'var(--tg-theme-button-text-color, #fff)',
+              fontWeight: 600,
+              fontSize: '0.95rem',
+              cursor: loading ? 'default' : 'pointer',
+              opacity: loading ? 0.7 : 1,
+            }}
+          >
+            {loading ? 'Анализирую уточнения…' : 'Отправить уточнения'}
+          </button>
+        </form>
+      )}
 
       {history.length > 0 && (
         <div style={{ marginBottom: 20 }}>
@@ -370,6 +494,58 @@ export default function Problem() {
               </div>
             )}
           </div>
+
+          {/* Section: Key rule && practice */}
+          {(result.rules && result.rules.length > 0) || (result.practices && result.practices.length > 0) ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 10 }}>
+              {result.rules && result.rules.length > 0 && (
+                <div style={{ flex: '1 1 240px', background: 'var(--tg-theme-secondary-bg-color, #f5f5f5)', borderRadius: 12, padding: 12 }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 4 }}>📜 Правило, на котором основан план</div>
+                  {(() => {
+                    const rule = result.rules[0]
+                    if (!rule) return null
+                    return (
+                      <>
+                        {rule.title && (
+                          <div style={{ fontWeight: 600, marginBottom: 4 }}>{rule.title}</div>
+                        )}
+                        {rule.number && (
+                          <div style={{ fontSize: '0.8rem', opacity: 0.6, marginBottom: 4 }}>№ {rule.number}</div>
+                        )}
+                        <div style={{ fontSize: '0.9rem' }}>
+                          {renderContent((rule.content || '').slice(0, 400))}
+                        </div>
+                      </>
+                    )
+                  })()}
+                </div>
+              )}
+
+              {result.practices && result.practices.length > 0 && (
+                <div style={{ flex: '1 1 240px', background: 'var(--tg-theme-secondary-bg-color, #f5f5f5)', borderRadius: 12, padding: 12 }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 4 }}>🧘 Рекомендуемая практика дня</div>
+                  {(() => {
+                    const practice = result.practices[0]
+                    if (!practice) return null
+                    const title = practice.name || practice.title
+                    return (
+                      <>
+                        {title && (
+                          <div style={{ fontWeight: 600, marginBottom: 4 }}>{title}</div>
+                        )}
+                        {practice.duration && (
+                          <div style={{ fontSize: '0.8rem', opacity: 0.6, marginBottom: 4 }}>{practice.duration} мин</div>
+                        )}
+                        <div style={{ fontSize: '0.9rem' }}>
+                          {renderContent((practice.content || '').slice(0, 400))}
+                        </div>
+                      </>
+                    )
+                  })()}
+                </div>
+              )}
+            </div>
+          ) : null}
 
           {/* Section: Concepts from RAG */}
           {result.concepts && result.concepts.length > 0 && (

@@ -2,6 +2,7 @@
 from pathlib import Path
 from typing import List, Dict
 import re
+import csv
 from app.models.knowledge import KnowledgeItem, Correlation, Quote, Concept
 
 
@@ -17,6 +18,8 @@ class KnowledgeLoader:
         
         # 1. Correlations from diamond-correlations-table.md
         items.extend(await self._load_correlations())
+        # 1b. Extended correlations from diamond-correlations-extended.md
+        items.extend(await self._load_extended_correlations())
         
         # 2. Concepts from diamond-concepts.md
         items.extend(await self._load_concepts())
@@ -71,37 +74,150 @@ class KnowledgeLoader:
                                 "problem": problem,
                                 "cause": cause,
                                 "solution": solution,
-                                "category": self._categorize_problem(section_name)
+                                "category": self._categorize_problem(section_name),
+                                # Обобщённый тип отпечатка / паттерна, извлечённый из причины
+                                "problem_type": self._extract_problem_type(cause),
+                                # Источник внутри корреляций: базовая таблица
+                                "source_type": "base",
                             }
                         ))
         
         return correlations
     
-    async def _load_concepts(self) -> List[KnowledgeItem]:
-        """Load core concepts from diamond-concepts.md"""
-        file_path = self.knowledge_dir / "diamond-concepts.md"
+    async def _load_extended_correlations(self) -> List[KnowledgeItem]:
+        """Parse extended correlation tables with additional fields"""
+        file_path = self.knowledge_dir / "diamond-correlations-extended.md"
         if not file_path.exists():
             return []
         
-        content = file_path.read_text(encoding='utf-8')
-        concepts = []
+        content = file_path.read_text(encoding="utf-8")
+        correlations: List[KnowledgeItem] = []
         
-        # Parse by ## headers
-        sections = re.split(r'\n## ', content)
+        # Split by sections starting with level-2 headers (## ...)
+        sections = re.split(r"\n## ", content)
         
-        for section in sections[1:]:
-            lines = section.split('\n')
-            title = lines[0].strip()
-            text = '\n'.join(lines[1:]).strip()
+        for section in sections[1:]:  # Skip header part before first section
+            lines = section.split("\n")
+            if not lines:
+                continue
+            section_name = lines[0].strip()
             
-            if text:
-                concepts.append(KnowledgeItem(
-                    type="concept",
-                    content=f"# {title}\n\n{text}",
-                    source="diamond-concepts.md",
-                    metadata={"title": title, "category": self._categorize_concept(title)}
-                ))
+            # Find table rows (lines starting with '|' but not separator row with '---')
+            table_rows = [line for line in lines if line.strip().startswith("|") and "---" not in line]
+            if len(table_rows) < 2:
+                continue
+            
+            # Skip header row (first data row is after it)
+            for row in table_rows[1:]:
+                cells = [cell.strip() for cell in row.split("|")[1:-1]]
+                # Expected schema:
+                # № | Проблема | Сфера | Импринт | Качество | Решение | Партнёры | Принцип
+                if len(cells) < 8:
+                    continue
+                number = cells[0]
+                problem = cells[1]
+                sphere = cells[2]
+                imprint = cells[3]
+                quality = cells[4]
+                solution = cells[5]
+                partners = cells[6]
+                principle = cells[7]
+                
+                cause = imprint
+                if not problem or not solution:
+                    continue
+                
+                category = self._category_from_sphere(sphere, section_name)
+                
+                correlations.append(
+                    KnowledgeItem(
+                        type="correlation",
+                        content=(
+                            f"Проблема: {problem}\n"
+                            f"Причина: {cause}\n"
+                            f"Решение: {solution}"
+                        ),
+                        source="diamond-correlations-extended.md",
+                        metadata={
+                            "problem": problem,
+                            "cause": cause,
+                            "solution": solution,
+                            "category": category,
+                            "sphere": sphere,
+                            "imprint": imprint,
+                            "quality": quality,
+                            "partners": partners,
+                            "principle": principle,
+                            "number": number,
+                            # Обобщённый тип отпечатка (первая фраза из колонки "Импринт")
+                            "problem_type": self._extract_problem_type(imprint),
+                            # Источник внутри корреляций: расширенная таблица
+                            "source_type": "extended",
+                        },
+                    )
+                )
         
+        return correlations
+    
+    async def _load_concepts(self) -> List[KnowledgeItem]:
+        """Load core concepts from CSV if available, otherwise from diamond-concepts.md."""
+        concepts: List[KnowledgeItem] = []
+
+        # 1. Try CSV-based concepts first
+        csv_path = self.knowledge_dir / "concepts.csv"
+        if csv_path.exists():
+            with csv_path.open(encoding="utf-8") as f:
+                reader = csv.DictReader(f, delimiter=";")
+                for row in reader:
+                    title = (row.get("title") or "").strip()
+                    if not title:
+                        continue
+                    category = (row.get("category") or "").strip() or self._categorize_concept(title)
+                    body = (row.get("content") or "").strip()
+                    source = (row.get("source") or "concepts.csv").strip()
+
+                    content = f"# {title}\n\n{body}" if body else title
+
+                    concepts.append(
+                        KnowledgeItem(
+                            type="concept",
+                            content=content,
+                            source=source,
+                            metadata={"title": title, "category": category},
+                        )
+                    )
+
+            return concepts
+
+        # 2. Fallback: старый парсинг diamond-concepts.md
+        file_path = self.knowledge_dir / "diamond-concepts.md"
+        if not file_path.exists():
+            return []
+
+        content = file_path.read_text(encoding="utf-8")
+        concepts = []
+
+        # Parse by ## headers
+        sections = re.split(r"\n## ", content)
+
+        for section in sections[1:]:
+            lines = section.split("\n")
+            title = lines[0].strip()
+            text = "\n".join(lines[1:]).strip()
+
+            if text:
+                concepts.append(
+                    KnowledgeItem(
+                        type="concept",
+                        content=f"# {title}\n\n{text}",
+                        source="diamond-concepts.md",
+                        metadata={
+                            "title": title,
+                            "category": self._categorize_concept(title),
+                        },
+                    )
+                )
+
         return concepts
     
     async def _load_quotes(self) -> List[KnowledgeItem]:
@@ -146,81 +262,175 @@ class KnowledgeLoader:
         return quotes
     
     async def _load_practices(self) -> List[KnowledgeItem]:
-        """Load practices from yoga-concepts.md and karma-concepts.md"""
-        practices = []
-        
+        """Load practices from CSV if available, otherwise fall back to markdown parsing."""
+        practices: List[KnowledgeItem] = []
+
+        # 1. Try CSV-based practices first
+        csv_path = self.knowledge_dir / "practices.csv"
+        if csv_path.exists():
+            with csv_path.open(encoding="utf-8") as f:
+                reader = csv.DictReader(f, delimiter=";")
+                for row in reader:
+                    name = (row.get("name") or "").strip()
+                    if not name:
+                        continue
+                    category = (row.get("category") or "").strip()
+                    duration_raw = (row.get("duration_min") or "").strip()
+                    try:
+                        duration = int(duration_raw) if duration_raw else 0
+                    except ValueError:
+                        duration = 0
+                    content = (row.get("content") or "").strip()
+                    source = (row.get("source") or "practices.csv").strip()
+
+                    practices.append(
+                        KnowledgeItem(
+                            type="practice",
+                            content=content,
+                            source=source,
+                            metadata={
+                                "name": name,
+                                "category": category,
+                                "duration": duration,
+                            },
+                        )
+                    )
+
+            return practices
+
+        # 2. Fallback: старый парсинг markdown (для совместимости)
         # Yoga practices
         yoga_file = self.knowledge_dir / "yoga-concepts.md"
         if yoga_file.exists():
-            content = yoga_file.read_text(encoding='utf-8')
-            
+            content = yoga_file.read_text(encoding="utf-8")
+
             # Find the 10 exercises section
-            exercises_section = re.search(r'## Десять упражнений комплекса(.*?)(?=##|$)', content, re.DOTALL)
+            exercises_section = re.search(
+                r"## Десять упражнений комплекса(.*?)(?=##|$)",
+                content,
+                re.DOTALL,
+            )
             if exercises_section:
                 exercises_text = exercises_section.group(1)
-                
+
                 # Parse each exercise (### headers)
-                exercises = re.split(r'\n### ', exercises_text)
+                exercises = re.split(r"\n### ", exercises_text)
                 for ex in exercises[1:]:
-                    lines = ex.split('\n')
+                    lines = ex.split("\n")
                     name = lines[0].strip()
-                    description = '\n'.join(lines[1:]).strip()
-                    
-                    practices.append(KnowledgeItem(
-                        type="practice",
-                        content=f"# {name}\n\n{description}",
-                        source="yoga-concepts.md",
-                        metadata={
-                            "name": name,
-                            "category": "yoga",
-                            "duration": self._extract_duration(name)
-                        }
-                    ))
-        
+                    description = "\n".join(lines[1:]).strip()
+
+                    practices.append(
+                        KnowledgeItem(
+                            type="practice",
+                            content=f"# {name}\n\n{description}",
+                            source="yoga-concepts.md",
+                            metadata={
+                                "name": name,
+                                "category": "yoga",
+                                "duration": self._extract_duration(name),
+                            },
+                        )
+                    )
+
         # Meditation practices from karma-concepts.md
         karma_file = self.knowledge_dir / "karma-concepts.md"
         if karma_file.exists():
-            content = karma_file.read_text(encoding='utf-8')
-            
+            content = karma_file.read_text(encoding="utf-8")
+
             # Find meditation section
-            meditation_section = re.search(r'### 2. Начните делать медитацию(.*?)(?=###|$)', content, re.DOTALL)
+            meditation_section = re.search(
+                r"### 2. Начните делать медитацию(.*?)(?=###|$)",
+                content,
+                re.DOTALL,
+            )
             if meditation_section:
-                practices.append(KnowledgeItem(
-                    type="practice",
-                    content=meditation_section.group(0),
-                    source="karma-concepts.md",
-                    metadata={"name": "Медитация", "category": "meditation", "duration": 10}
-                ))
-        
+                practices.append(
+                    KnowledgeItem(
+                        type="practice",
+                        content=meditation_section.group(0),
+                        source="karma-concepts.md",
+                        metadata={
+                            "name": "Медитация",
+                            "category": "meditation",
+                            "duration": 10,
+                        },
+                    )
+                )
+
         return practices
     
     async def _load_rules(self) -> List[KnowledgeItem]:
-        """Load 8 rules from karma-concepts.md"""
+        """Load rules from CSV if available, otherwise fall back to markdown parsing."""
+        rules: List[KnowledgeItem] = []
+
+        # 1. Try CSV-based rules first
+        csv_path = self.knowledge_dir / "rules.csv"
+        if csv_path.exists():
+            with csv_path.open(encoding="utf-8") as f:
+                reader = csv.DictReader(f, delimiter=";")
+                for row in reader:
+                    number_raw = (row.get("number") or "").strip()
+                    if not number_raw:
+                        continue
+                    try:
+                        number = int(number_raw)
+                    except ValueError:
+                        continue
+                    title = (row.get("title") or "").strip()
+                    content = (row.get("content") or "").strip()
+                    source = (row.get("source") or "rules.csv").strip()
+
+                    rules.append(
+                        KnowledgeItem(
+                            type="rule",
+                            content=content,
+                            source=source,
+                            metadata={
+                                "number": number,
+                                "title": title,
+                            },
+                        )
+                    )
+
+            return rules
+
+        # 2. Fallback: старый парсинг markdown (для совместимости)
         file_path = self.knowledge_dir / "karma-concepts.md"
         if not file_path.exists():
             return []
-        
-        content = file_path.read_text(encoding='utf-8')
+
+        content = file_path.read_text(encoding="utf-8")
         rules = []
-        
+
         # Find the 8 rules section
-        rules_section = re.search(r'## 8 Правил Кармического Менеджмента(.*?)(?=##|$)', content, re.DOTALL)
+        rules_section = re.search(
+            r"## 8 Правил Кармического Менеджмента(.*?)(?=##|$)",
+            content,
+            re.DOTALL,
+        )
         if not rules_section:
             return []
-        
+
         rules_text = rules_section.group(1)
-        
+
         # Parse each rule
-        individual_rules = re.findall(r'### Правило №(\d+): (.*?)\n(.*?)(?=###|$)', rules_text, re.DOTALL)
-        
+        individual_rules = re.findall(
+            r"### Правило №(\d+): (.*?)\n(.*?)(?=###|$)",
+            rules_text,
+            re.DOTALL,
+        )
+
         for number, title, content_text in individual_rules:
-            rules.append(KnowledgeItem(
-                type="rule",
-                content=f"Правило #{number}: {title}\n\n{content_text.strip()}",
-                source="karma-concepts.md",
-                metadata={"number": int(number), "title": title}
-            ))
-        
+            rules.append(
+                KnowledgeItem(
+                    type="rule",
+                    content=f"Правило #{number}: {title}\n\n{content_text.strip()}",
+                    source="karma-concepts.md",
+                    metadata={"number": int(number), "title": title},
+                )
+            )
+
         return rules
     
     def _categorize_problem(self, section_name: str) -> str:
@@ -257,6 +467,45 @@ class KnowledgeLoader:
             return "practices"
         else:
             return "concept"
+    
+    def _extract_problem_type(self, text: str | None) -> str:
+        """Extract generalized imprint/problem type from free-form text.
+
+        Heuristic: take the first meaningful fragment (before newline or comma).
+        This даёт короткий ярлык вроде "Скупость", "Гнев на партнёров",
+        который можно использовать как problem_type.
+        """
+        if not text:
+            return ""
+        # Берём первую строку
+        first_line = str(text).strip().split("\n", 1)[0]
+        # Отсекаем всё после точки/воскл./вопросительного знака/точки с запятой
+        for sep in [".", "!", "?", ";"]:
+            if sep in first_line:
+                first_line = first_line.split(sep, 1)[0]
+        # И первую часть до запятой как ярлык
+        if "," in first_line:
+            first_line = first_line.split(",", 1)[0]
+        return first_line.strip()
+    
+    def _category_from_sphere(self, sphere: str, section_name: str) -> str:
+        """Map high-level sphere name to correlation category"""
+        text = (sphere or "").lower()
+        if "финанс" in text or "деньг" in text:
+            return "finance"
+        if "отношен" in text:
+            return "relationships"
+        if "здоров" in text:
+            return "health"
+        if "смысл" in text or "путь" in text:
+            return "meaning"
+        if "работ" in text or "карьер" in text or "бизнес" in text:
+            return "career"
+        if "эмоци" in text or "состояни" in text:
+            return "emotions"
+        
+        # Fallback to existing section-based categorization
+        return self._categorize_problem(section_name)
     
     def _extract_quote_tags(self, quote_text: str, context: str | None) -> List[str]:
         """Extract tags for quote search"""

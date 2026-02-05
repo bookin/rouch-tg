@@ -235,22 +235,31 @@ async def update_user_focus(db: AsyncSession, user_id: int, focus: str) -> bool:
     return False
 
 
-async def save_problem_history(db: AsyncSession, user_id: int, problem_text: str, solution_json: dict) -> ProblemHistoryDB:
+async def save_problem_history(
+    db: AsyncSession, 
+    user_id: int, 
+    problem_text: str, 
+    solution_json: dict,
+    is_active: bool = True
+) -> ProblemHistoryDB:
     """Save problem solution to history"""
     history = ProblemHistoryDB(
         id=str(uuid4()),
         user_id=user_id,
         problem_text=problem_text,
         solution_json=solution_json,
-        is_active=True
+        is_active=is_active
     )
-    # Deactivate others
-    from sqlalchemy import update
-    await db.execute(
-        update(ProblemHistoryDB)
-        .where(ProblemHistoryDB.user_id == user_id)
-        .values(is_active=False)
-    )
+    
+    if is_active:
+        # Deactivate others only if this one is active
+        from sqlalchemy import update
+        await db.execute(
+            update(ProblemHistoryDB)
+            .where(ProblemHistoryDB.user_id == user_id)
+            .values(is_active=False)
+        )
+    
     db.add(history)
     await db.flush()
     await db.refresh(history)

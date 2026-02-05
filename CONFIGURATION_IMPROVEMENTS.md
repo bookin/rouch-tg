@@ -125,6 +125,19 @@ DB_POOL_SIZE=5
 DB_MAX_OVERFLOW=10
 
 # ===========================================
+# Knowledge Base
+# ===========================================
+KNOWLEDGE_BASE_PATH=data/knowledge_base
+
+# ===========================================
+# Problem Solver Agent tuning
+# ===========================================
+PROBLEM_SOLVER_CORRELATIONS_LIMIT=3
+PROBLEM_SOLVER_CONCEPTS_LIMIT=2
+PROBLEM_SOLVER_RULES_LIMIT=3
+PROBLEM_SOLVER_PRACTICES_LIMIT=3
+
+# ===========================================
 # Scheduler Settings
 # ===========================================
 SCHEDULER_ENABLED=true

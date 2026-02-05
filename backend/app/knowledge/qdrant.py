@@ -46,15 +46,19 @@ class QdrantKnowledgeBase:
         """Create collection and add items"""
         
         # Recreate collection
+        print(f"   → Recreating collection '{name}' in Qdrant...")
         try:
             self.client.delete_collection(collection_name=name)
+            print(f"     • Deleted existing collection '{name}'")
         except Exception as e:
-            print(e)
+            # Часто это просто "collection not found" при первом запуске
+            print(f"     • No existing collection '{name}' to delete or delete failed: {e}")
         
         self.client.create_collection(
             collection_name=name,
             vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE)
         )
+        print(f"     • Created collection '{name}'")
         
         # Prepare points
         points = []
@@ -72,6 +76,8 @@ class QdrantKnowledgeBase:
                 }
             ))
         
+        print(f"     • Prepared {len(points)} points to upload into '{name}'")
+        
         # Upload in batches
         batch_size = 100
         for i in range(0, len(points), batch_size):
@@ -80,6 +86,7 @@ class QdrantKnowledgeBase:
                 collection_name=name,
                 points=batch
             )
+        print(f"     • Finished uploading {len(points)} points into '{name}'")
     
     def _point_id(self, item: KnowledgeItem) -> str:
         """
@@ -105,15 +112,29 @@ class QdrantKnowledgeBase:
                 limit=limit
             )
             
-            return [
-                {
-                    "problem": hit.payload["metadata"].get("problem", ""),
-                    "cause": hit.payload["metadata"].get("cause", ""),
-                    "solution": hit.payload["metadata"].get("solution", ""),
-                    "score": hit.score
-                }
-                for hit in results.points
-            ]
+            enriched_results: List[Dict[str, Any]] = []
+            for hit in results.points:
+                metadata = hit.payload.get("metadata") or {}
+                enriched_results.append(
+                    {
+                        "problem": metadata.get("problem", ""),
+                        "cause": metadata.get("cause", ""),
+                        "solution": metadata.get("solution", ""),
+                        # New structured fields (may be empty for старой таблицы):
+                        "category": metadata.get("category", ""),
+                        "sphere": metadata.get("sphere", ""),
+                        "imprint": metadata.get("imprint", ""),
+                        "quality": metadata.get("quality", ""),
+                        "partners": metadata.get("partners", ""),
+                        "principle": metadata.get("principle", ""),
+                        "number": metadata.get("number", ""),
+                        "problem_type": metadata.get("problem_type", ""),
+                        "source_type": metadata.get("source_type", ""),
+                        "score": hit.score,
+                    }
+                )
+            
+            return enriched_results
         except Exception as e:
             print(f"Error searching correlations: {e}")
             return []
@@ -204,6 +225,38 @@ class QdrantKnowledgeBase:
             
         except Exception as e:
             print(f"Error searching practices: {e}")
+            return []
+    
+    async def search_rules(self, query: str, limit: int = 3) -> List[Dict[str, Any]]:
+        """Search for karmic management rules relevant to the query.
+
+        Rules are stored in a separate "rules" collection, populated from karma-concepts.md.
+        """
+        try:
+            vector = await embed_text(query)
+            results = self.client.query_points(
+                collection_name="rules",
+                query=vector,
+                limit=limit,
+            )
+
+            rules: List[Dict[str, Any]] = []
+            for hit in results.points:
+                payload = hit.payload or {}
+                metadata = payload.get("metadata") or {}
+                rules.append(
+                    {
+                        "number": metadata.get("number"),
+                        "title": metadata.get("title", ""),
+                        "content": payload.get("content", ""),
+                        "source": payload.get("source", ""),
+                        "score": hit.score,
+                    }
+                )
+
+            return rules
+        except Exception as e:
+            print(f"Error searching rules: {e}")
             return []
     
     async def search_concepts(self, query: str, limit: int = 3) -> List[Dict[str, Any]]:

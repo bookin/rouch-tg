@@ -1,4 +1,5 @@
 """Daily Manager Agent - communicates with users twice a day"""
+from datetime import datetime, UTC
 from typing import Dict, Any
 from pydantic import BaseModel
 from app.models.user import UserProfile
@@ -66,7 +67,7 @@ class DailyManagerAgent:
         from app.crud import get_daily_suggestions, save_daily_suggestions
         
         try:
-            now = datetime.utcnow()
+            now = datetime.now(UTC)
             async with AsyncSessionLocal() as db:
                 # 1. Try to get from database
                 existing_suggestions = await get_daily_suggestions(db, user_id, now)
@@ -142,6 +143,7 @@ class DailyManagerAgent:
             }
             
         except Exception as e:
+            print(f"Error generating morning message: {e}")
             # Fallback to workflow if AI fails
             result = await self.daily_flow.morning_workflow(user)
             return {

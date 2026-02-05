@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     
     # Knowledge Base
     KNOWLEDGE_BASE_PATH: str = Field(default="data/knowledge_base", description="Path to knowledge base files")
+    # Problem Solver Agent tuning
+    PROBLEM_SOLVER_CORRELATIONS_LIMIT: int = Field(default=3, description="How many correlations to fetch from Qdrant for problem analysis")
+    PROBLEM_SOLVER_CONCEPTS_LIMIT: int = Field(default=2, description="How many concepts to fetch from Qdrant for problem analysis")
+    PROBLEM_SOLVER_RULES_LIMIT: int = Field(default=3, description="How many karmic rules to fetch from Qdrant for problem analysis")
+    PROBLEM_SOLVER_PRACTICES_LIMIT: int = Field(default=3, description="How many practices to fetch from Qdrant for problem analysis and recommendations")
     
     # Scheduler Settings
     SCHEDULER_ENABLED: bool = Field(default=True, description="Enable daily message scheduler")

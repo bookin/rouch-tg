@@ -79,6 +79,17 @@ class ProblemSolveResponse(BaseModel):
     success_tip: Optional[str] = None
     correlations: list[dict] = []
     concepts: list[dict] = []
+    # Дополнительные поля для более глубокой логики (обратносуместимо)
+    clarity_level: Optional[str] = None
+    karmic_pattern: Optional[str] = None
+    seed_strategy_summary: Optional[str] = None
+    coffee_meditation_script: Optional[str] = None
+    partner_actions: list[str] = []
+    needs_clarification: Optional[bool] = None
+    clarifying_questions: list[str] = []
+    # Отладочные/объяснительные слои знаний
+    rules: list[dict] = []
+    practices: list[dict] = []
 
 
 async def get_current_user(
@@ -248,6 +259,7 @@ async def get_daily_actions(user: UserProfile = Depends(get_current_user)):
         return {"actions": actions}
         
     except Exception as e:
+        print(e)
         # Fallback to default actions
         actions = [
             {
@@ -520,10 +532,10 @@ async def solve_problem_endpoint(
     agent = ProblemSolverAgent(qdrant)
     solution = await agent.analyze_problem(user, payload.problem)
 
-    # Save to history
+    # Save to history только для финальных решений (без запроса уточнений)
     async with AsyncSessionLocal() as db:
         user_db = await get_user_by_telegram_id(db, user.telegram_id)
-        if user_db:
+        if user_db and not solution.get("needs_clarification"):
             await save_problem_history(db, user_db.id, payload.problem, solution)
             await db.commit()
 

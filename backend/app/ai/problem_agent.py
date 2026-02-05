@@ -11,6 +11,12 @@ class ProblemContext(BaseModel):
     user_name: str
     correlations: list[dict] = Field(default_factory=list)
     concepts: list[dict] = Field(default_factory=list)
+    # Дополнительные внутренние поля (могут использоваться позже для явного Intake)
+    sphere: Optional[str] = Field(default=None, description="Сфера проблемы (финансы, отношения, здоровье, работа, смысл, эмоции)")
+    desired_outcome: Optional[str] = Field(default=None, description="Желаемый результат пользователя в свободной формулировке")
+    # Отдельный слой знаний: правила и практики
+    rules: list[dict] = Field(default_factory=list, description="Подборка правил кармического менеджмента, релевантных проблеме")
+    practices: list[dict] = Field(default_factory=list, description="Подборка практик (йога/медитация/упражнения), на которые можно опереться в плане")
 
 
 class ProblemSolution(BaseModel):
@@ -28,6 +34,18 @@ class ProblemSolution(BaseModel):
     expected_outcome: str = Field(description="Ожидаемый результат через 30-90 дней")
     timeline_days: int = Field(default=30, description="Срок до первых результатов")
     success_tip: str = Field(description="Совет для ускорения результата (коэффициент усиления)")
+    # Новые поля (обратносуместимо, можно игнорировать на фронте)
+    clarity_level: Optional[str] = Field(default=None, description="Уровень ясности проблемы: high / medium / low")
+    karmic_pattern: Optional[str] = Field(default=None, description="Краткое описание 1–2 ключевых отпечатков и паттернов")
+    seed_strategy_summary: Optional[str] = Field(default=None, description="Короткое резюме: какие семена мы сажаем и для кого")
+    coffee_meditation_script: Optional[str] = Field(default=None, description="Короткий текст/сценарий для кофе-медитации")
+    partner_actions: Optional[list[str]] = Field(default=None, description="До 4 действий для 4 кармических партнёров")
+    # Поля для Q&A-режима (используются в Telegram/WebApp, можно игнорировать, если не нужны)
+    needs_clarification: bool = Field(default=False, description="Нужно ли задать уточняющие вопросы перед финальным планом")
+    clarifying_questions: list[str] = Field(
+        default_factory=list,
+        description="Список из 0–3 уточняющих вопросов, если проблема сформулирована размыто"
+    )
 
 
 def create_problem_agent() -> Agent[ProblemContext, ProblemSolution]:
@@ -40,16 +58,37 @@ def create_problem_agent() -> Agent[ProblemContext, ProblemSolution]:
         deps_type=ProblemContext,
         output_type=ProblemSolution,
         system_prompt=(
-            "Ты - эксперт по кармическому менеджменту системы Diamond Cutter (Геше Майкл Роуч). "
-            "Твоя задача - проанализировать проблему пользователя и дать глубокое решение, основанное на системе 'отпечатков' (seeds). "
-            "\n\nМетодология:\n"
-            "1. Идентифицируй КОРЕНЬ: какой негативный отпечаток из прошлого создал эту ситуацию сейчас. "
-            "2. Объясни ЛОГИКУ: как именно 'мир из меня' работает в этом случае (механизм проекции). "
-            "3. Решение 'STOP-START-GROW':\n"
-            "   - STOP: что именно нужно перестать делать, чтобы не 'подпитывать' плохой отпечаток.\n"
-            "   - START: какое противоположное действие создаст нужный результат.\n"
-            "   - GROW: как правильно радоваться и 'поливать' семена (медитация кофе).\n"
-            "\nИспользуй предоставленные корреляции и концепции как основу, но расширяй их глубоким пониманием системы."
+            "Ты — кармический консультант системы Diamond Cutter (Геше Майкл Роуч) внутри приложения Rouch. "
+            "Твоя задача — на основе проблемы пользователя и примеров из базы знаний (корреляции, концепции) "
+            "выстроить глубокий разбор по отпечаткам и дать практический план. База знаний — это ПРИМЕРЫ, а не истина; "
+            "ты обязан мыслить самостоятельно в рамках кармической логики, а не просто пересказывать строки."
+            "\n\nРабочая оптика:\n"
+            "- Мир исходит из отпечатков в уме (seeds), всё зависит от причины, посеянной в отношениях с другими.\n"
+            "- Ключевые оси анализа: СФЕРА (финансы, отношения, здоровье, смысл/путь, работа/карьера, эмоции), "
+            "ОТПЕЧАТОК (imprint: скупость, гнев, зависть и т.п.), КАЧЕСТВО (из 7: даяние, нравственность, терпение, усилие, "
+            "сосредоточение, мудрость, сострадание), ПРИНЦИП (закон/правило/формула)."
+            "\n\nМетодология рассуждения (всегда проходи эти шаги внутренно):\n"
+            "1) Intake (диагностика):\n"
+            "   - Определи основную сферу проблемы пользователя по описанию и по полю sphere корреляций.\n"
+            "   - Сформулируй корень проблемы в терминах отпечатков: какое отношение к другим повторяется в этой сфере.\n"
+            "2) Karmic linking (связь с базой знаний):\n"
+            "   - Посмотри на найденные корреляции: problem, cause, solution, sphere, imprint, quality, principle, number.\n"
+            "   - Выбери 1–3 наиболее близких примера и на их основе уточни гипотезу о корне и механизме проекции.\n"
+            "   - Используй концепции (rules, законы, формулы) для объяснения, ПОЧЕМУ именно такой отпечаток даёт такой результат.\n"
+            "3) Solution synthesis (решение):\n"
+            "   - Сформулируй STOP: конкретные формы поведения/мышления, которые подпитывают отпечаток и которые нужно прекратить.\n"
+            "   - Сформулируй START: противоположные действия по отношению к другим людям в той же сфере.\n"
+            "   - Сформулируй GROW: как радоваться, делать кофе-медитацию, фиксировать прогресс, чтобы семена проросли.\n"
+            "   - Составь практический план на ~30 дней (practice_steps) с простыми, но регулярными действиями.\n"
+            "\nОформление ответа:\n"
+            "- Все поля структуры ProblemSolution должны быть заполнены.\n"
+            "- В root_cause и imprint_logic явно упоминай тип отпечатка и базовое качество (из 7), на котором строится решение.\n"
+            "- В success_tip можешь дать 1–2 тонких совета (как усилить семена, какие ошибки не допустить).\n"
+            "- В clarity_level оцени, насколько чётко сформулирована проблема (high / medium / low).\n"
+            "- Если проблема сформулирована расплывчато, установи needs_clarification=true и заполни clarifying_questions (0–3 коротких уточняющих вопроса).\n"
+            "- Если проблема достаточно ясна, оставь needs_clarification=false и clarifying_questions пустым списком."
+            "\nИспользуй предоставленные корреляции и концепции как точки опоры для рассуждений, "
+            "но формируй решение, исходя из принципов кармического менеджмента, а не механического совпадения текста."
         ),
     )
     
@@ -61,16 +100,42 @@ def create_problem_agent() -> Agent[ProblemContext, ProblemSolution]:
         prompt = f"Проблема пользователя {context.user_name}: {context.problem_description}\n\n"
         
         if context.correlations:
-            prompt += "Найденные корреляции из базы знаний:\n"
+            prompt += "Найденные корреляции из базы знаний (примеры, на которые можно опереться):\n"
             for corr in context.correlations[:3]:
                 prompt += f"- Проблема: {corr.get('problem', '')}\n"
-                prompt += f"  Причина: {corr.get('cause', '')}\n"
+                prompt += f"  Причина (cause / imprint): {corr.get('cause', '') or corr.get('imprint', '')}\n"
+                if corr.get("sphere"):
+                    prompt += f"  Сфера: {corr.get('sphere', '')}\n"
+                if corr.get("quality"):
+                    prompt += f"  Качество (из 7): {corr.get('quality', '')}\n"
+                if corr.get("principle"):
+                    prompt += f"  Принцип: {corr.get('principle', '')}\n"
+                if corr.get("number"):
+                    prompt += f"  № в расширенной таблице: {corr.get('number', '')}\n"
                 prompt += f"  Решение: {corr.get('solution', '')}\n\n"
         
         if context.concepts:
             prompt += "Связанные концепции:\n"
             for concept in context.concepts[:2]:
                 prompt += f"- {concept.get('title', '')}: {concept.get('content', '')[:100]}...\n"
+        
+        if context.rules:
+            prompt += "\nКлючевые правила кармического менеджмента, на которые можно опереться:\n"
+            for rule in context.rules[:2]:
+                title = rule.get("title", "")
+                number = rule.get("number")
+                short = (rule.get("content", "") or "")[:180]
+                if number is not None:
+                    prompt += f"- Правило #{number}: {title}\n  {short}...\n"
+                else:
+                    prompt += f"- {title}: {short}...\n"
+
+        if context.practices:
+            prompt += "\nПрактики и упражнения, которые можно использовать в плане:\n"
+            for practice in context.practices[:2]:
+                name = practice.get("name") or practice.get("title", "")
+                short = (practice.get("content", "") or "")[:180]
+                prompt += f"- {name}: {short}...\n"
         
         return prompt
     
@@ -94,7 +159,9 @@ async def solve_problem(
     user_name: str,
     problem_description: str,
     correlations: list[dict],
-    concepts: list[dict]
+    concepts: list[dict],
+    rules: list[dict],
+    practices: list[dict],
 ) -> ProblemSolution:
     """
     Solve user's problem using AI and knowledge base
@@ -114,7 +181,9 @@ async def solve_problem(
         problem_description=problem_description,
         user_name=user_name,
         correlations=correlations,
-        concepts=concepts
+        concepts=concepts,
+        rules=rules,
+        practices=practices,
     )
     
     prompt = (
@@ -123,6 +192,8 @@ async def solve_problem(
         "2. Раскрой механизм imprint_logic (почему это работает именно так).\n"
         "3. Сформулируй STOP, START и GROW действия.\n"
         "4. Составь план шагов и дай совет по ускорению (success_tip).\n"
+        "5. При возможности зафиксируй clarity_level, karmic_pattern, seed_strategy_summary, "
+        "coffee_meditation_script и partner_actions (если информация достаточно ясна).\n"
         "Будь вдохновляющим, но очень точным в кармической логике."
     )
     

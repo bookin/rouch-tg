@@ -27,11 +27,27 @@ async def main():
     print(f"✅ Loaded {len(items)} knowledge items")
     
     # Print breakdown
-    types = {}
+    types: dict[str, int] = {}
     for item in items:
         types[item.type] = types.get(item.type, 0) + 1
     for item_type, count in types.items():
         print(f"   - {item_type}: {count}")
+
+    # Сопоставление типов KnowledgeItem с коллекциями Qdrant
+    collection_counts = {
+        "correlations": types.get("correlation", 0),
+        "concepts": types.get("concept", 0),
+        "quotes": types.get("quote", 0),
+        "practices": types.get("practice", 0),
+        "rules": types.get("rule", 0),
+    }
+
+    print("\n"); print("Collections to index in Qdrant:")
+    for collection_name, count in collection_counts.items():
+        if count:
+            print(f"   - {collection_name}: {count} points")
+        else:
+            print(f"   - {collection_name}: 0 (will be recreated empty if collection exists)")
     
     # 2. Create collections in Qdrant
     print("\n🔄 Indexing in Qdrant...")

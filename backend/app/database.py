@@ -3,6 +3,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from typing import AsyncGenerator
+import json
 from app.config import get_settings
 
 settings = get_settings()
@@ -10,13 +11,18 @@ settings = get_settings()
 # Convert postgresql:// to postgresql+asyncpg://
 DATABASE_URL = settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
 
+# Custom JSON serializer to keep unicode characters unescaped
+def json_serializer(obj):
+    return json.dumps(obj, ensure_ascii=False)
+
 # Create async engine with configurable pool settings
 engine = create_async_engine(
     DATABASE_URL,
     echo=settings.DB_ECHO,
     pool_pre_ping=True,
     pool_size=settings.DB_POOL_SIZE,
-    max_overflow=settings.DB_MAX_OVERFLOW
+    max_overflow=settings.DB_MAX_OVERFLOW,
+    json_serializer=json_serializer
 )
 
 # Create async session factory
