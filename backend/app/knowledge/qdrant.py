@@ -6,7 +6,7 @@ from app.models.knowledge import KnowledgeItem
 from .embeddings import embed_text
 from app.config import get_settings
 from app.knowledge.cache_decorator import cache_quote, cache_correlation
-from datetime import datetime
+from datetime import datetime, UTC
 import hashlib
 import random
 import uuid
@@ -161,7 +161,7 @@ class QdrantKnowledgeBase:
                     with_vectors=False,
                 )
                 if points:
-                    rng = random.Random(datetime.utcnow().strftime("%Y-%m-%d"))
+                    rng = random.Random(datetime.now(UTC).strftime("%Y-%m-%d"))
                     point = rng.choice(points)
                     return {
                         "text": point.payload.get("content", ""),

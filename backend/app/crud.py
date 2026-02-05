@@ -2,7 +2,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, UTC
 from uuid import uuid4
 
 from app.models.db_models import (
@@ -48,14 +48,14 @@ async def get_or_create_user(db: AsyncSession, telegram_id: int, first_name: str
         telegram_id=telegram_id,
         first_name=first_name,
         username=username,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     ).on_conflict_do_update(
         index_elements=['telegram_id'],
         set_={
             'first_name': first_name,
             'username': username,
-            'updated_at': datetime.utcnow()
+            'updated_at': datetime.now(UTC),
         }
     )
     
@@ -170,7 +170,7 @@ async def ensure_default_partner_groups(db: AsyncSession, user_id: int) -> List[
         return existing_groups
 
     groups: list[PartnerGroupDB] = []
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     for g in DEFAULT_GROUPS:
         groups.append(
             PartnerGroupDB(
@@ -205,7 +205,7 @@ async def update_user_streak(db: AsyncSession, user_id: int, streak_days: int):
     user = result.scalar_one_or_none()
     if user:
         user.streak_days = streak_days
-        user.updated_at = datetime.utcnow()
+        user.updated_at = datetime.now(UTC)
         await db.flush()
 
 
@@ -217,7 +217,7 @@ async def increment_user_seeds_count(db: AsyncSession, user_id: int):
     user = result.scalar_one_or_none()
     if user:
         user.total_seeds += 1
-        user.updated_at = datetime.utcnow()
+        user.updated_at = datetime.now(UTC)
         await db.flush()
 
 
@@ -229,7 +229,7 @@ async def update_user_focus(db: AsyncSession, user_id: int, focus: str) -> bool:
     user = result.scalar_one_or_none()
     if user:
         user.current_focus = focus
-        user.updated_at = datetime.utcnow()
+        user.updated_at = datetime.now(UTC)
         await db.flush()
         return True
     return False
@@ -323,7 +323,7 @@ async def save_daily_suggestions(db: AsyncSession, user_id: int, suggestions: Li
             description=s["description"],
             why=s["why"],
             completed=False,
-            date=datetime.utcnow()
+            date=datetime.now(UTC),
         )
         for s in suggestions
     ]
@@ -408,7 +408,7 @@ async def reset_user_progress(db: AsyncSession, user_id: int):
         user.last_onboarding_update = None
         user.last_morning_message = None
         user.last_evening_message = None
-        
-        user.updated_at = datetime.utcnow()
+
+        user.updated_at = datetime.now(UTC)
         
     await db.flush()

@@ -1,7 +1,7 @@
 """User models"""
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, UTC
 
 
 class UserProfile(BaseModel):
@@ -31,8 +31,8 @@ class UserProfile(BaseModel):
     current_focus: Optional[str] = None  # Current problem area
     
     # Timestamps
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     last_onboarding_update: Optional[datetime] = None
     
     model_config = ConfigDict(from_attributes=True)

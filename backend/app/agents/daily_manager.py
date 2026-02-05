@@ -197,19 +197,18 @@ class DailyManagerAgent:
             }
     
     async def _get_today_seeds(self, user_id: int) -> int:
-        """Get count of seeds planted today"""
+        """Get count of seeds planted today (UTC-based day)."""
         from app.database import AsyncSessionLocal
         from app.models.db_models import SeedDB
         from sqlalchemy import select, func
-        from datetime import datetime
-        
+
         try:
             async with AsyncSessionLocal() as db:
-                today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+                today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
                 result = await db.execute(
                     select(func.count(SeedDB.id)).where(
                         SeedDB.user_id == user_id,
-                        SeedDB.timestamp >= today_start
+                        SeedDB.timestamp >= today_start,
                     )
                 )
                 return result.scalar() or 0
@@ -217,20 +216,19 @@ class DailyManagerAgent:
             return 0
     
     async def _get_completed_actions(self, user_id: int) -> list:
-        """Get completed actions for today"""
+        """Get completed actions for today (UTC-based day)."""
         from app.database import AsyncSessionLocal
         from app.models.db_models import PartnerActionDB
         from sqlalchemy import select
-        from datetime import datetime
-        
+
         try:
             async with AsyncSessionLocal() as db:
-                today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+                today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
                 result = await db.execute(
                     select(PartnerActionDB).where(
                         PartnerActionDB.user_id == user_id,
                         PartnerActionDB.timestamp >= today_start,
-                        PartnerActionDB.completed == True
+                        PartnerActionDB.completed == True,
                     )
                 )
                 return result.scalars().all()

@@ -1,7 +1,7 @@
 """FastAPI endpoints for Mini App"""
 from fastapi import APIRouter, Depends, HTTPException, Header, status
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, UTC
 from pydantic import BaseModel
 from app.models.user import UserProfile
 from app.models.seed import Seed
@@ -487,14 +487,23 @@ async def add_problem_to_calendar(
     from app.crud import get_user_by_telegram_id
     from app.models.db_models import PartnerActionDB
     from datetime import timedelta
+    from zoneinfo import ZoneInfo
     import uuid
     
     async with AsyncSessionLocal() as db:
         user_db = await get_user_by_telegram_id(db, user.telegram_id)
         if not user_db:
             raise HTTPException(status_code=404, detail="User not found")
-            
-        start = payload.start_date or datetime.utcnow()
+
+        # Normalize start date to UTC-aware datetime
+        if payload.start_date is not None:
+            start = payload.start_date
+            user_tz = ZoneInfo(user.timezone or "UTC")
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=user_tz)
+            start = start.astimezone(UTC)
+        else:
+            start = datetime.now(UTC)
         
         actions = []
         for i in range(30):

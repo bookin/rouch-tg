@@ -1,7 +1,7 @@
 """SQLAlchemy ORM models for database"""
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, Text, JSON, ForeignKey, LargeBinary, PrimaryKeyConstraint
+from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, Text, JSON, ForeignKey, LargeBinary, PrimaryKeyConstraint, func
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, UTC
 from app.database import Base
 
 
@@ -33,11 +33,11 @@ class UserDB(Base):
     current_focus = Column(String, nullable=True)
     
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    last_onboarding_update = Column(DateTime, nullable=True)
-    last_morning_message = Column(DateTime, nullable=True)
-    last_evening_message = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    last_onboarding_update = Column(DateTime(timezone=True), nullable=True)
+    last_morning_message = Column(DateTime(timezone=True), nullable=True)
+    last_evening_message = Column(DateTime(timezone=True), nullable=True)
     
     # Relationships
     seeds = relationship("SeedDB", back_populates="user", lazy="selectin")
@@ -53,7 +53,7 @@ class SeedDB(Base):
     
     id = Column(String, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     
     action_type = Column(String, nullable=False, index=True)
     description = Column(Text, nullable=False)
@@ -82,7 +82,7 @@ class PartnerGroupDB(Base):
     description = Column(Text, nullable=False)
     is_default = Column(Boolean, default=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class PartnerDB(Base):
@@ -104,7 +104,7 @@ class PartnerDB(Base):
     phone = Column(String, nullable=True)
     notes = Column(Text, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     # Relationships
     user = relationship("UserDB", back_populates="partners")
@@ -140,7 +140,7 @@ class HabitDB(Base):
     duration = Column(Integer, default=30)
     
     streak = Column(Integer, default=0)
-    last_completed = Column(DateTime, nullable=True)
+    last_completed = Column(DateTime(timezone=True), nullable=True)
     completion_rate = Column(Float, default=0.0)
     
     user_restrictions = Column(JSON, default=list)
@@ -157,7 +157,7 @@ class HabitCompletionDB(Base):
     id = Column(String, primary_key=True)
     habit_id = Column(String, ForeignKey("habits.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    completed_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime(timezone=True), server_default=func.now())
     
     duration_actual = Column(Integer, nullable=True)
     notes = Column(Text, nullable=True)
@@ -173,7 +173,7 @@ class PartnerActionDB(Base):
     partner_name = Column(String, nullable=True)
     seed_id = Column(String, ForeignKey("seeds.id"), nullable=True)
     
-    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     action = Column(Text, nullable=False)
     completed = Column(Boolean, default=False, index=True)
 
@@ -187,7 +187,7 @@ class ProblemHistoryDB(Base):
     problem_text = Column(Text, nullable=False)
     solution_json = Column(JSON, nullable=False)
     is_active = Column(Boolean, default=False, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     
     # Relationships
     user = relationship("UserDB", back_populates="problem_history")
@@ -203,7 +203,7 @@ class DailySuggestionDB(Base):
     description = Column(Text, nullable=False)
     why = Column(Text, nullable=False)
     completed = Column(Boolean, default=False, index=True)
-    date = Column(DateTime, default=datetime.utcnow, index=True)
+    date = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     seed_id = Column(String, ForeignKey("seeds.id", ondelete="SET NULL"), nullable=True)
     
     # Relationships

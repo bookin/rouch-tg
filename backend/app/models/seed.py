@@ -1,7 +1,7 @@
 """Seed and practice models"""
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, UTC
 from uuid import uuid4
 
 
@@ -10,7 +10,7 @@ class Seed(BaseModel):
     
     id: str = Field(default_factory=lambda: str(uuid4()))
     user_id: int
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     
     # Action details
     action_type: str  # 'giving', 'kindness', 'patience', 'effort', 'concentration', 'wisdom'
@@ -82,7 +82,7 @@ class HabitCompletion(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     habit_id: str
     user_id: int
-    completed_at: datetime = Field(default_factory=datetime.utcnow)
+    completed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     
     # Optional details
     duration_actual: Optional[int] = None  # actual minutes

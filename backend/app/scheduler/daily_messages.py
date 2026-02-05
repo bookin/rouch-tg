@@ -103,8 +103,8 @@ class MessageScheduler:
                                 msg["message"]
                             )
                             if success:
-                                # Update last sent time
-                                user.last_morning_message = datetime.utcnow()
+                                # Update last sent time (store in UTC)
+                                user.last_morning_message = datetime.now(timezone.utc)
                                 await db.flush()
                                 morning_sent += 1
                             else:
@@ -143,8 +143,8 @@ class MessageScheduler:
                                 msg["message"]
                             )
                             if success:
-                                # Update last sent time
-                                user.last_evening_message = datetime.utcnow()
+                                # Update last sent time (store in UTC)
+                                user.last_evening_message = datetime.now(timezone.utc)
                                 await db.flush()
                                 evening_sent += 1
                             else:

@@ -168,7 +168,7 @@ async def save_onboarding_progress(telegram_id: int, step: str, answer: Any):
     """
     from app.database import AsyncSessionLocal
     from app.crud import get_user_by_telegram_id
-    from datetime import datetime
+    from datetime import datetime, UTC
     
     step_info = ONBOARDING_STEPS.get(step)
     if not step_info:
@@ -195,7 +195,7 @@ async def save_onboarding_progress(telegram_id: int, step: str, answer: Any):
         # 'partners' is the last interaction before 'complete'
         next_step_name = get_next_step(step)
         if next_step_name == OnboardingSteps.COMPLETE or step == OnboardingSteps.PARTNERS:
-            user_db.last_onboarding_update = datetime.utcnow()
+            user_db.last_onboarding_update = datetime.now(UTC)
             
         await db.commit()
 

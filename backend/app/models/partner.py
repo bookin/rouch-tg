@@ -1,7 +1,7 @@
 """Partner and partner group models"""
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, UTC
 from uuid import uuid4
 
 
@@ -14,7 +14,7 @@ class PartnerGroup(BaseModel):
     description: str
     is_default: bool = False  # True for 4 default groups
     user_id: int
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -51,7 +51,7 @@ class Partner(BaseModel):
     # Notes
     notes: Optional[str] = None
     
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -64,7 +64,7 @@ class PartnerAction(BaseModel):
     partner_id: str
     seed_id: Optional[str] = None  # Linked seed if applicable
     
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     action: str  # Description of action taken
     
     model_config = ConfigDict(from_attributes=True)

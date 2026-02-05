@@ -770,7 +770,7 @@ async def process_action_done(message: Message, state: FSMContext):
     from app.database import AsyncSessionLocal
     from app.crud import get_user_by_telegram_id, increment_user_seeds_count
     from app.models.db_models import PartnerActionDB
-    from datetime import datetime
+    from datetime import datetime, UTC
     import uuid
     
     text = message.text.strip()
@@ -802,8 +802,8 @@ async def process_action_done(message: Message, state: FSMContext):
                     partner_id=None,
                     partner_name=partner_name,
                     action=action_text,
-                    timestamp=datetime.utcnow(),
-                    completed=True
+                    timestamp=datetime.now(UTC),
+                    completed=True,
                 )
                 db.add(action)
                 
@@ -854,7 +854,8 @@ async def process_seed(message: Message, state: FSMContext):
     from app.database import AsyncSessionLocal
     from app.crud import get_user_by_telegram_id, create_seed, increment_user_seeds_count
     from app.models.seed import Seed
-    from datetime import datetime, timedelta
+    from datetime import datetime, UTC, timedelta
+    from zoneinfo import ZoneInfo
     import uuid
     
     description = message.text.strip()
@@ -865,10 +866,11 @@ async def process_seed(message: Message, state: FSMContext):
             
             if user_db:
                 # Create seed
+                now_utc = datetime.now(UTC)
                 seed = Seed(
                     id=str(uuid.uuid4()),
                     user_id=user_db.id,
-                    timestamp=datetime.utcnow(),
+                    timestamp=now_utc,
                     action_type="kindness",
                     description=description,
                     partner_group="world",
@@ -882,11 +884,14 @@ async def process_seed(message: Message, state: FSMContext):
                 await create_seed(db, seed)
                 await increment_user_seeds_count(db, user_db.id)
                 await db.commit()
-                
+
                 logger.info(f"User {message.from_user.id} planted seed: {description}")
-                
-                maturation_date = datetime.utcnow() + timedelta(days=21)
-                
+
+                # Calculate maturation date in user's local timezone for display
+                user_tz = ZoneInfo(user_db.timezone or "UTC")
+                maturation_utc = now_utc + timedelta(days=21)
+                maturation_date = maturation_utc.astimezone(user_tz)
+
                 await message.answer(
                     f"🌱 Семя посеяно!\n\n"
                     f"📝 {description}\n\n"

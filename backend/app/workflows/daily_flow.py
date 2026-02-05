@@ -6,7 +6,7 @@ from app.ai import generate_morning_message, generate_evening_message
 from app.database import AsyncSessionLocal
 from app.models.db_models import SeedDB, PartnerActionDB
 from sqlalchemy import select, func
-from datetime import datetime
+from datetime import datetime, UTC
 
 
 class DailyFlowWorkflow:
@@ -138,7 +138,7 @@ class DailyFlowWorkflow:
         
         try:
             async with AsyncSessionLocal() as db:
-                today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+                today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
                 
                 # Count seeds
                 seeds_result = await db.execute(
