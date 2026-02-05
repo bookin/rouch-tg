@@ -6,8 +6,10 @@ from pydantic import BaseModel
 from app.models.user import UserProfile
 from app.models.seed import Seed
 from uuid import uuid4
+import logging
 
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Mini App"])
 
 
@@ -257,9 +259,8 @@ async def get_daily_actions(user: UserProfile = Depends(get_current_user)):
         actions = result.get("actions", [])
         
         return {"actions": actions}
-        
     except Exception as e:
-        print(e)
+        logger.error(f"Error getting daily actions: {e}", exc_info=True)
         # Fallback to default actions
         actions = [
             {
@@ -335,8 +336,8 @@ async def get_daily_quote(user: UserProfile = Depends(get_current_user)):
         # Get quote based on user focus area
         quote = await qdrant.get_daily_quote(user.current_focus)
         return quote
-        
     except Exception as e:
+        logger.error(f"Error getting daily quote: {e}", exc_info=True)
         # Fallback quote
         return {
             "text": "Даяние приносит богатство, но не размер суммы важен, а щедрое состояние ума",
@@ -380,8 +381,8 @@ async def get_seeds(
             ]
             
             return {"seeds": seeds}
-            
     except Exception as e:
+        logger.error(f"Error getting seeds for user {user.id}: {e}", exc_info=True)
         return {"seeds": []}
 
 
@@ -416,6 +417,7 @@ async def create_seed_endpoint(
             await db.commit()
             return SeedCreateResponse(success=True, seed_id=seed_db.id).model_dump()
     except Exception as e:
+        logger.error(f"Error creating seed via API: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -652,7 +654,8 @@ async def get_practices(user: UserProfile = Depends(get_current_user)):
         qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
         practices = await qdrant.search_practice(need="общее развитие", restrictions=None, limit=10)
         return {"practices": practices}
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error getting practices: {e}", exc_info=True)
         return {"practices": []}
 
 
@@ -684,7 +687,8 @@ async def get_habits(user: UserProfile = Depends(get_current_user)):
                 for h in habits_db
             ]
             return {"habits": habits}
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error getting habits: {e}", exc_info=True)
         return {"habits": []}
 
 

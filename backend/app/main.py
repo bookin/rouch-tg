@@ -59,12 +59,12 @@ async def lifespan(app: FastAPI):
                 scheduler.stop()
                 print("✅ Scheduler stopped")
             except Exception as e:
-                print(f"Error stopping scheduler: {e}")
+                logger.error(f"Error stopping scheduler: {e}", exc_info=True)
         
         try:
             await stop_bot()
         except Exception as e:
-            print(f"Error stopping bot: {e}")
+            logger.error(f"Error stopping bot: {e}", exc_info=True)
         
         if bot_task:
             try:
@@ -80,7 +80,7 @@ async def lifespan(app: FastAPI):
             await close_cache()
             print("✅ Cache closed")
         except Exception as e:
-            print(f"Error closing cache: {e}")
+            logger.error(f"Error closing cache: {e}", exc_info=True)
 
 
 # Create FastAPI app

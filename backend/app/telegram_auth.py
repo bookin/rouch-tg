@@ -3,7 +3,11 @@ import hmac
 import hashlib
 from urllib.parse import parse_qsl
 from typing import Optional, Dict
+import logging
 from app.config import get_settings
+
+
+logger = logging.getLogger(__name__)
 
 
 def validate_telegram_webapp_data(init_data: str) -> Optional[Dict[str, str]]:
@@ -58,7 +62,7 @@ def validate_telegram_webapp_data(init_data: str) -> Optional[Dict[str, str]]:
         return parsed_data
         
     except Exception as e:
-        print(f"Error validating Telegram data: {e}")
+        logger.error(f"Error validating Telegram data: {e}", exc_info=True)
         return None
 
 
@@ -89,5 +93,5 @@ def extract_user_from_init_data(parsed_data: Dict[str, str]) -> Optional[Dict]:
         }
         
     except Exception as e:
-        print(f"Error extracting user: {e}")
+        logger.error(f"Error extracting Telegram user data: {e}", exc_info=True)
         return None

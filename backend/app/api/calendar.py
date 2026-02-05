@@ -4,11 +4,13 @@ from typing import Dict, Any
 from datetime import date, datetime
 from pydantic import BaseModel
 from sqlalchemy import select, func, literal
+import logging
 
 from app.models.user import UserProfile
 from app.api.webapp import get_current_user
 
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/calendar", tags=["Calendar"])
 
 
@@ -169,7 +171,8 @@ async def get_calendar_data(
                 "practices": practices,
                 "partnerActions": partner_actions
             }
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error getting calendar data for user {user.id}: {e}", exc_info=True)
         return {"seeds": [], "practices": [], "partnerActions": []}
 
 
@@ -253,7 +256,8 @@ async def get_calendar_stats(
                 "streakDays": user_db.streak_days,
                 "topPartners": top_partners
             }
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error getting calendar stats for user {user.id}: {e}", exc_info=True)
         return CalendarStatsResponse(
             seedsCount=0,
             practicesCount=0,

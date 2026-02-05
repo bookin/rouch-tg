@@ -2,10 +2,12 @@
 from typing import List, Optional
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import logging
 
 # Global model instance
 _model = None
 _executor = ThreadPoolExecutor(max_workers=1)
+logger = logging.getLogger(__name__)
 
 def _get_model():
     """Load model in a separate thread to avoid blocking"""
@@ -16,7 +18,7 @@ def _get_model():
             # Use a lightweight multilingual model
             _model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
         except Exception as e:
-            print(f"Error loading embedding model: {e}")
+            logger.error(f"Error loading embedding model: {e}", exc_info=True)
             return None
     return _model
 

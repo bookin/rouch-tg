@@ -10,6 +10,10 @@ from datetime import datetime, UTC
 import hashlib
 import random
 import uuid
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 class QdrantKnowledgeBase:
@@ -52,7 +56,10 @@ class QdrantKnowledgeBase:
             print(f"     • Deleted existing collection '{name}'")
         except Exception as e:
             # Часто это просто "collection not found" при первом запуске
-            print(f"     • No existing collection '{name}' to delete or delete failed: {e}")
+            logger.warning(
+                f"No existing collection '{name}' to delete or delete failed: {e}",
+                exc_info=True,
+            )
         
         self.client.create_collection(
             collection_name=name,
@@ -136,7 +143,7 @@ class QdrantKnowledgeBase:
             
             return enriched_results
         except Exception as e:
-            print(f"Error searching correlations: {e}")
+            logger.error(f"Error searching correlations in Qdrant: {e}", exc_info=True)
             return []
     
     @cache_quote()
@@ -180,7 +187,7 @@ class QdrantKnowledgeBase:
             return await self._get_fallback_quote()
             
         except Exception as e:
-            print(f"Error getting quote: {e}")
+            logger.error(f"Error getting daily quote from Qdrant: {e}", exc_info=True)
             return await self._get_fallback_quote()
     
     async def search_practice(
@@ -224,7 +231,7 @@ class QdrantKnowledgeBase:
             return practices
             
         except Exception as e:
-            print(f"Error searching practices: {e}")
+            logger.error(f"Error searching practices in Qdrant: {e}", exc_info=True)
             return []
     
     async def search_rules(self, query: str, limit: int = 3) -> List[Dict[str, Any]]:
@@ -256,7 +263,7 @@ class QdrantKnowledgeBase:
 
             return rules
         except Exception as e:
-            print(f"Error searching rules: {e}")
+            logger.error(f"Error searching rules in Qdrant: {e}", exc_info=True)
             return []
     
     async def search_concepts(self, query: str, limit: int = 3) -> List[Dict[str, Any]]:
@@ -283,7 +290,7 @@ class QdrantKnowledgeBase:
             ]
             
         except Exception as e:
-            print(f"Error searching concepts: {e}")
+            logger.error(f"Error searching concepts in Qdrant: {e}", exc_info=True)
             return []
     
     async def _get_fallback_quote(self) -> Dict[str, Any]:

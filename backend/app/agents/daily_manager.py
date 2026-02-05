@@ -1,11 +1,15 @@
 """Daily Manager Agent - communicates with users twice a day"""
 from datetime import datetime, UTC
 from typing import Dict, Any
+import logging
 from pydantic import BaseModel
 from app.models.user import UserProfile
 from app.knowledge.qdrant import QdrantKnowledgeBase
 from app.workflows.daily_flow import DailyFlowWorkflow
 from app.ai import generate_morning_message, generate_evening_message
+
+
+logger = logging.getLogger(__name__)
 
 
 class ManagerPersonality(BaseModel):
@@ -143,7 +147,7 @@ class DailyManagerAgent:
             }
             
         except Exception as e:
-            print(f"Error generating morning message: {e}")
+            logger.error(f"Error generating morning message for user {user_id}: {e}", exc_info=True)
             # Fallback to workflow if AI fails
             result = await self.daily_flow.morning_workflow(user)
             return {
@@ -187,6 +191,7 @@ class DailyManagerAgent:
             }
             
         except Exception as e:
+            logger.error(f"Error generating evening message for user {user.id}: {e}", exc_info=True)
             # Fallback
             result = await self.daily_flow.evening_workflow(user)
             return {
@@ -212,7 +217,8 @@ class DailyManagerAgent:
                     )
                 )
                 return result.scalar() or 0
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error getting today's seeds for user {user_id}: {e}", exc_info=True)
             return 0
     
     async def _get_completed_actions(self, user_id: int) -> list:
@@ -232,7 +238,8 @@ class DailyManagerAgent:
                     )
                 )
                 return result.scalars().all()
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error getting completed actions for user {user_id}: {e}", exc_info=True)
             return []
     
     async def _analyze_recent_progress(self, user: UserProfile) -> Dict[str, Any]:

@@ -2,8 +2,11 @@
 import json
 from typing import Optional, Any
 from datetime import timedelta
+import logging
 import redis.asyncio as redis
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class RedisCache:
@@ -28,7 +31,7 @@ class RedisCache:
             self._connected = True
             print("✅ Redis connected")
         except Exception as e:
-            print(f"⚠️  Redis connection failed: {e}")
+            logger.error(f"Redis connection failed: {e}", exc_info=True)
             self._connected = False
     
     async def close(self):
@@ -47,7 +50,7 @@ class RedisCache:
             if value:
                 return json.loads(value)
         except Exception as e:
-            print(f"Redis get error: {e}")
+            logger.error(f"Redis get error for key {key}: {e}", exc_info=True)
         
         return None
     
@@ -68,7 +71,7 @@ class RedisCache:
             else:
                 await self.redis.set(key, serialized)
         except Exception as e:
-            print(f"Redis set error: {e}")
+            logger.error(f"Redis set error for key {key}: {e}", exc_info=True)
     
     async def delete(self, key: str):
         """Delete key from cache"""
@@ -78,7 +81,7 @@ class RedisCache:
         try:
             await self.redis.delete(key)
         except Exception as e:
-            print(f"Redis delete error: {e}")
+            logger.error(f"Redis delete error for key {key}: {e}", exc_info=True)
     
     async def exists(self, key: str) -> bool:
         """Check if key exists"""
@@ -87,7 +90,8 @@ class RedisCache:
         
         try:
             return await self.redis.exists(key) > 0
-        except Exception:
+        except Exception as e:
+            logger.error(f"Redis exists error for key {key}: {e}", exc_info=True)
             return False
 
 
