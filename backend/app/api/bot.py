@@ -656,7 +656,7 @@ async def process_problem_clarification(message: Message, state: FSMContext):
             )
 
             response_text = (
-                f"🧐 **Уточнённый анализ ситуации:**\n\n"
+                f"🧐 **Анализ ситуации:**\n\n"
                 f"**Корень проблемы:** {solution.get('root_cause')}\n\n"
                 f"🌱 **Как это работает (семена):**\n{solution.get('imprint_logic')}\n\n"
                 f"🛑 **Что прекратить (Stop):** {solution.get('stop_action')}\n"

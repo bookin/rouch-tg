@@ -65,12 +65,26 @@ class DailyManagerAgent:
             },
         ]
     
-    async def morning_message(self, user_id: int, first_name: str, focus: str | None, streak_days: int, total_seeds: int) -> Dict[str, Any]:
+    async def morning_message(
+        self,
+        user_id: int,
+        first_name: str,
+        focus: str | None,
+        streak_days: int,
+        total_seeds: int,
+    ) -> Dict[str, Any]:
         """Generate morning message with quote and daily actions using AI"""
         from app.database import AsyncSessionLocal
         from app.crud import get_daily_suggestions, save_daily_suggestions
         
         try:
+            ai_message = await generate_morning_message(
+                user_name=first_name,
+                focus=focus,
+                streak_days=streak_days,
+                total_seeds=total_seeds,
+            )
+
             now = datetime.now(UTC)
             async with AsyncSessionLocal() as db:
                 # 1. Try to get from database
@@ -85,28 +99,24 @@ class DailyManagerAgent:
                             "partner_name": self._get_partner_name(s.group),
                             "description": s.description,
                             "why": s.why,
-                            "completed": s.completed
+                            "completed": s.completed,
                         }
                         for s in existing_suggestions
                     ]
                 else:
                     # 2. Generate new if not found
                     print(f"🪄 Generating NEW suggestions for user {user_id}")
-                    ai_message = await generate_morning_message(
-                        user_name=first_name,
-                        focus=focus,
-                        streak_days=streak_days,
-                        total_seeds=total_seeds
-                    )
                     
                     templates = self._action_templates()
                     to_save = []
                     for template, action_text in zip(templates, ai_message.actions[:4]):
-                        to_save.append({
-                            "group": template["group"],
-                            "description": action_text,
-                            "why": template["why"]
-                        })
+                        to_save.append(
+                            {
+                                "group": template["group"],
+                                "description": action_text,
+                                "why": template["why"],
+                            }
+                        )
                     
                     saved_objs = await save_daily_suggestions(db, user_id, to_save)
                     await db.commit()
@@ -118,14 +128,14 @@ class DailyManagerAgent:
                             "partner_name": self._get_partner_name(s.group),
                             "description": s.description,
                             "why": s.why,
-                            "completed": s.completed
+                            "completed": s.completed,
                         }
                         for s in saved_objs
                     ]
 
             # Get quote from Qdrant
             quote = await self.qdrant.get_daily_quote(focus)
-            
+
             # Format message
             message = (
                 f"{ai_message.greeting}\n\n"
@@ -143,18 +153,26 @@ class DailyManagerAgent:
                 "message": message,
                 "quote": quote,
                 "actions": actions,
-                "time": "morning"
+                "time": "morning",
             }
             
         except Exception as e:
             logger.error(f"Error generating morning message for user {user_id}: {e}", exc_info=True)
             # Fallback to workflow if AI fails
+            user = UserProfile(
+                id=user_id,
+                telegram_id=0,
+                first_name=first_name,
+                current_focus=focus,
+                streak_days=streak_days,
+                total_seeds=total_seeds,
+            )
             result = await self.daily_flow.morning_workflow(user)
             return {
                 "message": result["message"],
                 "quote": result["quote"],
                 "actions": result["actions"],
-                "time": "morning"
+                "time": "morning",
             }
     
     async def evening_message(self, user: UserProfile) -> Dict[str, Any]:

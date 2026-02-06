@@ -169,25 +169,6 @@ export default function Problem() {
         Система проанализирует твой запрос через призму кармического менеджмента и предложит конкретный путь исправления ситуации.
       </p>
 
-      <div
-        style={{
-          marginBottom: 16,
-          padding: 12,
-          borderRadius: 12,
-          background: 'var(--tg-theme-secondary-bg-color, #f5f5f5)',
-          fontSize: '0.8rem',
-          lineHeight: 1.4,
-        }}
-      >
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>ℹ️ Как работает консультант</div>
-        <ul style={{ margin: 0, paddingLeft: 18 }}>
-          <li>основывается на принципах Diamond Cutter и Karmic Management;</li>
-          <li>использует векторную базу знаний (корреляции, правила, практики) из книг и конспектов;</li>
-          <li>анализирует запрос с помощью языковой модели через PydanticAI-агента;</li>
-          <li>не заменяет врача, юриста или психолога, а даёт кармическую оптику и план действий.</li>
-        </ul>
-      </div>
-
       {needsClarification && clarifyingQuestions.length > 0 && (
         <form
           onSubmit={onClarificationSubmit}
