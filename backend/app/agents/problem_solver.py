@@ -369,6 +369,10 @@ class ProblemSolverAgent:
 
         if not correlations:
             return []
+        
+        if intake is None:
+            # Если intake отсутствует, просто возвращаем первые limit корреляций
+            return correlations[:limit]
 
         sphere = (intake.sphere or "").lower()
         imprints = [imp.lower() for imp in intake.hypothesized_imprints or []]
