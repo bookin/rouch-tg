@@ -66,6 +66,8 @@ class SeedCreateResponse(BaseModel):
 
 class ProblemSolveRequest(BaseModel):
     problem: str
+    session_id: Optional[str] = None
+    diagnostic_answer: Optional[str] = None
 
 
 class ProblemSolveResponse(BaseModel):
@@ -92,6 +94,8 @@ class ProblemSolveResponse(BaseModel):
     # Отладочные/объяснительные слои знаний
     rules: list[dict] = []
     practices: list[dict] = []
+    # Идентификатор сессии диагностики (для многошагового режима)
+    session_id: Optional[str] = None
 
 
 async def get_current_user(
@@ -541,7 +545,21 @@ async def solve_problem_endpoint(
     settings = get_settings()
     qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
     agent = ProblemSolverAgent(qdrant)
-    solution = await agent.analyze_problem(user, payload.problem)
+
+    # Determine or create diagnostic session id for web flow
+    from uuid import uuid4
+    session_id = payload.session_id or f"web_{user.id}_{uuid4().hex[:8]}"
+
+    # Always use diagnostic mode for web problem solving flow
+    solution = await agent.analyze_problem(
+        user,
+        payload.problem,
+        session_id=session_id,
+        diagnostic_answer=payload.diagnostic_answer,
+    )
+
+    # Attach session id so client can continue diagnostic if needed
+    solution["session_id"] = session_id
 
     # Save to history только для финальных решений (без запроса уточнений)
     async with AsyncSessionLocal() as db:

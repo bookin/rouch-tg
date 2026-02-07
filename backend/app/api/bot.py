@@ -473,11 +473,11 @@ async def process_problem_description(message: Message, state: FSMContext):
             import uuid
             session_id = f"tg_{message.from_user.id}_{uuid.uuid4().hex[:8]}"
             
-            # Start intelligent diagnostic
+            # Start intelligent diagnostic (multi-step mode)
             solution = await agent.analyze_problem(
-                user_profile, 
-                problem_text, 
-                session_id=session_id
+                user_profile,
+                problem_text,
+                session_id=session_id,
             )
             
             # Check if diagnostic needs more questions
@@ -619,11 +619,12 @@ async def process_diagnostic_answer(message: Message, state: FSMContext):
             from app.models.user import UserProfile
             user_profile = UserProfile.model_validate(user_db)
             
-            # Continue diagnostic with user's answer
+            # Continue diagnostic with user's answer (structured, без текстовых маркеров)
             solution = await agent.analyze_problem(
                 user_profile,
-                f"уточнения пользователя {user_answer}",
-                session_id=session_id
+                original_problem,
+                session_id=session_id,
+                diagnostic_answer=user_answer,
             )
             
             # Check if diagnostic needs more questions

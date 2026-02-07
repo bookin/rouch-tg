@@ -59,6 +59,7 @@ class DiagnosticResult(BaseModel):
     desired_outcome: str = Field(description="Желаемый результат")
     confidence_score: float = Field(description="Общая уверенность в диагнозе")
     diagnostic_summary: str = Field(description="Краткое резюме диагностики")
+    has_error: bool = Field(default=False, description="Флаг технической ошибки в процессе диагностики")
     
     class Config:
         # Allow extra fields for flexibility
@@ -220,9 +221,23 @@ class DiagnosticSession:
             result = await self.agent.run(prompt, deps=context)
             return result.output
         except Exception as e:
-            logger.error(f"Agent tool call failed: {e}")
-            # Fallback: parse text response manually
-            return await _parse_text_fallback(context, prompt)
+            logger.error(f"Agent tool call failed: {e}", exc_info=True)
+            # Вернём структурированный результат с флагом ошибки,
+            # чтобы внешний резолвер мог отреагировать в кармическом стиле.
+            return DiagnosticResult(
+                is_complete=True,
+                final_hypothesis=None,
+                next_question=None,
+                normalized_problem=problem,
+                sphere=self.state.sphere or "общая",
+                desired_outcome=self.state.desired_outcome or "",
+                confidence_score=0.0,
+                diagnostic_summary=(
+                    "Кармический диагност сейчас не может корректно продолжить работу — "
+                    "это похоже на небольшой сбой в системе. Попробуйте повторить запрос чуть позже."
+                ),
+                has_error=True,
+            )
     
     async def continue_diagnostic(
         self, 
@@ -270,30 +285,25 @@ class DiagnosticSession:
             
             return result.output
         except Exception as e:
-            logger.error(f"Agent tool call failed in continue: {e}")
-            # Fallback: complete diagnostic after first answer
-            fallback_result = DiagnosticResult(
+            logger.error(f"Agent tool call failed in continue: {e}", exc_info=True)
+            # Вернём структурированный результат с флагом ошибки,
+            # чтобы внешний резолвер мог отреагировать в кармическом стиле.
+            return DiagnosticResult(
                 is_complete=True,
-                final_hypothesis=DiagnosticHypothesis(
-                    imprint="осуждение чужого отдыха",
-                    sphere="здоровье",
-                    confidence=0.8,
-                    evidence=["пользователь подтвердил осуждение"],
-                    target_partners=["коллеги"]
-                ),
+                final_hypothesis=None,
                 next_question=None,
-                normalized_problem=self.state.problem,
-                sphere="здоровье",
-                desired_outcome="нормальный сон и отдых",
-                confidence_score=0.8,
-                diagnostic_summary="Найдена кармическая причина: осуждение чужого отдыха влияет на собственный сон"
+                normalized_problem=self.state.problem if self.state else "",
+                sphere=(self.state.sphere if self.state and self.state.sphere else "общая"),
+                desired_outcome=(
+                    self.state.desired_outcome if self.state and self.state.desired_outcome else ""
+                ),
+                confidence_score=0.0,
+                diagnostic_summary=(
+                    "Кармический диагност сейчас не может корректно продолжить работу — "
+                    "это похоже на небольшой сбой в системе. Попробуйте повторить запрос чуть позже."
+                ),
+                has_error=True,
             )
-            
-            # Update state with fallback result
-            if fallback_result.next_question:
-                self.state.asked_questions.append(fallback_result.next_question)
-            
-            return fallback_result
 
 
 # Global session instances (in production would be stored per user/chat)
@@ -327,86 +337,3 @@ async def continue_karmic_diagnostic(
     """Continue karmic diagnostic with user answer"""
     session = get_diagnostic_session(session_id, qdrant_knowledge_base)
     return await session.continue_diagnostic(user_name, answer)
-
-
-async def _parse_text_fallback(context: DiagnosticContext, prompt: str) -> DiagnosticResult:
-    """Fallback parser when model doesn't call tools"""
-    try:
-        # Get the model directly for text completion
-        model = get_model()
-        
-        # Simple text request
-        messages = [
-            {"role": "system", "content": "Ты — кармический диагност. Отвечай кратко и по делу."},
-            {"role": "user", "content": prompt}
-        ]
-        
-        response = await model._completions_create(messages)
-        text = response.choices[0].message.content
-        
-        # Parse the text response to extract key information
-        lines = text.split('\n')
-        
-        # Find question (look for **Вопрос:** or similar)
-        question = ""
-        for line in lines:
-            if "**Вопрос**:" in line or "Вопрос:" in line:
-                question = line.split(":", 1)[1].strip().replace("*", "").replace("_", "")
-                break
-        
-        # Extract sphere and imprint from text
-        sphere = "здоровье"  # default
-        if "Здоровье" in text:
-            sphere = "здоровье"
-        elif "Финансы" in text:
-            sphere = "финансы"
-        elif "Отношения" in text:
-            sphere = "отношения"
-        
-        # Extract imprint/hypothesis
-        imprint = "осуждение"  # default
-        if "осуждение" in text.lower():
-            imprint = "осуждение"
-        elif "требование" in text.lower():
-            imprint = "требование"
-        elif "контроль" in text.lower():
-            imprint = "контроль"
-        
-        return DiagnosticResult(
-            is_complete=False,
-            final_hypothesis=None,
-            next_question=DiagnosticQuestion(
-                question=question,
-                target_imprint=imprint,
-                target_partners="коллеги, друзья",
-                rationale="Вопрос основан на анализе корреляций из базы знаний",
-                expected_answer_type="да/нет",
-                correlation_source="fallback_parser"
-            ),
-            normalized_problem=context.initial_problem,
-            sphere=sphere,
-            desired_outcome="восстановление энергии и нормального сна",
-            confidence_score=0.3,
-            diagnostic_summary="Анализ проблемы через кармические корреляции"
-        )
-        
-    except Exception as e:
-        logger.error(f"Fallback parsing failed: {e}")
-        # Ultimate fallback
-        return DiagnosticResult(
-            is_complete=False,
-            final_hypothesis=None,
-            next_question=DiagnosticQuestion(
-                question="Осуждали ли вы людей, которые отдыхают больше вас?",
-                target_imprint="осуждение",
-                target_partners="коллеги, друзья",
-                rationale="Базовый диагностический вопрос",
-                expected_answer_type="да/нет",
-                correlation_source="ultimate_fallback"
-            ),
-            normalized_problem=context.initial_problem,
-            sphere="общая",
-            desired_outcome="улучшение ситуации",
-            confidence_score=0.1,
-            diagnostic_summary="Используется базовый диагностический подход"
-        )

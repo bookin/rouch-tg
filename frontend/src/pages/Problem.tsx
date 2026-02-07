@@ -26,6 +26,7 @@ export default function Problem() {
   const [clarifyingQuestions, setClarifyingQuestions] = useState<string[]>([])
   const [clarificationText, setClarificationText] = useState('')
   const [initialProblem, setInitialProblem] = useState('')
+  const [sessionId, setSessionId] = useState<string | null>(null)
 
   const loadData = async () => {
     try {
@@ -53,7 +54,7 @@ export default function Problem() {
       setSuccess(null)
       setLoading(true)
       const currentProblem = problem.trim()
-      const data = await solveProblem(currentProblem)
+      const data = await solveProblem({ problem: currentProblem })
 
       // Если агент просит уточнения и дал 1–3 вопроса — переходим в режим уточнения
       if (data?.needs_clarification && Array.isArray(data.clarifying_questions) && data.clarifying_questions.length > 0) {
@@ -61,9 +62,11 @@ export default function Problem() {
         setClarifyingQuestions(data.clarifying_questions.slice(0, 3))
         setClarificationText('')
         setInitialProblem(currentProblem)
+        setSessionId(data.session_id || null)
         setResult(null)
       } else {
         setResult(data)
+        setSessionId(data.session_id || null)
         await loadData() // Refresh history только для финальных решений
       }
     } catch (err: any) {
@@ -82,16 +85,27 @@ export default function Problem() {
       setSuccess(null)
       setLoading(true)
 
-      const baseProblem = initialProblem || problem.trim()
-      const combinedProblem = `${baseProblem}\n\nУточнения пользователя:\n${clarificationText.trim()}`
+      if (!sessionId) {
+        setError('Сессия диагностики утеряна. Попробуй начать заново.')
+        setNeedsClarification(false)
+        setClarifyingQuestions([])
+        return
+      }
 
-      const data = await solveProblem(combinedProblem)
+      const baseProblem = initialProblem || problem.trim()
+
+      const data = await solveProblem({
+        problem: baseProblem,
+        session_id: sessionId,
+        diagnostic_answer: clarificationText.trim()
+      })
 
       // Второй заход считаем финальным, даже если агент снова попросит уточнения
       setResult(data)
       setNeedsClarification(false)
       setClarifyingQuestions([])
       setClarificationText('')
+      setSessionId(data.session_id || sessionId)
       await loadData()
     } catch (err: any) {
       setError(err?.message || 'Не удалось обработать уточнения')

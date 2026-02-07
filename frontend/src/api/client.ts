@@ -114,8 +114,14 @@ export const getHabits = async () => {
   return response.data
 }
 
-export const solveProblem = async (problem: string) => {
-  const response = await api.post('/api/problem/solve', { problem })
+export interface SolveProblemPayload {
+  problem: string
+  session_id?: string
+  diagnostic_answer?: string
+}
+
+export const solveProblem = async (payload: SolveProblemPayload) => {
+  const response = await api.post('/api/problem/solve', payload)
   return response.data
 }
 
