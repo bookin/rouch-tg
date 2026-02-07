@@ -74,7 +74,8 @@ class OnboardingState(StatesGroup):
 class ProblemState(StatesGroup):
     """States for problem solving"""
     waiting_for_description = State()
-    waiting_for_clarification = State()
+    diagnostic_in_progress = State()
+    waiting_for_diagnostic_answer = State()
 
 
 # Map generic steps to FSM states
@@ -442,11 +443,11 @@ async def start_problem_flow(callback: CallbackQuery, state: FSMContext):
 
 @router.message(ProblemState.waiting_for_description)
 async def process_problem_description(message: Message, state: FSMContext):
-    """Analyze problem using Agent"""
+    """Start intelligent diagnostic dialog"""
     from app.knowledge.qdrant import QdrantKnowledgeBase
     from app.agents.problem_solver import ProblemSolverAgent
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id, save_problem_history
+    from app.crud import get_user_by_telegram_id
     
     problem_text = message.text
     
@@ -468,68 +469,47 @@ async def process_problem_description(message: Message, state: FSMContext):
             from app.models.user import UserProfile
             user_profile = UserProfile.model_validate(user_db)
             
-            # Analyze
-            solution = await agent.analyze_problem(user_profile, problem_text)
-
-            # Если агент просит уточнения и дал 1–3 вопроса — переходим в режим уточнения
-            needs_clarification = bool(solution.get("needs_clarification")) and bool(solution.get("clarifying_questions"))
-            if needs_clarification:
-                questions: list[str] = solution.get("clarifying_questions", [])[:3]
-
-                await state.update_data(
-                    original_problem_text=problem_text,
-                    clarification_questions=questions,
-                )
-                await state.set_state(ProblemState.waiting_for_clarification)
-
-                questions_lines = [f"{idx}) {q}" for idx, q in enumerate(questions, start=1)]
-                questions_block = "\n".join(questions_lines) if questions_lines else ""
-
-                text = (
-                    "Хочу дать максимально точный кармический план, поэтому сначала задам несколько уточняющих вопросов:\n\n"
-                    f"{questions_block}\n\n"
-                    "Ответь одним сообщением (можно по пунктам), и я уточню анализ."
-                )
-
-                await message.answer(text)
-                return
-
-            # Иначе — работаем как раньше и сразу показываем анализ
+            # Generate unique session ID for this diagnostic
+            import uuid
+            session_id = f"tg_{message.from_user.id}_{uuid.uuid4().hex[:8]}"
             
-            # Save to DB immediately as inactive
-            history = await save_problem_history(
-                db, 
-                user_db.id, 
+            # Start intelligent diagnostic
+            solution = await agent.analyze_problem(
+                user_profile, 
                 problem_text, 
-                solution, 
-                is_active=False
-            )
-            await db.commit()
-            
-            await state.update_data(
-                pending_solution=solution,
-                problem_text=problem_text,
-                history_id=history.id
+                session_id=session_id
             )
             
-            response_text = (
-                f"🧐 **Анализ ситуации:**\n\n"
-                f"**Корень проблемы:** {solution.get('root_cause')}\n\n"
-                f"🌱 **Как это работает (семена):**\n{solution.get('imprint_logic')}\n\n"
-                f"🛑 **Что прекратить (Stop):** {solution.get('stop_action')}\n"
-                f"🚀 **Что начать (Start):** {solution.get('start_action')}\n"
-            )
+            # Check if diagnostic needs more questions
+            if solution.get("needs_clarification") and solution.get("clarifying_questions"):
+                # Save diagnostic state
+                await state.update_data(
+                    session_id=session_id,
+                    original_problem=problem_text,
+                    diagnostic_summary=solution.get("diagnostic_summary", ""),
+                    confidence_score=solution.get("confidence_score", 0.0)
+                )
+                await state.set_state(ProblemState.waiting_for_diagnostic_answer)
+                
+                # Show the first diagnostic question
+                question = solution["clarifying_questions"][0]
+                
+                text = (
+                    f"🔍 **Карма-диагностика**\n\n"
+                    f"{solution.get('diagnostic_summary', '')}\n\n"
+                    f"❓ **Вопрос:**\n{question}\n\n"
+                    f"Отвечай просто: 'да', 'нет' или приведи пример."
+                )
+                
+                await message.answer(text, parse_mode="Markdown")
+                return
             
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🎯 Выбрать целью", callback_data="confirm_goal")],
-                [InlineKeyboardButton(text="📱 Открыть приложение", web_app=WebAppInfo(url=settings.WEBAPP_URL))]
-            ])
-            
-            await message.answer(response_text, parse_mode="Markdown", reply_markup=kb)
+            # If diagnostic is complete, show solution immediately
+            await _show_complete_solution(message, state, problem_text, solution, user_db)
             
     except Exception as e:
-        logger.error(f"Error analyzing problem: {e}", exc_info=True)
-        await message.answer("Не удалось проанализировать проблему. Попробуй позже.")
+        logger.error(f"Error in diagnostic: {e}", exc_info=True)
+        await message.answer("Не удалось начать диагностику. Попробуй позже.")
         await state.clear()
 
 
@@ -603,77 +583,126 @@ async def confirm_goal_selection(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Ошибка при сохранении цели", show_alert=True)
 
 
-@router.message(ProblemState.waiting_for_clarification)
-async def process_problem_clarification(message: Message, state: FSMContext):
-    """Get clarification answers and run final analysis"""
+@router.message(ProblemState.waiting_for_diagnostic_answer)
+async def process_diagnostic_answer(message: Message, state: FSMContext):
+    """Continue diagnostic dialog with user's answer"""
     from app.knowledge.qdrant import QdrantKnowledgeBase
     from app.agents.problem_solver import ProblemSolverAgent
     from app.database import AsyncSessionLocal
     from app.crud import get_user_by_telegram_id, save_problem_history
-
-    clarification_text = (message.text or "").strip()
+    
+    user_answer = message.text.strip()
     data = await state.get_data()
-    original_problem = data.get("original_problem_text") or data.get("problem_text") or clarification_text
-
-    combined_problem = (
-        f"{original_problem}\n\n"
-        f"Уточнения пользователя:\n{clarification_text}"
-    )
-
+    
+    session_id = data.get("session_id")
+    original_problem = data.get("original_problem")
+    
+    if not session_id or not original_problem:
+        await message.answer("Сессия диагностики утеряна. Начни заново: /solver")
+        await state.clear()
+        return
+    
     # Show typing status
     await bot.send_chat_action(chat_id=message.chat.id, action="typing")
-
+    
     try:
         qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
         agent = ProblemSolverAgent(qdrant)
-
+        
         async with AsyncSessionLocal() as db:
             user_db = await get_user_by_telegram_id(db, message.from_user.id)
             if not user_db:
                 await message.answer("Пользователь не найден.")
                 await state.clear()
                 return
-
+            
             from app.models.user import UserProfile
             user_profile = UserProfile.model_validate(user_db)
+            
+            # Continue diagnostic with user's answer
+            solution = await agent.analyze_problem(
+                user_profile,
+                f"уточнения пользователя {user_answer}",
+                session_id=session_id
+            )
+            
+            # Check if diagnostic needs more questions
+            if solution.get("needs_clarification") and solution.get("clarifying_questions"):
+                # Continue with next question
+                question = solution["clarifying_questions"][0]
+                confidence = solution.get("confidence_score", 0.0)
+                
+                text = (
+                    f"🔍 **Карма-диагностика** (уверенность: {confidence:.1%})\n\n"
+                    f"❓ **Следующий вопрос:**\n{question}\n\n"
+                    f"Отвечай просто: 'да', 'нет' или приведи пример."
+                )
+                
+                await message.answer(text, parse_mode="Markdown")
+                return
+            
+            # Diagnostic complete - show full solution
+            await _show_complete_solution(message, state, original_problem, solution, user_db)
+            
+    except Exception as e:
+        logger.error(f"Error in diagnostic continuation: {e}", exc_info=True)
+        await message.answer("Ошибка в процессе диагностики. Попробуй позже.")
+        await state.clear()
 
-            solution = await agent.analyze_problem(user_profile, combined_problem)
 
-            # Save to DB immediately as inactive
+async def _show_complete_solution(message: Message, state: FSMContext, problem_text: str, solution: dict, user_db):
+    """Show complete solution and save to database"""
+    from app.database import AsyncSessionLocal
+    from app.crud import save_problem_history
+    
+    try:
+        async with AsyncSessionLocal() as db:
+            # Save to database
             history = await save_problem_history(
                 db, 
                 user_db.id, 
-                combined_problem, 
+                problem_text, 
                 solution, 
                 is_active=False
             )
             await db.commit()
-
+            
+            # Update state
             await state.update_data(
                 pending_solution=solution,
-                problem_text=combined_problem,
+                problem_text=problem_text,
                 history_id=history.id
             )
-
+            
+            # Format response
+            confidence = solution.get("confidence_score", 0.0)
+            diagnostic_summary = solution.get("diagnostic_summary", "")
+            
             response_text = (
-                f"🧐 **Анализ ситуации:**\n\n"
-                f"**Корень проблемы:** {solution.get('root_cause')}\n\n"
-                f"🌱 **Как это работает (семена):**\n{solution.get('imprint_logic')}\n\n"
-                f"🛑 **Что прекратить (Stop):** {solution.get('stop_action')}\n"
-                f"🚀 **Что начать (Start):** {solution.get('start_action')}\n"
+                f"🎯 **Карма-диагностика завершена**\n"
+                f"Уверенность: {confidence:.1%}\n\n"
             )
-
+            
+            if diagnostic_summary:
+                response_text += f"📋 **Анализ:** {diagnostic_summary}\n\n"
+            
+            response_text += (
+                f"🧐 **Корень проблемы:** {solution.get('root_cause')}\n\n"
+                f"🌱 **Как это работает:**\n{solution.get('imprint_logic')}\n\n"
+                f"🛑 **Что прекратить:** {solution.get('stop_action')}\n"
+                f"🚀 **Что начать:** {solution.get('start_action')}\n"
+            )
+            
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🎯 Выбрать целью", callback_data="confirm_goal")],
                 [InlineKeyboardButton(text="📱 Открыть приложение", web_app=WebAppInfo(url=settings.WEBAPP_URL))]
             ])
-
+            
             await message.answer(response_text, parse_mode="Markdown", reply_markup=kb)
-
+            
     except Exception as e:
-        logger.error(f"Error analyzing clarified problem: {e}", exc_info=True)
-        await message.answer("Не удалось проанализировать проблему. Попробуй позже.")
-        await state.clear()
+        logger.error(f"Error showing solution: {e}", exc_info=True)
+        await message.answer("Ошибка при сохранении решения. Попробуй позже.")
 
 
 @router.message(Command("today"))
