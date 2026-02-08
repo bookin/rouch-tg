@@ -1,15 +1,13 @@
 """Problem Solver Agent"""
 import logging
+import uuid
 from typing import Dict, Any, List, Optional
 from app.models.user import UserProfile
 from app.knowledge.qdrant import QdrantKnowledgeBase
-from app.workflows.problem_flow import ProblemSolverWorkflow
 from app.ai.diagnostic_agent import (
     start_karmic_diagnostic,
     continue_karmic_diagnostic,
     DiagnosticResult,
-    DiagnosticSession,
-    get_diagnostic_session,
 )
 from app.ai.problem_agent import (
     solve_problem as ai_solve_problem,
@@ -22,7 +20,6 @@ class ProblemSolverAgent:
     
     def __init__(self, qdrant: QdrantKnowledgeBase):
         self.qdrant = qdrant
-        self.workflow = ProblemSolverWorkflow(qdrant)
         self.logger = logging.getLogger(__name__)
     
     async def analyze_problem(
@@ -32,21 +29,23 @@ class ProblemSolverAgent:
         session_id: Optional[str] = None,
         diagnostic_answer: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Analyze problem and provide solution using AI.
+        """Analyze problem and provide solution using AI **only** via diagnostic flow.
 
-        If session_id is provided, works in multi-step diagnostic mode.
-        Otherwise runs direct one-shot analysis.
+        Всегда запускает или продолжает сессию диагностического агента,
+        а затем, после завершения диагностики, использует resolver (problem_agent).
+        Прямого "одношагового" режима без диагностики больше нет.
         """
 
-        if session_id:
-            return await self._handle_diagnostic_mode(
-                user=user,
-                problem=problem,
-                session_id=session_id,
-                diagnostic_answer=diagnostic_answer,
-            )
+        # Гарантируем, что у каждого анализа есть session_id для диагностики
+        if session_id is None:
+            session_id = f"auto_{user.id}_{uuid.uuid4().hex[:8]}"
 
-        return await self._handle_direct_mode(user, problem)
+        return await self._handle_diagnostic_mode(
+            user=user,
+            problem=problem,
+            session_id=session_id,
+            diagnostic_answer=diagnostic_answer,
+        )
     
     async def _handle_diagnostic_mode(
         self, 
@@ -121,78 +120,6 @@ class ProblemSolverAgent:
             # Structured karmic error instead of legacy fallback
             return self._error_solution(problem=problem, technical_message=str(e))
     
-    async def _handle_direct_mode(
-        self, 
-        user: UserProfile, 
-        problem: str
-    ) -> Dict[str, Any]:
-        """Handle direct one-shot mode without dedicated intake agent"""
-        
-        try:
-            settings = get_settings()
-
-            # Search correlations
-            correlations = await self.qdrant.search_correlation(
-                problem,
-                limit=settings.PROBLEM_SOLVER_CORRELATIONS_LIMIT,
-            )
-
-            # Search concepts, rules, practices
-            concepts = await self.qdrant.search_concepts(
-                problem,
-                limit=settings.PROBLEM_SOLVER_CONCEPTS_LIMIT,
-            )
-            rules = await self.qdrant.search_rules(
-                problem,
-                limit=settings.PROBLEM_SOLVER_RULES_LIMIT,
-            )
-            practices = await self.qdrant.search_practice(
-                need=problem,
-                restrictions=(
-                    user.physical_restrictions.split(",")
-                    if user.physical_restrictions
-                    else None
-                ),
-                limit=settings.PROBLEM_SOLVER_PRACTICES_LIMIT,
-            )
-
-            # Generate solution
-            solution = await ai_solve_problem(
-                user_name=user.first_name,
-                problem_description=problem,
-                correlations=correlations,
-                concepts=concepts,
-                rules=rules,
-                practices=practices,
-            )
-
-            return {
-                "problem": solution.problem_summary,
-                "root_cause": solution.root_cause,
-                "imprint_logic": solution.imprint_logic,
-                "stop_action": solution.stop_action,
-                "start_action": solution.start_action,
-                "grow_action": solution.grow_action,
-                "practice_steps": solution.practice_steps,
-                "expected_outcome": solution.expected_outcome,
-                "timeline_days": solution.timeline_days,
-                "success_tip": solution.success_tip,
-                "clarity_level": solution.clarity_level,
-                "karmic_pattern": solution.karmic_pattern,
-                "seed_strategy_summary": solution.seed_strategy_summary,
-                "coffee_meditation_script": solution.coffee_meditation_script,
-                "partner_actions": solution.partner_actions,
-                "needs_clarification": solution.needs_clarification,
-                "clarifying_questions": solution.clarifying_questions,
-                "correlations": correlations,
-                "concepts": concepts,
-                "rules": rules,
-                "practices": practices,
-            }
-        except Exception as e:
-            self.logger.error(f"Direct analysis failed: {str(e)}", exc_info=True)
-            return self._error_solution(problem=problem, technical_message=str(e))
-    
     async def _generate_solution_from_diagnostic(
         self,
         user: UserProfile,
@@ -264,16 +191,6 @@ class ProblemSolverAgent:
             "diagnostic_summary": diagnostic_result.diagnostic_summary,
             "confidence_score": diagnostic_result.confidence_score,
         }
-    
-    async def _full_analysis(
-        self,
-        user: UserProfile,
-        problem: str,
-        intake: Optional["ProblemIntakeResult"],
-    ) -> Dict[str, Any]:
-        """(Deprecated) kept for backward compatibility only."""
-        # This method is no longer used; direct mode handles analysis now.
-        return await self._handle_direct_mode(user, problem)
     
     async def get_practice_recommendation(
         self,
