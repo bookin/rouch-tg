@@ -1,6 +1,6 @@
 """Qdrant vector database client"""
 from typing import List, Dict, Any, Optional
-from qdrant_client import QdrantClient
+from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 from app.models.knowledge import KnowledgeItem
 from .embeddings import embed_text
@@ -21,7 +21,7 @@ class QdrantKnowledgeBase:
     
     def __init__(self, url: str):
         settings = get_settings()
-        self.client = QdrantClient(url=url, api_key=settings.QDRANT_API_KEY)
+        self.client = AsyncQdrantClient(url=url, api_key=settings.QDRANT_API_KEY)
         self.vector_size = settings.QDRANT_COLLECTION_SIZE
         
     async def index_knowledge(self, items: List[KnowledgeItem]):
@@ -52,7 +52,7 @@ class QdrantKnowledgeBase:
         # Recreate collection
         print(f"   → Recreating collection '{name}' in Qdrant...")
         try:
-            self.client.delete_collection(collection_name=name)
+            await self.client.delete_collection(collection_name=name)
             print(f"     • Deleted existing collection '{name}'")
         except Exception as e:
             # Часто это просто "collection not found" при первом запуске
@@ -61,7 +61,7 @@ class QdrantKnowledgeBase:
                 exc_info=True,
             )
         
-        self.client.create_collection(
+        await self.client.create_collection(
             collection_name=name,
             vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE)
         )
@@ -89,7 +89,7 @@ class QdrantKnowledgeBase:
         batch_size = 100
         for i in range(0, len(points), batch_size):
             batch = points[i:i + batch_size]
-            self.client.upsert(
+            await self.client.upsert(
                 collection_name=name,
                 points=batch
             )
@@ -113,7 +113,7 @@ class QdrantKnowledgeBase:
         try:
             vector = await embed_text(problem)
             
-            results = self.client.query_points(
+            results = await self.client.query_points(
                 collection_name="correlations",
                 query=vector,
                 limit=limit
@@ -154,14 +154,15 @@ class QdrantKnowledgeBase:
             if focus_area:
                 # Search by focus area
                 vector = await embed_text(focus_area)
-                results = self.client.query_points(
+                results = await self.client.query_points(
                     collection_name="quotes",
                     query=vector,
                     limit=1
-                ).points
+                )
+                results = results.points
             else:
                 # Deterministic "random" quote of the day without relying on Qdrant offsets
-                points, _ = self.client.scroll(
+                points, _ = await self.client.scroll(
                     collection_name="quotes",
                     limit=200,
                     with_payload=True,
@@ -201,11 +202,12 @@ class QdrantKnowledgeBase:
         try:
             vector = await embed_text(need)
             
-            results = self.client.query_points(
+            results = await self.client.query_points(
                 collection_name="practices",
                 query=vector,
                 limit=limit * 2  # Get more to filter
-            ).points
+            )
+            results = results.points
             
             practices = []
             for hit in results:
@@ -241,7 +243,7 @@ class QdrantKnowledgeBase:
         """
         try:
             vector = await embed_text(query)
-            results = self.client.query_points(
+            results = await self.client.query_points(
                 collection_name="rules",
                 query=vector,
                 limit=limit,
@@ -272,7 +274,7 @@ class QdrantKnowledgeBase:
         try:
             vector = await embed_text(query)
             
-            results = self.client.query_points(
+            results = await self.client.query_points(
                 collection_name="concepts",
                 query=vector,
                 limit=limit
