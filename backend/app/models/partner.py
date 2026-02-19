@@ -6,12 +6,13 @@ from uuid import uuid4
 
 
 class PartnerGroup(BaseModel):
-    """Group of partners (e.g., colleagues, clients, suppliers, world, custom)"""
+    """Group of partners (e.g., source, ally, protege, world, custom)"""
     
     id: str = Field(default_factory=lambda: str(uuid4()))
     name: str
     icon: str  # Emoji icon
     description: str
+    universal_category: str = "world" # source, ally, protege, world
     is_default: bool = False  # True for 4 default groups
     user_id: int
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -21,10 +22,10 @@ class PartnerGroup(BaseModel):
 
 # Default groups
 DEFAULT_GROUPS = [
-    {"name": "Коллеги", "icon": "👥", "description": "Сделать каждого героем", "is_default": True},
-    {"name": "Клиенты", "icon": "🤝", "description": "Быть одержимым их успехом", "is_default": True},
-    {"name": "Поставщики", "icon": "📦", "description": "Проявлять личный интерес", "is_default": True},
-    {"name": "Мир", "icon": "🌍", "description": "Создавать ценность для всех", "is_default": True},
+    {"name": "Соратник", "icon": "🤝", "description": "Кто помогает в делах (Коллеги, партнеры)", "universal_category": "ally", "is_default": True},
+    {"name": "Подопечный", "icon": "🌱", "description": "Кто зависит от тебя (Клиенты, дети, подчиненные)", "universal_category": "protege", "is_default": True},
+    {"name": "Источник", "icon": "🌳", "description": "Кто дает ресурсы (Родители, учителя, поставщики)", "universal_category": "source", "is_default": True},
+    {"name": "Внешний мир", "icon": "🌍", "description": "Незнакомцы, конкуренты, общество", "universal_category": "world", "is_default": True},
 ]
 
 

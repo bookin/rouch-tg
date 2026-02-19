@@ -40,6 +40,14 @@ class ProblemContext(BaseModel):
     )
 
 
+class PartnerCategoryGuide(BaseModel):
+    """Guide for selecting a partner for a specific category"""
+    category: str = Field(description="Universal category: source, ally, protege, world")
+    title: str = Field(description="User-facing title for this category, e.g. 'Your Source of Life'")
+    description: str = Field(description="Explanation of who fits here for this specific problem")
+    examples: list[str] = Field(description="List of specific examples of people who could be partners")
+
+
 class ProblemSolution(BaseModel):
     """Structured problem solution"""
     problem_summary: str = Field(description="Краткое описание проблемы")
@@ -60,7 +68,17 @@ class ProblemSolution(BaseModel):
     karmic_pattern: Optional[str] = Field(default=None, description="Краткое описание 1–2 ключевых отпечатков и паттернов")
     seed_strategy_summary: Optional[str] = Field(default=None, description="Короткое резюме: какие семена мы сажаем и для кого")
     coffee_meditation_script: Optional[str] = Field(default=None, description="Короткий текст/сценарий для кофе-медитации")
-    partner_actions: Optional[list[str]] = Field(default=None, description="До 4 действий для 4 кармических партнёров")
+    partner_actions: Optional[list[str]] = Field(default=None, description=(
+        "До 4 действий, где пользователь помогает конкретным людям "
+        "с аналогичной проблемой. Это всегда действия отдачи, "
+        "а не получения поддержки."
+    ))
+    
+    partner_selection_guide: Optional[list[PartnerCategoryGuide]] = Field(
+        default=None,
+        description="Guide for selecting partners for the 4 universal categories (Source, Ally, Protege, World) specific to this problem"
+    )
+
     # Поля для Q&A-режима (используются в Telegram/WebApp, можно игнорировать, если не нужны)
     needs_clarification: bool = Field(default=False, description="Нужно ли задать уточняющие вопросы перед финальным планом")
     clarifying_questions: list[str] = Field(
@@ -104,6 +122,11 @@ def create_problem_agent() -> Agent[ProblemContext, ProblemSolution]:
             "   - Сформулируй START: противоположные действия по отношению к другим людям в той же сфере.\n"
             "   - Сформулируй GROW: как радоваться, делать кофе-медитацию, фиксировать прогресс, чтобы семена проросли.\n"
             "   - Составь список из нескольких ключевых шагов (practice_steps), который пользователь сможет превратить в 30-дневный план.\n"
+            "   - Сгенерируй `partner_selection_guide` для 4 универсальных категорий специфично для этой проблемы:\n"
+            "     1. Source (Источник): Кто выше / дает ресурсы (Родители, учителя, начальство, врачи).\n"
+            "     2. Ally (Соратник): Кто на равных / партнеры (Супруги, коллеги, друзья, подрядчики).\n"
+            "     3. Protege (Подопечный): Кто зависит / нуждается (Дети, клиенты, подчиненные, пациенты).\n"
+            "     4. World (Внешний мир): Далекие люди / конкуренты (Незнакомцы, общество, те, кто мешает).\n"
             "\nОформление ответа:\n"
             "- Все поля структуры ProblemSolution должны быть заполнены.\n"
             "- В root_cause и imprint_logic явно упоминай тип отпечатка и базовое качество (из 7), на котором строится решение.\n"
@@ -242,6 +265,37 @@ async def solve_problem(
         "5. Дай совет по ускорению (success_tip) и при возможности зафиксируй clarity_level, karmic_pattern, "
         "seed_strategy_summary, coffee_meditation_script и partner_actions.\n"
         "Будь вдохновляющим, но очень точным в кармической логике."
+        """
+        КРИТИЧЕСКОЕ ПРАВИЛО ДЛЯ partner_actions:
+
+- Кармический партнёр — это человек, которому пользователь ПОМОГАЕТ,
+  а не тот, кто помогает пользователю.
+
+- partner_actions должны описывать только действия,
+  где пользователь активно улучшает жизнь другого человека
+  в той же сфере, где он хочет результата.
+
+- НЕЛЬЗЯ:
+  * просить поддержки
+  * требовать понимания
+  * ожидать изменений от других
+  * просить не звонить / не писать / не мешать
+
+- МОЖНО ТОЛЬКО:
+  * помогать
+  * защищать
+  * облегчать
+  * создавать условия
+  * поддерживать
+  * давать ресурс
+
+- Каждый пункт partner_actions должен:
+  1) назвать тип человека с похожей проблемой
+  2) описать конкретное действие помощи
+  3) быть формулировкой "я делаю для другого", а не "они делают для меня"
+
+Если действия направлены на получение поддержки — это ошибка логики кармического менеджмента.
+        """
     )
 
     result = await agent.run(prompt, deps=context)

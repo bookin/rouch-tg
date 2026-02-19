@@ -20,27 +20,27 @@ class DailyFlowWorkflow:
         """Default 4 groups used across the app."""
         return [
             {
-                "id": "colleagues",
-                "group": "colleagues",
-                "partner_name": "Коллега",
+                "id": "source",
+                "group": "source",
+                "partner_name": "Источник",
+                "why": "Сеешь благодарность → получишь ресурсы",
+            },
+            {
+                "id": "ally",
+                "group": "ally",
+                "partner_name": "Соратник",
                 "why": "Сеешь поддержку → получишь помощь",
             },
             {
-                "id": "clients",
-                "group": "clients",
-                "partner_name": "Клиент",
-                "why": "Сеешь знания → получишь лояльность",
-            },
-            {
-                "id": "suppliers",
-                "group": "suppliers",
-                "partner_name": "Поставщик",
-                "why": "Сеешь признание → получишь приоритет",
+                "id": "protege",
+                "group": "protege",
+                "partner_name": "Подопечный",
+                "why": "Сеешь заботу → получишь рост",
             },
             {
                 "id": "world",
                 "group": "world",
-                "partner_name": "Мир",
+                "partner_name": "Внешний мир",
                 "why": "Сеешь сострадание → получишь гармонию",
             },
         ]
@@ -121,9 +121,9 @@ class DailyFlowWorkflow:
             # Fallback to static list if AI fails
             templates = self._default_action_templates()
             descriptions = [
-                "Принеси кофе и спроси как дела",
-                "Отправь полезную статью",
-                "Поблагодари за работу",
+                "Позвони родителям и узнай как дела",
+                "Предложи помощь коллеге",
+                "Научи кого-то чему-то новому",
                 "Пожертвуй 100₽ в благотворительность",
             ]
             return [

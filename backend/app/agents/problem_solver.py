@@ -182,6 +182,9 @@ class ProblemSolverAgent:
             "seed_strategy_summary": solution.seed_strategy_summary,
             "coffee_meditation_script": solution.coffee_meditation_script,
             "partner_actions": solution.partner_actions,
+            "partner_selection_guide": [
+                g.model_dump() for g in (solution.partner_selection_guide or [])
+            ],
             "needs_clarification": False,
             "clarifying_questions": [],
             "correlations": correlations,

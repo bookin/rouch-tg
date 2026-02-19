@@ -6,8 +6,12 @@ import {
   getProblemsHistory,
   activateProblem,
   getPartners,
-  addProblemToCalendar
+  addProblemToCalendar,
+  getActiveProject,
+  ProjectStatusResponse
 } from '../api/client'
+import ActiveProjectDashboard from '../components/ActiveProjectDashboard'
+import PartnerWizard from '../components/PartnerWizard'
 
 export default function Problem() {
   const navigate = useNavigate()
@@ -27,15 +31,28 @@ export default function Problem() {
   const [clarificationText, setClarificationText] = useState('')
   const [initialProblem, setInitialProblem] = useState('')
   const [sessionId, setSessionId] = useState<string | null>(null)
+  
+  const [activeProjectData, setActiveProjectData] = useState<ProjectStatusResponse | null>(null)
+  const [showProblemForm, setShowProblemForm] = useState(true)
+  const [showWizard, setShowWizard] = useState(false)
 
   const loadData = async () => {
     try {
-      const [histData, partData] = await Promise.all([
+      const [histData, partData, projData] = await Promise.all([
         getProblemsHistory(),
-        getPartners()
+        getPartners(),
+        getActiveProject()
       ])
       setHistory(histData.history || [])
       setPartners(partData.partners || [])
+      setActiveProjectData(projData)
+      
+      // If we have an active project, hide the form by default
+      if (projData && projData.has_active_project) {
+        setShowProblemForm(false)
+      } else {
+        setShowProblemForm(true)
+      }
     } catch (e) {
       console.error('Failed to load data', e)
     }
@@ -67,7 +84,7 @@ export default function Problem() {
       } else {
         setResult(data)
         setSessionId(data.session_id || null)
-        await loadData() // Refresh history только для финальных решений
+        await loadData() // Refresh history (and grab new history_id if needed)
       }
     } catch (err: any) {
       setError(err?.message || 'Failed to solve problem')
@@ -100,13 +117,23 @@ export default function Problem() {
         diagnostic_answer: clarificationText.trim()
       })
 
-      // Второй заход считаем финальным, даже если агент снова попросит уточнения
-      setResult(data)
-      setNeedsClarification(false)
-      setClarifyingQuestions([])
-      setClarificationText('')
-      setSessionId(data.session_id || sessionId)
-      await loadData()
+      // Check if the agent needs MORE clarification (multi-step diagnostic)
+      if (data?.needs_clarification && Array.isArray(data.clarifying_questions) && data.clarifying_questions.length > 0) {
+        setNeedsClarification(true)
+        setClarifyingQuestions(data.clarifying_questions.slice(0, 3))
+        setClarificationText('')
+        setSessionId(data.session_id || sessionId)
+        // Keep result null so we don't show empty dashboard
+        setResult(null)
+      } else {
+        // Diagnostic complete - show final solution
+        setResult(data)
+        setNeedsClarification(false)
+        setClarifyingQuestions([])
+        setClarificationText('')
+        setSessionId(data.session_id || sessionId)
+        await loadData()
+      }
     } catch (err: any) {
       setError(err?.message || 'Не удалось обработать уточнения')
     } finally {
@@ -115,12 +142,16 @@ export default function Problem() {
   }
 
   const handleActivateHistory = async (h: any) => {
+    // This activates the problem in history (legacy) AND shows the result
     try {
       setLoading(true)
       await activateProblem(h.id)
       setResult(h.solution)
+      // Ensure result has history_id for project activation
+      setResult((prev: any) => ({ ...prev, history_id: h.id }))
+      
       setProblem(h.problem_text)
-      setSuccess('Проблема активирована! Твой план действий обновлен.')
+      setSuccess('Проблема выбрана из истории.')
       setShowHistory(false)
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (err: any) {
@@ -128,6 +159,28 @@ export default function Problem() {
     } finally {
       setLoading(false)
     }
+  }
+  
+  const handleStartProject = () => {
+    if (!result || !result.history_id) {
+      setError('Невозможно создать проект: отсутствует ID истории. Попробуйте обновить страницу.')
+      return
+    }
+    setShowWizard(true)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const handleWizardComplete = (projData: ProjectStatusResponse) => {
+    setActiveProjectData(projData)
+    setSuccess('🚀 Кармический проект успешно запущен! Твой план на 30 дней готов.')
+    setResult(null)
+    setShowProblemForm(false)
+    setShowWizard(false)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const handleWizardCancel = () => {
+    setShowWizard(false)
   }
 
   const togglePartner = (id: string) => {
@@ -179,156 +232,195 @@ export default function Problem() {
     <div className="page" style={{ paddingBottom: 40 }}>
       <h1>🧩 Решение проблемы</h1>
 
-      <p style={{ opacity: 0.8, fontSize: '0.9rem', marginBottom: 16 }}>
-        Система проанализирует твой запрос через призму кармического менеджмента и предложит конкретный путь исправления ситуации.
-      </p>
-
-      {needsClarification && clarifyingQuestions.length > 0 && (
-        <form
-          onSubmit={onClarificationSubmit}
-          style={{
-            marginBottom: 20,
-            padding: 16,
-            borderRadius: 16,
-            background: 'var(--tg-theme-secondary-bg-color, #f5f5f5)',
-            border: '1px solid rgba(0,0,0,0.05)',
-          }}
-        >
-          <h3 style={{ margin: '0 0 10px 0', fontSize: '1rem' }}>🧐 Нужно чуть больше деталей</h3>
-          <p style={{ margin: '0 0 10px 0', fontSize: '0.9rem', opacity: 0.8 }}>
-            Ответь одним сообщением на вопросы ниже — так система сможет точнее увидеть корень проблемы.
-          </p>
-
-          <ol style={{ paddingLeft: 18, margin: '0 0 12px 0', fontSize: '0.9rem' }}>
-            {clarifyingQuestions.map((q, idx) => (
-              <li key={idx} style={{ marginBottom: 4 }}>{q}</li>
-            ))}
-          </ol>
-
-          <textarea
-            value={clarificationText}
-            onChange={(e) => setClarificationText(e.target.value)}
-            placeholder="Напиши свои ответы одним сообщением..."
-            rows={4}
-            style={{
-              marginTop: 8,
-              width: '100%',
-              padding: 10,
-              borderRadius: 10,
-              border: '1px solid var(--tg-theme-hint-color, #bbb)',
-              fontSize: '0.95rem',
-              resize: 'none',
-              outline: 'none',
-              background: 'var(--tg-theme-bg-color, #fff)',
-              color: 'var(--tg-theme-text-color, #000)',
-            }}
-          />
-
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              marginTop: 10,
-              padding: '10px 16px',
-              borderRadius: 10,
-              border: 'none',
-              background: 'var(--tg-theme-button-color, #3390ec)',
-              color: 'var(--tg-theme-button-text-color, #fff)',
-              fontWeight: 600,
-              fontSize: '0.95rem',
-              cursor: loading ? 'default' : 'pointer',
-              opacity: loading ? 0.7 : 1,
-            }}
-          >
-            {loading ? 'Анализирую уточнения…' : 'Отправить уточнения'}
-          </button>
-        </form>
-      )}
-
-      {history.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <button
-            onClick={() => setShowHistory(!showHistory)}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--tg-theme-button-color, #3390ec)',
-              fontSize: '0.9rem',
-              fontWeight: 600,
-              padding: 0,
-              cursor: 'pointer',
-              marginBottom: 10,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4
-            }}
-          >
-            {showHistory ? '🔼 Скрыть историю' : `📜 Показать историю (${history.length})`}
-          </button>
-
-          {showHistory && (
-            <div style={{ display: 'grid', gap: 8, maxHeight: 200, overflowY: 'auto', padding: 4 }}>
-              {history.map(h => (
-                <div
-                  key={h.id}
-                  onClick={() => handleActivateHistory(h)}
-                  style={{
-                    padding: 12,
-                    borderRadius: 10,
-                    background: h.is_active ? '#e3f2fd' : 'var(--tg-theme-secondary-bg-color, #f5f5f5)',
-                    border: h.is_active ? '1px solid #2196f3' : '1px solid transparent',
-                    cursor: 'pointer',
-                    fontSize: '0.9rem'
-                  }}
-                >
-                  <div style={{ fontWeight: h.is_active ? 700 : 500 }}>{h.problem_text}</div>
-                  <div style={{ fontSize: '0.75rem', opacity: 0.6, marginTop: 4 }}>
-                    {new Date(h.created_at).toLocaleDateString()} {h.is_active && '• Активна'}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+      {showWizard && result?.history_id ? (
+        <PartnerWizard 
+          historyId={result.history_id}
+          onComplete={handleWizardComplete}
+          onCancel={handleWizardCancel}
+        />
+      ) : (
+        <>
+          {/* ACTIVE PROJECT DASHBOARD */}
+          {activeProjectData?.has_active_project && activeProjectData.project && (
+        <div style={{ marginBottom: 30 }}>
+           <ActiveProjectDashboard data={activeProjectData} onRefresh={loadData} />
+           
+           {!showProblemForm && (
+             <button 
+               onClick={() => setShowProblemForm(true)}
+               style={{
+                 marginTop: 20,
+                 background: 'none',
+                 border: '1px dashed #ccc',
+                 width: '100%',
+                 padding: 12,
+                 borderRadius: 12,
+                 color: '#888',
+                 fontSize: '0.9rem',
+                 cursor: 'pointer'
+               }}
+             >
+               🔍 Разобрать другую проблему (не прерывая проект)
+             </button>
+           )}
         </div>
       )}
 
-      <form onSubmit={onSubmit} style={{ display: 'grid', gap: 12, marginBottom: 20 }}>
-        <textarea
-          value={problem}
-          onChange={(e) => setProblem(e.target.value)}
-          placeholder="Опиши проблему как можно точнее..."
-          rows={4}
-          style={{
-            padding: 12,
-            borderRadius: 12,
-            border: '1px solid var(--tg-theme-hint-color, #ccc)',
-            background: 'var(--tg-theme-bg-color, #fff)',
-            color: 'var(--tg-theme-text-color, #000)',
-            fontSize: '1rem',
-            resize: 'none',
-            outline: 'none',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
-          }}
-        />
-        <button
-          type="submit"
-          disabled={loading}
-          style={{
-            padding: '14px 20px',
-            borderRadius: 12,
-            border: 'none',
-            background: 'var(--tg-theme-button-color, #3390ec)',
-            color: 'var(--tg-theme-button-text-color, #fff)',
-            fontWeight: 700,
-            fontSize: '1rem',
-            opacity: loading ? 0.7 : 1,
-            cursor: loading ? 'default' : 'pointer',
-            transition: 'transform 0.1s active'
-          }}
-        >
-          {loading ? 'Анализирую отпечатки…' : 'Найти решение'}
-        </button>
-      </form>
+      {/* PROBLEM FORM */}
+      {showProblemForm && (
+        <>
+          <p style={{ opacity: 0.8, fontSize: '0.9rem', marginBottom: 16 }}>
+            Система проанализирует твой запрос через призму кармического менеджмента и предложит конкретный путь исправления ситуации.
+          </p>
+
+          {needsClarification && clarifyingQuestions.length > 0 && (
+            <form
+              onSubmit={onClarificationSubmit}
+              style={{
+                marginBottom: 20,
+                padding: 16,
+                borderRadius: 16,
+                background: 'var(--tg-theme-secondary-bg-color, #f5f5f5)',
+                border: '1px solid rgba(0,0,0,0.05)',
+              }}
+            >
+              <h3 style={{ margin: '0 0 10px 0', fontSize: '1rem' }}>🧐 Нужно чуть больше деталей</h3>
+              <p style={{ margin: '0 0 10px 0', fontSize: '0.9rem', opacity: 0.8 }}>
+                Ответь одним сообщением на вопросы ниже — так система сможет точнее увидеть корень проблемы.
+              </p>
+
+              <ol style={{ paddingLeft: 18, margin: '0 0 12px 0', fontSize: '0.9rem' }}>
+                {clarifyingQuestions.map((q, idx) => (
+                  <li key={idx} style={{ marginBottom: 4 }}>{q}</li>
+                ))}
+              </ol>
+
+              <textarea
+                value={clarificationText}
+                onChange={(e) => setClarificationText(e.target.value)}
+                placeholder="Напиши свои ответы одним сообщением..."
+                rows={4}
+                style={{
+                  marginTop: 8,
+                  width: '100%',
+                  padding: 10,
+                  borderRadius: 10,
+                  border: '1px solid var(--tg-theme-hint-color, #bbb)',
+                  fontSize: '0.95rem',
+                  resize: 'none',
+                  outline: 'none',
+                  background: 'var(--tg-theme-bg-color, #fff)',
+                  color: 'var(--tg-theme-text-color, #000)',
+                }}
+              />
+
+              <button
+                type="submit"
+                disabled={loading}
+                style={{
+                  marginTop: 10,
+                  padding: '10px 16px',
+                  borderRadius: 10,
+                  border: 'none',
+                  background: 'var(--tg-theme-button-color, #3390ec)',
+                  color: 'var(--tg-theme-button-text-color, #fff)',
+                  fontWeight: 600,
+                  fontSize: '0.95rem',
+                  cursor: loading ? 'default' : 'pointer',
+                  opacity: loading ? 0.7 : 1,
+                }}
+              >
+                {loading ? 'Анализирую уточнения…' : 'Отправить уточнения'}
+              </button>
+            </form>
+          )}
+
+          {history.length > 0 && (
+            <div style={{ marginBottom: 20 }}>
+              <button
+                onClick={() => setShowHistory(!showHistory)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--tg-theme-button-color, #3390ec)',
+                  fontSize: '0.9rem',
+                  fontWeight: 600,
+                  padding: 0,
+                  cursor: 'pointer',
+                  marginBottom: 10,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4
+                }}
+              >
+                {showHistory ? '🔼 Скрыть историю' : `📜 Показать историю (${history.length})`}
+              </button>
+
+              {showHistory && (
+                <div style={{ display: 'grid', gap: 8, maxHeight: 200, overflowY: 'auto', padding: 4 }}>
+                  {history.map(h => (
+                    <div
+                      key={h.id}
+                      onClick={() => handleActivateHistory(h)}
+                      style={{
+                        padding: 12,
+                        borderRadius: 10,
+                        background: h.is_active ? '#e3f2fd' : 'var(--tg-theme-secondary-bg-color, #f5f5f5)',
+                        border: h.is_active ? '1px solid #2196f3' : '1px solid transparent',
+                        cursor: 'pointer',
+                        fontSize: '0.9rem'
+                      }}
+                    >
+                      <div style={{ fontWeight: h.is_active ? 700 : 500 }}>{h.problem_text}</div>
+                      <div style={{ fontSize: '0.75rem', opacity: 0.6, marginTop: 4 }}>
+                        {new Date(h.created_at).toLocaleDateString()} {h.is_active && '• Активна'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <form onSubmit={onSubmit} style={{ display: 'grid', gap: 12, marginBottom: 20 }}>
+            <textarea
+              value={problem}
+              onChange={(e) => setProblem(e.target.value)}
+              placeholder="Опиши проблему как можно точнее..."
+              rows={4}
+              style={{
+                padding: 12,
+                borderRadius: 12,
+                border: '1px solid var(--tg-theme-hint-color, #ccc)',
+                background: 'var(--tg-theme-bg-color, #fff)',
+                color: 'var(--tg-theme-text-color, #000)',
+                fontSize: '1rem',
+                resize: 'none',
+                outline: 'none',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
+              }}
+            />
+            <button
+              type="submit"
+              disabled={loading}
+              style={{
+                padding: '14px 20px',
+                borderRadius: 12,
+                border: 'none',
+                background: 'var(--tg-theme-button-color, #3390ec)',
+                color: 'var(--tg-theme-button-text-color, #fff)',
+                fontWeight: 700,
+                fontSize: '1rem',
+                opacity: loading ? 0.7 : 1,
+                cursor: loading ? 'default' : 'pointer',
+                transition: 'transform 0.1s active'
+              }}
+            >
+              {loading ? 'Анализирую отпечатки…' : 'Найти решение'}
+            </button>
+          </form>
+        </>
+      )}
 
       {error && (
         <div style={{ padding: 12, borderRadius: 10, background: '#fff0f0', color: 'crimson', marginBottom: 16, border: '1px solid #ffcccc' }}>
@@ -344,6 +436,39 @@ export default function Problem() {
 
       {result && (
         <div style={{ display: 'grid', gap: 16 }}>
+
+          {/* MAIN CTA: ACTIVATE PROJECT */}
+          <div style={{ 
+            background: 'linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)', 
+            borderRadius: 16, 
+            padding: 20, 
+            border: '1px solid #90caf9',
+            boxShadow: '0 4px 12px rgba(33, 150, 243, 0.15)' 
+          }}>
+            <h3 style={{ margin: '0 0 8px 0', fontSize: '1.2rem', color: '#1565c0' }}>Решение найдено! 🚀</h3>
+            <p style={{ margin: '0 0 16px 0', fontSize: '0.95rem', color: '#0d47a1' }}>
+              Хочешь, чтобы я провел тебя через 30-дневный путь исправления этой ситуации? 
+              Я буду давать тебе задания каждый день и поддерживать тебя.
+            </p>
+            <button 
+              onClick={handleStartProject}
+              disabled={loading}
+              style={{
+                width: '100%',
+                padding: '14px',
+                borderRadius: 12,
+                border: 'none',
+                background: '#1565c0',
+                color: '#fff',
+                fontWeight: 700,
+                fontSize: '1.05rem',
+                cursor: 'pointer',
+                boxShadow: '0 4px 6px rgba(21, 101, 192, 0.3)'
+              }}
+            >
+              {loading ? 'Создаю проект...' : 'Начать Кармический Проект'}
+            </button>
+          </div>
 
           {/* Section: Diagnostics */}
           <div style={{ background: 'var(--tg-theme-secondary-bg-color, #f5f5f5)', borderRadius: 16, padding: 16 }}>
@@ -365,7 +490,7 @@ export default function Problem() {
               <div style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--tg-theme-hint-color, #888)', textTransform: 'uppercase', marginBottom: 8 }}>С кем практиковать (Партнеры)</div>
               <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8 }}>
                 {partners.length === 0 && <div style={{ fontSize: '0.85rem', opacity: 0.5 }}>У тебя пока нет партнеров</div>}
-                {partners.map(p => (
+                {partners.map((p: any) => (
                   <div
                     key={p.id}
                     onClick={() => togglePartner(p.id)}
@@ -401,7 +526,7 @@ export default function Problem() {
                   cursor: 'pointer'
                 }}
               >
-                🎯 Выбрать целью
+                🎯 Просто цель
               </button>
               <button
                 onClick={handleStartPractice}
@@ -578,6 +703,8 @@ export default function Problem() {
           </div>
 
         </div>
+      )}
+        </>
       )}
     </div>
   )

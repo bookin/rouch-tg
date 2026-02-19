@@ -78,6 +78,14 @@ class ProblemState(StatesGroup):
     waiting_for_diagnostic_answer = State()
 
 
+class ProjectSetupState(StatesGroup):
+    """States for setting up a new project (partners)"""
+    waiting_for_source = State()
+    waiting_for_ally = State()
+    waiting_for_protege = State()
+    waiting_for_world = State()
+
+
 # Map generic steps to FSM states
 STEP_STATE_MAP = {
     OnboardingSteps.OCCUPATION: OnboardingState.occupation,
@@ -411,6 +419,358 @@ async def process_partners_confirm(message: Message, state: FSMContext):
 
 
 # =============================================================================
+# Project Setup Helpers
+# =============================================================================
+
+async def _ask_partner_category(message: Message, state: FSMContext, category: str):
+    """Ask user for a partner in a specific category"""
+    from app.database import AsyncSessionLocal
+    from app.crud import get_user_by_telegram_id, get_partners_by_universal_category
+    from app.models.db_models import PartnerDB
+    from sqlalchemy import select
+    
+    data = await state.get_data()
+    solution = data.get("pending_solution", {})
+    guide_list = solution.get("partner_selection_guide", [])
+    project_partners = data.get("project_partners", {})
+    selected_in_cat = project_partners.get(category, [])
+    
+    # Find guide item for this category
+    guide_item = next((g for g in guide_list if g.get("category") == category), None)
+    
+    # Fallback texts
+    fallbacks = {
+        "source": ("� Источник", "Кто дает тебе ресурсы и основу? (Родители, учителя)"),
+        "ally": ("🤝 Соратник", "Кто помогает тебе в делах? (Коллеги, партнеры)"),
+        "protege": ("🌱 Подопечный", "Кто зависит от тебя? (Клиенты, подчиненные)"),
+        "world": ("🌍 Внешний мир", "Кто-то далекий или конкурент.")
+    }
+    
+    title = guide_item["title"] if guide_item else fallbacks[category][0]
+    desc = guide_item["description"] if guide_item else fallbacks[category][1]
+    examples = guide_item.get("examples", []) if guide_item else []
+    
+    text = f"**{title}**\n\n{desc}\n"
+    if examples:
+        text += f"\n💡 Пример: {', '.join(examples)}"
+    
+    # Show selected partners names
+    if selected_in_cat:
+        async with AsyncSessionLocal() as db:
+            # Fetch names for display
+            res = await db.execute(select(PartnerDB.name).where(PartnerDB.id.in_(selected_in_cat)))
+            names = res.scalars().all()
+            if names:
+                text += f"\n\n✅ **Выбрано:** {', '.join(names)}"
+
+    # Check if user has existing partners in this category
+    has_existing = False
+    async with AsyncSessionLocal() as db:
+        user_db = await get_user_by_telegram_id(db, message.from_user.id if isinstance(message, Message) else message.from_user.id)
+        if user_db:
+            existing = await get_partners_by_universal_category(db, user_db.id, category)
+            if existing:
+                has_existing = True
+    
+    # Build Keyboard
+    kb_rows = []
+    
+    # Main actions
+    if has_existing:
+        kb_rows.append([InlineKeyboardButton(text="📂 Выбрать из списка", callback_data=f"list_p_{category}")])
+        
+    kb_rows.append([InlineKeyboardButton(text="➕ Добавить нового", callback_data=f"add_p_{category}")])
+    
+    # Navigation
+    if selected_in_cat:
+        kb_rows.append([InlineKeyboardButton(text="➡️ Дальше", callback_data=f"next_p_{category}")])
+    else:
+        kb_rows.append([InlineKeyboardButton(text="🤷‍♂️ Пропустить", callback_data=f"skip_p_{category}")])
+        
+    markup = InlineKeyboardMarkup(inline_keyboard=kb_rows)
+    
+    # Update state
+    state_map = {
+        "source": ProjectSetupState.waiting_for_source,
+        "ally": ProjectSetupState.waiting_for_ally,
+        "protege": ProjectSetupState.waiting_for_protege,
+        "world": ProjectSetupState.waiting_for_world
+    }
+    await state.set_state(state_map[category])
+    
+    if isinstance(message, CallbackQuery):
+        await message.message.edit_text(text, parse_mode="Markdown", reply_markup=markup)
+    else:
+        await message.answer(text, parse_mode="Markdown", reply_markup=markup)
+
+
+@router.callback_query(F.data.startswith("list_p_"))
+async def show_existing_partners(callback: CallbackQuery, state: FSMContext):
+    """Show list of existing partners to select"""
+    _, _, category = callback.data.split("_")
+    
+    from app.database import AsyncSessionLocal
+    from app.crud import get_user_by_telegram_id, get_partners_by_universal_category
+    
+    data = await state.get_data()
+    project_partners = data.get("project_partners", {})
+    selected_in_cat = project_partners.get(category, [])
+    
+    async with AsyncSessionLocal() as db:
+        user_db = await get_user_by_telegram_id(db, callback.from_user.id)
+        if not user_db:
+            await callback.answer("Ошибка пользователя")
+            return
+        partners = await get_partners_by_universal_category(db, user_db.id, category)
+        
+    kb_rows = []
+    for p in partners:
+        label = f"✅ {p.name}" if p.id in selected_in_cat else p.name
+        kb_rows.append([InlineKeyboardButton(text=label, callback_data=f"sel_p_{category}_{p.id}")])
+        
+    kb_rows.append([InlineKeyboardButton(text="🔙 Назад", callback_data=f"back_p_{category}")])
+    
+    markup = InlineKeyboardMarkup(inline_keyboard=kb_rows)
+    await callback.message.edit_text(f"Выберите партнеров для категории **{category.upper()}**:", parse_mode="Markdown", reply_markup=markup)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("back_p_"))
+async def back_to_category_menu(callback: CallbackQuery, state: FSMContext):
+    """Go back to category main menu"""
+    _, _, category = callback.data.split("_")
+    await _ask_partner_category(callback, state, category)
+
+
+@router.callback_query(F.data.startswith("sel_p_"))
+async def toggle_partner_selection(callback: CallbackQuery, state: FSMContext):
+    """Toggle partner selection from list"""
+    parts = callback.data.split("_")
+    # format: sel_p_category_id - id might contain dashes/underscores, need to be careful
+    # But UUID usually doesn't conflict if we split carefully. 
+    # Actually split("_") with partner_id being uuid might be risky if uuid has underscores? UUIDs use hyphens.
+    # So split("_") is fine for 4 parts: sel, p, category, id.
+    
+    category = parts[2]
+    partner_id = "_".join(parts[3:]) # Rejoin in case id had underscores (unlikely for uuid but safe)
+    
+    data = await state.get_data()
+    project_partners = data.get("project_partners", {})
+    
+    current_list = project_partners.get(category, [])
+    if partner_id in current_list:
+        current_list.remove(partner_id)
+    else:
+        current_list.append(partner_id)
+        
+    project_partners[category] = current_list
+    await state.update_data(project_partners=project_partners)
+    
+    # Stay in list view
+    await show_existing_partners(callback, state)
+
+
+@router.callback_query(F.data.startswith("add_p_"))
+async def start_add_partner(callback: CallbackQuery, state: FSMContext):
+    """Ask for new partner name"""
+    _, _, category = callback.data.split("_")
+    await state.update_data(adding_category=category)
+    
+    # We keep the state as is (waiting_for_X), but send a prompt
+    await callback.message.answer(
+        "Напиши имя нового партнера (одним сообщением):", 
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Отмена", callback_data=f"cancel_add_{category}")]
+        ])
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("cancel_add_"))
+async def cancel_add_partner(callback: CallbackQuery, state: FSMContext):
+    """Cancel adding new partner"""
+    _, _, category = callback.data.split("_")
+    await state.update_data(adding_category=None)
+    await callback.message.delete()
+    # No need to refresh main view, it's still there
+    await callback.answer("Отменено")
+
+
+@router.callback_query(F.data.startswith("next_p_"))
+async def next_partner_step(callback: CallbackQuery, state: FSMContext):
+    """Go to next category"""
+    _, _, category = callback.data.split("_")
+    
+    next_map = {
+        "source": "ally",
+        "ally": "protege",
+        "protege": "world",
+        "world": "finish"
+    }
+    
+    next_cat = next_map.get(category)
+    if next_cat == "finish":
+        await _finish_project_setup(callback.message, state)
+    else:
+        await _ask_partner_category(callback, state, next_cat)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("skip_p_"))
+async def skip_partner_step(callback: CallbackQuery, state: FSMContext):
+    """Skip category (empty list)"""
+    # Just proceed to next
+    await next_partner_step(callback, state)
+
+
+async def _process_partner_input(message: Message, state: FSMContext, current_cat: str, next_cat: str):
+    """Process NEW partner name input"""
+    from app.database import AsyncSessionLocal
+    from app.crud import get_user_by_telegram_id, get_default_partner_group_by_category, create_partner
+    from app.models.partner import Partner
+    from uuid import uuid4
+    
+    data = await state.get_data()
+    adding_cat = data.get("adding_category")
+    
+    # Only process text if we are adding a partner for this category
+    if adding_cat != current_cat:
+        # Ignore random text or show hint
+        return
+
+    name = message.text.strip()
+    if not name:
+        return
+
+    async with AsyncSessionLocal() as db:
+        user_db = await get_user_by_telegram_id(db, message.from_user.id)
+        if not user_db:
+            return
+            
+        group = await get_default_partner_group_by_category(db, user_db.id, current_cat)
+        if not group:
+            await message.answer("⚠️ Ошибка системы: группа не найдена.")
+            return
+            
+        p = Partner(
+            id=str(uuid4()),
+            name=name,
+            group_id=group.id,
+            user_id=user_db.id
+        )
+        created = await create_partner(db, p)
+        await db.commit()
+        
+        # Add to selection immediately
+        project_partners = data.get("project_partners", {})
+        current_list = project_partners.get(current_cat, [])
+        current_list.append(created.id)
+        project_partners[current_cat] = current_list
+        
+        await state.update_data(project_partners=project_partners, adding_category=None)
+        
+        await message.answer(f"✅ Добавлен и выбран: {name}")
+        # Refresh the wizard view
+        await _ask_partner_category(message, state, current_cat)
+
+
+async def _finish_project_setup(message: Message, state: FSMContext):
+    """Finish setup and activate project"""
+    from app.database import AsyncSessionLocal
+    from app.crud_extended import create_karma_plan
+    from app.crud import update_user_focus, set_active_problem, clear_today_suggestions, get_user_by_telegram_id, save_problem_history
+    from app.knowledge.qdrant import QdrantKnowledgeBase
+    
+    data = await state.get_data()
+    solution = data.get("pending_solution")
+    problem_text = data.get("problem_text")
+    history_id = data.get("history_id")
+    project_partners = data.get("project_partners")
+    
+    if not solution or not problem_text:
+        await message.answer("Данные устарели. Начни заново: /solver")
+        return
+        
+    try:
+        async with AsyncSessionLocal() as db:
+            user_db = await get_user_by_telegram_id(db, message.from_user.id)
+            if user_db:
+                # 1. Activate problem
+                if history_id:
+                    await set_active_problem(db, user_db.id, history_id)
+                else:
+                    history = await save_problem_history(db, user_db.id, problem_text, solution, is_active=True)
+                    history_id = history.id
+                
+                # Extract strategy
+                strategy_snapshot = {
+                    "root_cause": solution.get("root_cause"),
+                    "stop_action": solution.get("stop_action"),
+                    "start_action": solution.get("start_action"),
+                    "grow_action": solution.get("grow_action"),
+                    "success_tip": solution.get("success_tip"),
+                    "practice_steps": solution.get("practice_steps", []),
+                    "problem_text": problem_text
+                }
+
+                # 2. Create Plan with Partners
+                await create_karma_plan(
+                    db,
+                    user_db.id,
+                    history_id,
+                    strategy_snapshot,
+                    duration_days=30,
+                    project_partners=project_partners
+                )
+                
+                # 3. Update Focus
+                await update_user_focus(db, user_db.id, problem_text)
+                
+                # 4. Clear old suggestions
+                await clear_today_suggestions(db, user_db.id)
+                
+                await db.commit()
+                
+                # Format success message
+                partners_text = ""
+                # Could format this nicely
+                
+                await message.answer(
+                    f"🎯 **Цель активирована:** {problem_text}\n\n"
+                    "✅ Команда кармических партнеров собрана!\n"
+                    "Теперь твой план на день будет настроен на решение этой задачи.",
+                    parse_mode="Markdown"
+                )
+                
+                # Get Daily Quote
+                qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
+                quote = await qdrant.get_daily_quote(problem_text)
+                
+                quote_text = (
+                    f"📜 **Мудрость дня:**\n\n"
+                    f"_{quote['text']}_\n\n"
+                    f"Открой приложение, чтобы увидеть свои 4 действия на сегодня! 👇"
+                )
+                
+                kb = ReplyKeyboardMarkup(
+                    keyboard=[[
+                        KeyboardButton(
+                            text="📱 Открыть приложение",
+                            web_app=WebAppInfo(url=settings.WEBAPP_URL)
+                        )
+                    ]],
+                    resize_keyboard=True
+                )
+                
+                await message.answer(quote_text, parse_mode="Markdown", reply_markup=kb)
+                await state.clear()
+                
+    except Exception as e:
+        logger.error(f"Error setting goal: {e}", exc_info=True)
+        await message.answer("Ошибка при сохранении цели.")
+
+
+# =============================================================================
 # Problem Solving Flow
 # =============================================================================
 
@@ -513,79 +873,41 @@ async def process_problem_description(message: Message, state: FSMContext):
         await state.clear()
 
 
-@router.callback_query(F.data == "confirm_goal")
-async def confirm_goal_selection(callback: CallbackQuery, state: FSMContext):
-    """Set problem as current focus and show daily plan"""
-    from app.database import AsyncSessionLocal
-    from app.crud import update_user_focus, set_active_problem, clear_today_suggestions, get_user_by_telegram_id, save_problem_history
-    from app.knowledge.qdrant import QdrantKnowledgeBase
-    
-    data = await state.get_data()
-    solution = data.get("pending_solution")
-    problem_text = data.get("problem_text")
-    history_id = data.get("history_id")
-    
-    if not solution or not problem_text:
-        await callback.answer("Данные устарели. Начни заново.", show_alert=True)
-        return
-        
-    try:
-        async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, callback.from_user.id)
-            if user_db:
-                # 1. Activate problem (or create if missing for some reason)
-                if history_id:
-                    await set_active_problem(db, user_db.id, history_id)
-                else:
-                    # Fallback for old state or if history_id missing
-                    history = await save_problem_history(db, user_db.id, problem_text, solution, is_active=True)
-                    history_id = history.id
-                
-                # 2. Update Focus
-                await update_user_focus(db, user_db.id, problem_text)
-                
-                # 3. Clear old suggestions so they regenerate
-                await clear_today_suggestions(db, user_db.id)
-                
-                await db.commit()
-                
-                await callback.message.edit_text(
-                    f"🎯 Цель активирована: **{problem_text}**\n\n"
-                    "Теперь твой план на день будет настроен на решение этой задачи.",
-                    parse_mode="Markdown"
-                )
-                
-                # Get Daily Quote and encourage to open app
-                qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
-                quote = await qdrant.get_daily_quote(problem_text)
-                
-                quote_text = (
-                    f"📜 **Мудрость дня:**\n\n"
-                    f"_{quote['text']}_\n\n"
-                    f"Открой приложение, чтобы увидеть свои 4 действия на сегодня! 👇"
-                )
-                
-                kb = ReplyKeyboardMarkup(
-                    keyboard=[[
-                        KeyboardButton(
-                            text="📱 Открыть приложение",
-                            web_app=WebAppInfo(url=settings.WEBAPP_URL)
-                        )
-                    ]],
-                    resize_keyboard=True
-                )
-                
-                await callback.message.answer(quote_text, parse_mode="Markdown", reply_markup=kb)
-                await state.clear()
-                
-    except Exception as e:
-        logger.error(f"Error setting goal: {e}", exc_info=True)
-        await callback.answer("Ошибка при сохранении цели", show_alert=True)
+@router.callback_query(F.data == "start_partner_setup")
+async def start_partner_setup(callback: CallbackQuery, state: FSMContext):
+    """Start partner selection wizard"""
+    await callback.answer()
+    await callback.message.answer(
+        "🧘 **Кармические партнеры**\n\n"
+        "Чтобы достичь цели со 100% вероятностью, нам нужно посадить семена. "
+        "Семена сажаются в почву — это другие люди.\n\n"
+        "Давай выберем 4 группы партнеров для этого проекта."
+    )
+    await _ask_partner_category(callback.message, state, "source")
 
 
-@router.message(ProblemState.waiting_for_diagnostic_answer)
-async def process_diagnostic_answer(message: Message, state: FSMContext):
-    """Continue diagnostic dialog with user's answer"""
+@router.message(ProjectSetupState.waiting_for_source)
+async def process_source_partner(message: Message, state: FSMContext):
+    """Process source partner"""
+    await _process_partner_input(message, state, "source", "ally")
+
+
+@router.message(ProjectSetupState.waiting_for_ally)
+async def process_ally_partner(message: Message, state: FSMContext):
+    """Process ally partner"""
+    await _process_partner_input(message, state, "ally", "protege")
+
+
+@router.message(ProjectSetupState.waiting_for_protege)
+async def process_protege_partner(message: Message, state: FSMContext):
+    """Process protege partner"""
+    await _process_partner_input(message, state, "protege", "world")
+
+
+@router.message(ProjectSetupState.waiting_for_world)
+async def process_world_partner(message: Message, state: FSMContext):
+    """Process world partner"""
+    await _process_partner_input(message, state, "world", "finish")
     from app.knowledge.qdrant import QdrantKnowledgeBase
     from app.agents.problem_solver import ProblemSolverAgent
     from app.database import AsyncSessionLocal

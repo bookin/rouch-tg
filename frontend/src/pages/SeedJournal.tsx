@@ -15,7 +15,7 @@ interface SeedItem {
 }
 
 export default function SeedJournal() {
-  const [searchParams, setSearchParams] = useSearchParams()
+  const [searchParams] = useSearchParams()
   const [loading, setLoading] = useState(true)
   const [seeds, setSeeds] = useState<SeedItem[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -42,14 +42,10 @@ export default function SeedJournal() {
 
   useEffect(() => {
     load()
-    const pids = searchParams.get('partner_ids')
-    if (pids) {
-      // Currently the UI only supports one partner in the select.
-      // We should ideally show all partners or some indicator.
-      // For now, I'll just set the first one if available.
-      const firstPid = pids.split(',')[0]
-      // In a more advanced version, we'd have a multi-select here too.
-    }
+    // const pids = searchParams.get('partner_ids')
+    // if (pids) {
+    //   // Future: handle pre-selected partners
+    // }
   }, [])
 
   const onCreate = async (e: FormEvent) => {
@@ -134,9 +130,9 @@ export default function SeedJournal() {
               background: 'var(--tg-theme-bg-color, #fff)'
             }}
           >
-            <option value="colleagues">Коллеги</option>
-            <option value="clients">Клиенты</option>
-            <option value="suppliers">Поставщики</option>
+            <option value="source">Источник</option>
+            <option value="ally">Соратник</option>
+            <option value="protege">Подопечный</option>
             <option value="world">Мир</option>
           </select>
         </div>

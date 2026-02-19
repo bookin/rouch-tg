@@ -144,3 +144,81 @@ export const addProblemToCalendar = async (steps: string[]) => {
   const response = await api.post('/api/problem/add-to-calendar', { steps })
   return response.data
 }
+
+export interface PartnerOut {
+  id: string
+  name: string
+  group_id: string
+  telegram_username?: string
+  phone?: string
+  notes?: string
+}
+
+export interface ProjectSetupResponse {
+  problem: string
+  partner_selection_guide?: Array<{
+    category: string
+    title: string
+    description: string
+    examples: string[]
+  }>
+  user_partners: Record<string, PartnerOut[]>
+}
+
+export const getProjectSetup = async (historyId: string) => {
+  const response = await api.get<ProjectSetupResponse>(`/api/projects/setup/${historyId}`)
+  return response.data
+}
+
+export interface ProjectActivatePayload {
+  history_id: string
+  duration_days?: number
+  project_partners?: Record<string, string[]>
+}
+
+export interface ProjectStatusResponse {
+  has_active_project: boolean
+  project?: {
+    id: string
+    problem: string
+    day_number: number
+    duration_days: number
+    strategy: {
+      root_cause?: string
+      stop_action?: string
+      start_action?: string
+      grow_action?: string
+      success_tip?: string
+      problem_text?: string
+    }
+    partners?: Record<string, string[]>
+  }
+  daily_plan?: {
+    id: string
+    day_number: number
+    focus_quality: string
+    tasks: string[]
+    is_completed: boolean
+  }
+}
+
+export const activateProject = async (payload: ProjectActivatePayload) => {
+  const response = await api.post<ProjectStatusResponse>('/api/projects/activate', payload)
+  return response.data
+}
+
+export const getActiveProject = async () => {
+  const response = await api.get<ProjectStatusResponse>('/api/projects/active')
+  return response.data
+}
+
+export interface DailyCompletePayload {
+  plan_id: string
+  completed_tasks: string[]
+  notes?: string
+}
+
+export const completeDailyProjectPlan = async (payload: DailyCompletePayload) => {
+  const response = await api.post('/api/projects/daily/complete', payload)
+  return response.data
+}

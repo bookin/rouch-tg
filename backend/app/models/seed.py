@@ -18,7 +18,7 @@ class Seed(BaseModel):
     
     # Related partner
     partner_id: Optional[str] = None
-    partner_group: str = "world"  # 'colleagues', 'clients', 'suppliers', 'world', or custom
+    partner_group: str = "world"  # 'source', 'ally', 'protege', 'world', or custom
     
     # Strength factors (from book)
     intention_score: int = Field(ge=1, le=10, default=5)  # How sincere

@@ -45,6 +45,7 @@ class UserDB(Base):
     partners = relationship("PartnerDB", back_populates="user", lazy="selectin")
     problem_history = relationship("ProblemHistoryDB", back_populates="user", lazy="selectin")
     daily_suggestions = relationship("DailySuggestionDB", back_populates="user", lazy="selectin")
+    karma_plans = relationship("KarmaPlanDB", back_populates="user", lazy="selectin")
 
 
 class SeedDB(Base):
@@ -191,6 +192,67 @@ class ProblemHistoryDB(Base):
     
     # Relationships
     user = relationship("UserDB", back_populates="problem_history")
+    karma_plan = relationship("KarmaPlanDB", back_populates="problem_history", uselist=False)
+
+
+class KarmaPlanDB(Base):
+    """Active Karmic Project plan"""
+    __tablename__ = "karma_plans"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    problem_history_id = Column(String, ForeignKey("problem_history.id"), nullable=False)
+
+    status = Column(String, default="active", index=True) # active, completed, cancelled
+    strategy_snapshot = Column(JSON, nullable=False) # {stop, start, grow, ...}
+    
+    start_date = Column(DateTime(timezone=True), server_default=func.now())
+    duration_days = Column(Integer, default=30)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    user = relationship("UserDB", back_populates="karma_plans")
+    problem_history = relationship("ProblemHistoryDB", back_populates="karma_plan")
+    daily_plans = relationship("DailyPlanDB", back_populates="karma_plan", cascade="all, delete-orphan", lazy="selectin")
+    partners_association = relationship("KarmaPlanPartnerDB", back_populates="plan", cascade="all, delete-orphan", lazy="selectin")
+
+
+class KarmaPlanPartnerDB(Base):
+    """Many-to-Many link between KarmaPlan and Partner with category"""
+    __tablename__ = "karma_plan_partners"
+
+    plan_id = Column(String, ForeignKey("karma_plans.id", ondelete="CASCADE"), primary_key=True)
+    partner_id = Column(String, ForeignKey("partners.id", ondelete="CASCADE"), primary_key=True)
+    category = Column(String, nullable=False, primary_key=True) # source, ally, protege, world
+
+    # Relationships
+    plan = relationship("KarmaPlanDB", back_populates="partners_association")
+    partner = relationship("PartnerDB", lazy="joined")
+
+
+class DailyPlanDB(Base):
+    """Daily plan within a Karmic Project"""
+    __tablename__ = "daily_plans"
+
+    id = Column(String, primary_key=True)
+    karma_plan_id = Column(String, ForeignKey("karma_plans.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    day_number = Column(Integer, nullable=False)
+    date = Column(DateTime(timezone=True), nullable=False)
+    
+    focus_quality = Column(String, nullable=True) # e.g. "Giving", "Ethics"
+    tasks = Column(JSON, default=list) # List of generated tasks
+    
+    is_completed = Column(Boolean, default=False)
+    completion_notes = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    karma_plan = relationship("KarmaPlanDB", back_populates="daily_plans")
 
 
 class DailySuggestionDB(Base):

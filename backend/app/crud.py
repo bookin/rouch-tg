@@ -147,6 +147,18 @@ async def create_partner_group(db: AsyncSession, group: PartnerGroup) -> Partner
     return group_db
 
 
+async def get_default_partner_group_by_category(db: AsyncSession, user_id: int, category: str) -> Optional[PartnerGroupDB]:
+    """Get default partner group for a universal category"""
+    result = await db.execute(
+        select(PartnerGroupDB).where(
+            PartnerGroupDB.user_id == user_id,
+            PartnerGroupDB.universal_category == category,
+            PartnerGroupDB.is_default == True
+        ).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def get_partner_groups(db: AsyncSession, user_id: int) -> List[PartnerGroupDB]:
     """Get all partner groups for user"""
     result = await db.execute(
@@ -178,6 +190,7 @@ async def ensure_default_partner_groups(db: AsyncSession, user_id: int) -> List[
                 name=g["name"],
                 icon=g["icon"],
                 description=g["description"],
+                universal_category=g["universal_category"],
                 is_default=True,
                 user_id=user_id,
                 created_at=now,
@@ -189,10 +202,41 @@ async def ensure_default_partner_groups(db: AsyncSession, user_id: int) -> List[
     return groups
 
 
+async def create_partner(db: AsyncSession, partner: Partner) -> PartnerDB:
+    """Create new partner"""
+    partner_db = PartnerDB(
+        id=partner.id,
+        user_id=partner.user_id,
+        group_id=partner.group_id,
+        name=partner.name,
+        telegram_username=partner.telegram_username,
+        phone=partner.phone,
+        notes=partner.notes,
+        created_at=partner.created_at
+    )
+    db.add(partner_db)
+    await db.flush()
+    await db.refresh(partner_db)
+    return partner_db
+
+
 async def get_user_partners(db: AsyncSession, user_id: int) -> List[PartnerDB]:
     """Get user's partners"""
     result = await db.execute(
         select(PartnerDB).where(PartnerDB.user_id == user_id)
+    )
+    return result.scalars().all()
+
+
+async def get_partners_by_universal_category(db: AsyncSession, user_id: int, category: str) -> List[PartnerDB]:
+    """Get partners filtered by universal category"""
+    result = await db.execute(
+        select(PartnerDB)
+        .join(PartnerGroupDB, PartnerDB.group_id == PartnerGroupDB.id)
+        .where(
+            PartnerDB.user_id == user_id,
+            PartnerGroupDB.universal_category == category
+        )
     )
     return result.scalars().all()
 

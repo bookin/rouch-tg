@@ -7,7 +7,10 @@ from app.models.user import UserProfile
 from app.models.seed import Seed
 from uuid import uuid4
 import logging
-
+from app.crud_extended import create_karma_plan, get_active_karma_plan, get_daily_plan, create_daily_plan
+from app.crud import get_user_by_telegram_id, update_user_focus
+from app.models.db_models import ProblemHistoryDB
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Mini App"])
@@ -18,6 +21,7 @@ class PartnerGroupOut(BaseModel):
     name: str
     icon: str
     description: str
+    universal_category: Optional[str] = "world"
     is_default: bool = False
 
 
@@ -96,6 +100,10 @@ class ProblemSolveResponse(BaseModel):
     practices: list[dict] = []
     # Идентификатор сессии диагностики (для многошагового режима)
     session_id: Optional[str] = None
+    # ID истории для активации проекта
+    history_id: Optional[str] = None
+
+
 
 
 async def get_current_user(
@@ -269,32 +277,32 @@ async def get_daily_actions(user: UserProfile = Depends(get_current_user)):
         actions = [
             {
                 "id": "1",
-                "group": "colleagues",
-                "partner_name": "Коллега",
-                "description": "Принеси кофе",
-                "why": "Сеешь поддержку → получишь помощь",
+                "group": "source",
+                "partner_name": "Источник",
+                "description": "Позвони родителям",
+                "why": "Сеешь благодарность → получишь ресурсы",
                 "completed": False
             },
             {
                 "id": "2",
-                "group": "clients",
-                "partner_name": "Клиент",
-                "description": "Отправь статью",
-                "why": "Сеешь знания → получишь лояльность",
+                "group": "ally",
+                "partner_name": "Соратник",
+                "description": "Помоги коллеге",
+                "why": "Сеешь поддержку → получишь помощь",
                 "completed": False
             },
             {
                 "id": "3",
-                "group": "suppliers",
-                "partner_name": "Поставщик",
-                "description": "Поблагодари",
-                "why": "Сеешь признание → получишь приоритет",
+                "group": "protege",
+                "partner_name": "Подопечный",
+                "description": "Научи чему-то",
+                "why": "Сеешь знания → получишь авторитет",
                 "completed": False
             },
             {
                 "id": "4",
                 "group": "world",
-                "partner_name": "Мир",
+                "partner_name": "Внешний мир",
                 "description": "Пожертвуй 100₽",
                 "why": "Сеешь сострадание → получишь гармонию",
                 "completed": False
@@ -565,10 +573,294 @@ async def solve_problem_endpoint(
     async with AsyncSessionLocal() as db:
         user_db = await get_user_by_telegram_id(db, user.telegram_id)
         if user_db and not solution.get("needs_clarification"):
-            await save_problem_history(db, user_db.id, payload.problem, solution)
+            history_item = await save_problem_history(db, user_db.id, payload.problem, solution)
+            solution["history_id"] = history_item.id
             await db.commit()
 
     return solution
+
+
+class ProjectActivateRequest(BaseModel):
+    history_id: str
+    duration_days: int = 30
+    project_partners: Optional[dict[str, List[str]]] = None # {category: [partner_ids]}
+
+
+class ProjectSetupResponse(BaseModel):
+    problem: str
+    partner_selection_guide: Optional[list[dict]] = None # From AI
+    user_partners: dict[str, list[PartnerOut]] = {} # Grouped by universal_category
+
+
+@router.get("/projects/setup/{history_id}", response_model=ProjectSetupResponse)
+async def get_project_setup(
+    history_id: str,
+    user: UserProfile = Depends(get_current_user)
+):
+    """Get setup data for a new project (guide + existing partners)"""
+    from app.database import AsyncSessionLocal
+    from app.crud import get_user_by_telegram_id, get_user_partners, get_partner_groups
+    from app.models.db_models import ProblemHistoryDB
+    from sqlalchemy import select
+    
+    async with AsyncSessionLocal() as db:
+        user_db = await get_user_by_telegram_id(db, user.telegram_id)
+        if not user_db:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        # 1. Get history for guide
+        res = await db.execute(select(ProblemHistoryDB).where(ProblemHistoryDB.id == history_id))
+        hist = res.scalar_one_or_none()
+        if not hist:
+            raise HTTPException(status_code=404, detail="History entry not found")
+            
+        solution = hist.solution_json
+        guide = solution.get("partner_selection_guide")
+        
+        # Fallback if AI didn't generate guide
+        if not guide:
+            guide = [
+                {
+                    "category": "source",
+                    "title": "Ваш Источник (Source)",
+                    "description": "Выберите того, кто дает вам ресурсы, основу и поддержку. Это ваш фундамент.",
+                    "examples": ["Родители", "Учителя", "Врачи", "Авторы книг"]
+                },
+                {
+                    "category": "ally",
+                    "title": "Ваш Соратник (Ally)",
+                    "description": "Выберите того, кто находится с вами на одном уровне и идет к общей цели.",
+                    "examples": ["Супруг(а)", "Близкий друг", "Партнер по бизнесу", "Коллега"]
+                },
+                {
+                    "category": "protege",
+                    "title": "Ваш Подопечный (Protege)",
+                    "description": "Выберите того, кто зависит от вас и нуждается в вашей помощи.",
+                    "examples": ["Дети", "Ученики", "Клиенты", "Подчиненные"]
+                },
+                {
+                    "category": "world",
+                    "title": "Внешний мир (World)",
+                    "description": "Выберите кого-то далекого от вашего круга или даже конкурента.",
+                    "examples": ["Случайный прохожий", "Конкурент", "Незнакомец", "Общество"]
+                }
+            ]
+        
+        # 2. Get user partners and groups
+        partners_db = await get_user_partners(db, user_db.id)
+        groups_db = await get_partner_groups(db, user_db.id)
+        
+        # Map group_id to universal_category
+        group_map = {g.id: g.universal_category or "world" for g in groups_db}
+        
+        # Group partners by category
+        user_partners = {
+            "source": [],
+            "ally": [],
+            "protege": [],
+            "world": []
+        }
+        
+        for p in partners_db:
+            cat = group_map.get(p.group_id, "world")
+            if cat not in user_partners:
+                user_partners[cat] = []
+                
+            user_partners[cat].append(PartnerOut(
+                id=p.id,
+                name=p.name,
+                group_id=p.group_id,
+                telegram_username=p.telegram_username,
+                phone=p.phone,
+                notes=p.notes
+            ))
+            
+        return {
+            "problem": hist.problem_text,
+            "partner_selection_guide": guide,
+            "user_partners": user_partners
+        }
+
+
+class ProjectStatusResponse(BaseModel):
+    has_active_project: bool
+    project: Optional[dict] = None
+    daily_plan: Optional[dict] = None
+
+
+@router.post("/projects/activate", response_model=ProjectStatusResponse)
+async def activate_project(
+    payload: ProjectActivateRequest,
+    user: UserProfile = Depends(get_current_user)
+):
+    """Activate a new Karmic Project (Karma Plan)"""
+    from app.database import AsyncSessionLocal
+    from app.crud import get_user_by_telegram_id, update_user_focus
+    from app.models.db_models import ProblemHistoryDB
+    from sqlalchemy import select
+
+    async with AsyncSessionLocal() as db:
+        user_db = await get_user_by_telegram_id(db, user.telegram_id)
+        if not user_db:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Get the history item to extract strategy
+        res = await db.execute(select(ProblemHistoryDB).where(ProblemHistoryDB.id == payload.history_id))
+        hist = res.scalar_one_or_none()
+        
+        if not hist:
+            raise HTTPException(status_code=404, detail="History entry not found")
+            
+        solution = hist.solution_json
+        
+        # Extract strategy snapshot
+        strategy_snapshot = {
+            "root_cause": solution.get("root_cause"),
+            "stop_action": solution.get("stop_action"),
+            "start_action": solution.get("start_action"),
+            "grow_action": solution.get("grow_action"),
+            "success_tip": solution.get("success_tip"),
+            "practice_steps": solution.get("practice_steps", []),
+            "problem_text": hist.problem_text
+        }
+        
+        # Create plan
+        plan = await create_karma_plan(
+            db, 
+            user_db.id, 
+            payload.history_id, 
+            strategy_snapshot, 
+            payload.duration_days,
+            project_partners=payload.project_partners
+        )
+        
+        # Update user focus
+        await update_user_focus(db, user_db.id, hist.problem_text)
+        await db.commit()
+        
+        # Serialize partners from association
+        partners_dict = {}
+        if plan.partners_association:
+            for assoc in plan.partners_association:
+                if assoc.category not in partners_dict:
+                    partners_dict[assoc.category] = []
+                partners_dict[assoc.category].append(assoc.partner_id)
+
+        return {
+            "has_active_project": True,
+            "project": {
+                "id": plan.id,
+                "problem": hist.problem_text,
+                "day_number": 1,
+                "duration_days": plan.duration_days,
+                "strategy": plan.strategy_snapshot,
+                "partners": partners_dict
+            }
+        }
+
+
+@router.get("/projects/active", response_model=ProjectStatusResponse)
+async def get_active_project(user: UserProfile = Depends(get_current_user)):
+    """Get current active Karmic Project status"""
+    from app.database import AsyncSessionLocal
+    from app.crud import get_user_by_telegram_id
+    from datetime import datetime, UTC
+
+    async with AsyncSessionLocal() as db:
+        user_db = await get_user_by_telegram_id(db, user.telegram_id)
+        if not user_db:
+             return {"has_active_project": False}
+             
+        plan = await get_active_karma_plan(db, user_db.id)
+        if not plan:
+            return {"has_active_project": False}
+            
+        # Calculate day number
+        days_passed = (datetime.now(UTC) - plan.start_date).days + 1
+        
+        # Get today's daily plan
+        daily = await get_daily_plan(db, plan.id, datetime.now(UTC))
+        
+        daily_data = None
+        if daily:
+            daily_data = {
+                "id": daily.id,
+                "day_number": daily.day_number,
+                "focus_quality": daily.focus_quality,
+                "tasks": daily.tasks,
+                "is_completed": daily.is_completed
+            }
+            
+        # Serialize partners from association
+        partners_dict = {}
+        if plan.partners_association:
+            for assoc in plan.partners_association:
+                if assoc.category not in partners_dict:
+                    partners_dict[assoc.category] = []
+                partners_dict[assoc.category].append(assoc.partner_id)
+            
+        return {
+            "has_active_project": True,
+            "project": {
+                "id": plan.id,
+                "problem": plan.strategy_snapshot.get("problem_text", "Unknown Problem"),
+                "day_number": days_passed,
+                "duration_days": plan.duration_days,
+                "strategy": plan.strategy_snapshot,
+                "partners": partners_dict
+            },
+            "daily_plan": daily_data
+        }
+
+
+class DailyCompleteRequest(BaseModel):
+    plan_id: str
+    completed_tasks: list[str]
+    notes: Optional[str] = None
+
+
+@router.post("/projects/daily/complete")
+async def complete_daily_plan(
+    payload: DailyCompleteRequest,
+    user: UserProfile = Depends(get_current_user)
+):
+    """Complete daily tasks for the project (Coffee Meditation)"""
+    from app.database import AsyncSessionLocal
+    from app.models.db_models import DailyPlanDB
+    from sqlalchemy import select, update
+    from datetime import datetime, UTC
+    
+    async with AsyncSessionLocal() as db:
+        active_plan = await get_active_karma_plan(db, user.id) 
+        
+        if not active_plan or active_plan.id != payload.plan_id:
+             raise HTTPException(status_code=404, detail="Active project not found or mismatch")
+
+        daily = await get_daily_plan(db, active_plan.id, datetime.now(UTC))
+        
+        if not daily:
+             raise HTTPException(status_code=404, detail="Daily plan for today not found")
+             
+        # Update completion
+        await db.execute(
+            update(DailyPlanDB)
+            .where(DailyPlanDB.id == daily.id)
+            .values(
+                is_completed=True,
+                completion_notes=payload.notes,
+                updated_at=datetime.now(UTC)
+            )
+        )
+        
+        # Also increment seeds/streak for the user
+        from app.crud import increment_user_seeds_count
+        
+        for _ in payload.completed_tasks:
+            await increment_user_seeds_count(db, active_plan.user_id)
+            
+        await db.commit()
+        return {"success": True}
+
 
 @router.get("/partners", response_model=PartnersResponse)
 async def get_partners(user: UserProfile = Depends(get_current_user)):
@@ -598,6 +890,7 @@ async def get_partners(user: UserProfile = Depends(get_current_user)):
                 name=g.name,
                 icon=g.icon,
                 description=g.description,
+                universal_category=g.universal_category,
                 is_default=bool(g.is_default),
             )
             for g in groups_db
