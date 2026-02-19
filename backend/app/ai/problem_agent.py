@@ -46,6 +46,7 @@ class PartnerCategoryGuide(BaseModel):
     title: str = Field(description="User-facing title for this category, e.g. 'Your Source of Life'")
     description: str = Field(description="Explanation of who fits here for this specific problem")
     examples: list[str] = Field(description="List of specific examples of people who could be partners")
+    fallback_advice: str = Field(description="Advice if the user has NO ONE in this category (isolated). specific for this problem. e.g. 'Find an online forum' or 'Visualize ancestors'.")
 
 
 class ProblemSolution(BaseModel):
@@ -126,6 +127,11 @@ def create_problem_agent() -> Agent[ProblemContext, ProblemSolution]:
             "     1. Source (Источник): Кто выше / дает ресурсы (Родители, учителя, начальство, врачи).\n"
             "     2. Ally (Соратник): Кто на равных / партнеры (Супруги, коллеги, друзья, подрядчики).\n"
             "     3. Protege (Подопечный): Кто зависит / нуждается (Дети, клиенты, подчиненные, пациенты).\n"
+            "     Для КАЖДОЙ категории обязательно заполни `fallback_advice` — что делать, если у человека НЕТ никого в этой группе (изоляция).\n"
+            "     В случае изоляции предлагай:\n"
+            "       - Ментальные практики (пожелание счастья, визуализация).\n"
+            "       - Онлайн-волонтерство или помощь на форумах.\n"
+            "       - Анонимные действия (уборка мусора, донаты).\n"
             "     4. World (Внешний мир): Далекие люди / конкуренты (Незнакомцы, общество, те, кто мешает).\n"
             "\nОформление ответа:\n"
             "- Все поля структуры ProblemSolution должны быть заполнены.\n"

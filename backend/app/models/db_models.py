@@ -104,6 +104,7 @@ class PartnerDB(Base):
     telegram_username = Column(String, nullable=True)
     phone = Column(String, nullable=True)
     notes = Column(Text, nullable=True)
+    contact_type = Column(String, default="physical")  # physical, online, mental
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
@@ -205,6 +206,7 @@ class KarmaPlanDB(Base):
 
     status = Column(String, default="active", index=True) # active, completed, cancelled
     strategy_snapshot = Column(JSON, nullable=False) # {stop, start, grow, ...}
+    isolation_settings = Column(JSON, nullable=True) # {source: {is_isolated: true}, ...}
     
     start_date = Column(DateTime(timezone=True), server_default=func.now())
     duration_days = Column(Integer, default=30)

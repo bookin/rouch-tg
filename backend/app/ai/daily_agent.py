@@ -14,6 +14,8 @@ class MessageContext(BaseModel):
     time_of_day: str = "morning"  # morning, evening
     plan_strategy: Optional[dict] = None  # Karma Plan strategy snapshot
     project_partners: Optional[dict[str, list[str]]] = None # {category: ["Name 1", "Name 2"]}
+    isolation_settings: Optional[dict[str, dict]] = None # {source: {is_isolated: true}, ...}
+    partner_contact_types: Optional[dict[str, str]] = None # {Partner Name: "online"/"physical"}
 
 
 class DailyMessage(BaseModel):
@@ -45,11 +47,15 @@ def create_daily_agent() -> Agent[MessageContext, DailyMessage]:
             "Говори дружелюбно, но мудро. Используй метафоры из алмазов и семян. "
             "Если у пользователя есть Активный Кармический Проект (Karma Plan), твои советы и действия "
             "должны быть СТРОГО направлены на реализацию его стратегии (STOP/START/GROW). "
-            "Иначе включай действия для 4 универсальных категорий партнёров: "
-            "1. Источник (Source) - родители, учителя; "
-            "2. Соратник (Ally) - коллеги, партнеры; "
-            "3. Подопечный (Protege) - клиенты, подчиненные; "
-            "4. Внешний мир (World) - незнакомцы, общество."
+            "Иначе включай действия для 4 универсальных категорий партнёров. "
+            "\n\nВАЖНО ПРО ИЗОЛЯЦИЮ И ТИПЫ КОНТАКТА:\n"
+            "1. Проверяй `isolation_settings` для каждой категории.\n"
+            "   - Если категория помечена как изолированная (`is_isolated: true`), НЕ предлагай социальные действия.\n"
+            "   - Вместо этого предлагай: МЕНТАЛЬНЫЕ семена (пожелания счастья), АНОНИМНУЮ помощь, или действия для категории 'Внешний мир'.\n"
+            "2. Проверяй `partner_contact_types` для конкретных имен.\n"
+            "   - Если контакт `online`: предлагай ТОЛЬКО цифровые действия (написать, позвонить, перевести деньги, оставить комментарий).\n"
+            "   - ЗАПРЕЩЕНО предлагать встретиться, сходить на кофе, обнять и т.д. для online-партнеров.\n"
+            "3. Если нет ограничений - предлагай разнообразные действия."
         ),
     )
     
@@ -70,15 +76,26 @@ def create_daily_agent() -> Agent[MessageContext, DailyMessage]:
             prompt += f"START (что начать): {context.plan_strategy.get('start_action')}\n"
             prompt += f"GROW (как поливать): {context.plan_strategy.get('grow_action')}\n"
             
+            if context.isolation_settings:
+                prompt += "\nНастройки изоляции (где НЕТ партнеров):\n"
+                for cat, settings in context.isolation_settings.items():
+                    if settings.get('is_isolated'):
+                        prompt += f"- {cat.upper()}: ИЗОЛИРОВАН (только ментальные/анонимные действия)\n"
+            
             if context.project_partners:
-                prompt += "Партнеры проекта:\n"
+                prompt += "\nПартнеры проекта:\n"
                 for cat, names in context.project_partners.items():
                     prompt += f"- {cat.upper()}: {', '.join(names)}\n"
+                    # Add contact types info if available
+                    if context.partner_contact_types:
+                        for name in names:
+                            ctype = context.partner_contact_types.get(name, 'physical')
+                            prompt += f"  ({name}: {ctype})\n"
             
             prompt += "Твоя задача на утро: сгенерировать 3 конкретных микро-действия на сегодня, " \
                       "которые помогут пользователю реализовать эту стратегию. " \
-                      "Действия должны быть простыми, выполнимыми за день и разнообразными (одно на STOP, одно на START, одно на партнеров).\n" \
-                      "Если есть партнеры, обязательно используй их ИМЕНА в действиях для персонализации.\n"
+                      "Действия должны быть простыми, выполнимыми за день и разнообразными.\n" \
+                      "Строго следуй ограничениям изоляции и типа контактов (online/physical)!\n"
             prompt += "-----------------------------------\n"
         
         if context.streak_days > 0:
@@ -114,7 +131,9 @@ async def generate_morning_message(
     streak_days: int = 0,
     total_seeds: int = 0,
     plan_strategy: Optional[dict] = None,
-    project_partners: Optional[dict[str, list[str]]] = None
+    project_partners: Optional[dict[str, list[str]]] = None,
+    isolation_settings: Optional[dict] = None,
+    partner_contact_types: Optional[dict] = None
 ) -> DailyMessage:
     """
     Generate morning message using AI
@@ -126,6 +145,8 @@ async def generate_morning_message(
         total_seeds: Total seeds planted
         plan_strategy: Active Karma Plan strategy
         project_partners: Specific partners for the project
+        isolation_settings: Isolation flags per category
+        partner_contact_types: Contact types (online/physical) for partners
         
     Returns:
         Structured morning message
@@ -139,7 +160,9 @@ async def generate_morning_message(
         total_seeds=total_seeds,
         time_of_day="morning",
         plan_strategy=plan_strategy,
-        project_partners=project_partners
+        project_partners=project_partners,
+        isolation_settings=isolation_settings,
+        partner_contact_types=partner_contact_types
     )
     
     if plan_strategy:
@@ -147,6 +170,7 @@ async def generate_morning_message(
             "Создай утреннее сообщение с мотивацией и стратегическим планом для участника Кармического Проекта. "
             "Включи 3 конкретных действия (tasks), которые продвинут его стратегию сегодня. "
             "Если переданы имена партнеров, используй их в формулировках задач. "
+            "УЧИТЫВАЙ настройки изоляции и типы контактов (online/physical). "
             "Будь сфокусированным на его цели."
         )
     else:

@@ -97,6 +97,7 @@ export interface PartnerCreatePayload {
   telegram_username?: string
   phone?: string
   notes?: string
+  contact_type?: 'physical' | 'online'
 }
 
 export const createPartner = async (payload: PartnerCreatePayload) => {
@@ -152,6 +153,7 @@ export interface PartnerOut {
   telegram_username?: string
   phone?: string
   notes?: string
+  contact_type?: 'physical' | 'online'
 }
 
 export interface ProjectSetupResponse {
@@ -173,6 +175,7 @@ export const getProjectSetup = async (historyId: string) => {
 export interface ProjectActivatePayload {
   history_id: string
   duration_days?: number
+  isolation_settings?: Record<string, { is_isolated: boolean }>
   project_partners?: Record<string, string[]>
 }
 

@@ -28,8 +28,16 @@ export default function PartnerWizard({ historyId, onComplete, onCancel }: Props
     world: []
   })
   
+  const [isolationSettings, setIsolationSettings] = useState<Record<string, { is_isolated: boolean }>>({
+    source: { is_isolated: false },
+    ally: { is_isolated: false },
+    protege: { is_isolated: false },
+    world: { is_isolated: false }
+  })
+
   // For creating new partner
   const [newPartnerName, setNewPartnerName] = useState('')
+  const [newPartnerContactType, setNewPartnerContactType] = useState<'physical' | 'online'>('physical')
   const [isCreating, setIsCreating] = useState(false)
 
   useEffect(() => {
@@ -98,7 +106,8 @@ export default function PartnerWizard({ historyId, onComplete, onCancel }: Props
 
       const newP = await createPartner({
         name: newPartnerName,
-        group_id: group.id
+        group_id: group.id,
+        contact_type: newPartnerContactType
       })
       
       if (newP.success) {
@@ -106,7 +115,8 @@ export default function PartnerWizard({ historyId, onComplete, onCancel }: Props
         const p: PartnerOut = {
           id: newP.partner_id,
           name: newPartnerName,
-          group_id: group.id
+          group_id: group.id,
+          contact_type: newPartnerContactType
         }
         
         setSetupData((prev: ProjectSetupResponse | null) => {
@@ -124,6 +134,7 @@ export default function PartnerWizard({ historyId, onComplete, onCancel }: Props
         // Auto select
         togglePartner(category, newP.partner_id)
         setNewPartnerName('')
+        setNewPartnerContactType('physical')
       }
       
     } catch (e) {
@@ -139,7 +150,8 @@ export default function PartnerWizard({ historyId, onComplete, onCancel }: Props
       setSubmitting(true)
       const res = await activateProject({
         history_id: historyId,
-        project_partners: selections
+        project_partners: selections,
+        isolation_settings: isolationSettings
       })
       onComplete(res)
     } catch (e) {
@@ -187,10 +199,23 @@ export default function PartnerWizard({ historyId, onComplete, onCancel }: Props
     const guide = getGuide(category)
     const partners = setupData.user_partners[category] || []
     const selected = selections[category] || []
+    const isIsolated = isolationSettings[category]?.is_isolated || false
 
     // If no guide found (should not happen with backend fallback), show generic
     const displayTitle = guide?.title || category.toUpperCase()
     const displayDesc = guide?.description || 'Выберите партнера для этой категории'
+    const fallbackAdvice = guide?.fallback_advice || 'Если нет партнера в этой категории, используйте ментальные семена.'
+
+    const handleIsolationToggle = (e: ChangeEvent<HTMLInputElement>) => {
+      setIsolationSettings(prev => ({
+        ...prev,
+        [category]: { is_isolated: e.target.checked }
+      }))
+      // If isolated, clear selections
+      if (e.target.checked) {
+        setSelections(prev => ({ ...prev, [category]: [] }))
+      }
+    }
 
     return (
       <div style={{ padding: 20 }}>
@@ -205,47 +230,112 @@ export default function PartnerWizard({ historyId, onComplete, onCancel }: Props
           </div>
         )}
 
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontWeight: 600, marginBottom: 10 }}>Выбери из списка:</div>
-          {partners.length === 0 && <div style={{ opacity: 0.5, fontStyle: 'italic' }}>Пока никого нет</div>}
-          <div style={{ display: 'grid', gap: 8 }}>
-            {partners.map((p: PartnerOut) => (
-              <div 
-                key={p.id}
-                onClick={() => togglePartner(category, p.id)}
-                style={{
-                  padding: 12,
-                  borderRadius: 10,
-                  border: selected.includes(p.id) ? '2px solid #3390ec' : '1px solid #ddd',
-                  background: selected.includes(p.id) ? '#f0f8ff' : '#fff',
-                  cursor: 'pointer',
-                  fontWeight: 500
-                }}
-              >
-                {selected.includes(p.id) ? '✅ ' : '⬜️ '} {p.name}
-              </div>
-            ))}
-          </div>
+        <div style={{ marginBottom: 20, padding: 12, borderRadius: 10, background: '#fff3e0', border: '1px solid #ffe0b2' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 600, fontSize: '0.9rem' }}>
+            <input 
+              type="checkbox" 
+              checked={isIsolated} 
+              onChange={handleIsolationToggle}
+              style={{ width: 18, height: 18 }}
+            />
+            У меня нет никого в этой категории / Я в изоляции
+          </label>
         </div>
 
-        <div style={{ marginBottom: 30 }}>
-          <div style={{ fontWeight: 600, marginBottom: 10 }}>Или добавь нового:</div>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <input 
-              value={newPartnerName}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setNewPartnerName(e.target.value)}
-              placeholder="Имя..."
-              style={{ flex: 1, padding: 10, borderRadius: 8, border: '1px solid #ddd' }}
-            />
-            <button 
-              onClick={() => handleCreatePartner(category)}
-              disabled={isCreating || !newPartnerName}
-              style={{ padding: '0 16px', borderRadius: 8, border: 'none', background: '#3390ec', color: '#fff', cursor: 'pointer' }}
-            >
-              +
-            </button>
+        {isIsolated ? (
+          <div style={{ marginBottom: 30, padding: 16, borderRadius: 12, background: '#e8f5e9', border: '1px solid #c8e6c9' }}>
+            <div style={{ fontWeight: 700, color: '#2e7d32', marginBottom: 8 }}>🧘 Что делать:</div>
+            <div style={{ lineHeight: '1.5', fontSize: '0.95rem' }}>{fallbackAdvice}</div>
           </div>
-        </div>
+        ) : (
+          <>
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontWeight: 600, marginBottom: 10 }}>Выбери из списка:</div>
+              {partners.length === 0 && <div style={{ opacity: 0.5, fontStyle: 'italic' }}>Пока никого нет</div>}
+              <div style={{ display: 'grid', gap: 8 }}>
+                {partners.map((p: PartnerOut) => (
+                  <div 
+                    key={p.id}
+                    onClick={() => togglePartner(category, p.id)}
+                    style={{
+                      padding: 12,
+                      borderRadius: 10,
+                      border: selected.includes(p.id) ? '2px solid #3390ec' : '1px solid #ddd',
+                      background: selected.includes(p.id) ? '#f0f8ff' : '#fff',
+                      cursor: 'pointer',
+                      fontWeight: 500,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <div>
+                      {selected.includes(p.id) ? '✅ ' : '⬜️ '} {p.name}
+                    </div>
+                    {p.contact_type && (
+                      <div style={{ fontSize: '0.8rem', padding: '2px 6px', borderRadius: 4, background: '#eee', color: '#666' }}>
+                        {p.contact_type === 'online' ? '🌐 Онлайн' : '🏠 Лично'}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 30 }}>
+              <div style={{ fontWeight: 600, marginBottom: 10 }}>Или добавь нового:</div>
+              <div style={{ display: 'grid', gap: 10 }}>
+                <input 
+                  value={newPartnerName}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => setNewPartnerName(e.target.value)}
+                  placeholder="Имя..."
+                  style={{ padding: 10, borderRadius: 8, border: '1px solid #ddd', fontSize: '1rem' }}
+                />
+                
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button
+                    onClick={() => setNewPartnerContactType('physical')}
+                    style={{
+                      flex: 1,
+                      padding: 8,
+                      borderRadius: 8,
+                      border: `1px solid ${newPartnerContactType === 'physical' ? '#3390ec' : '#ddd'}`,
+                      background: newPartnerContactType === 'physical' ? '#e3f2fd' : '#fff',
+                      color: newPartnerContactType === 'physical' ? '#1565c0' : '#666',
+                      cursor: 'pointer',
+                      fontSize: '0.9rem'
+                    }}
+                  >
+                    🏠 Лично
+                  </button>
+                  <button
+                    onClick={() => setNewPartnerContactType('online')}
+                    style={{
+                      flex: 1,
+                      padding: 8,
+                      borderRadius: 8,
+                      border: `1px solid ${newPartnerContactType === 'online' ? '#3390ec' : '#ddd'}`,
+                      background: newPartnerContactType === 'online' ? '#e3f2fd' : '#fff',
+                      color: newPartnerContactType === 'online' ? '#1565c0' : '#666',
+                      cursor: 'pointer',
+                      fontSize: '0.9rem'
+                    }}
+                  >
+                    🌐 Онлайн
+                  </button>
+                </div>
+
+                <button 
+                  onClick={() => handleCreatePartner(category)}
+                  disabled={isCreating || !newPartnerName}
+                  style={{ padding: '12px', borderRadius: 8, border: 'none', background: '#3390ec', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
+                >
+                  {isCreating ? 'Создаем...' : 'Добавить и выбрать'}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
 
         <div style={{ display: 'flex', gap: 10 }}>
           <button 

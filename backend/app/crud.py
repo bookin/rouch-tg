@@ -211,6 +211,7 @@ async def create_partner(db: AsyncSession, partner: Partner) -> PartnerDB:
         name=partner.name,
         telegram_username=partner.telegram_username,
         phone=partner.phone,
+        contact_type=partner.contact_type,
         notes=partner.notes,
         created_at=partner.created_at
     )

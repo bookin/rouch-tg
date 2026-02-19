@@ -31,6 +31,7 @@ class PartnerOut(BaseModel):
     group_id: str
     telegram_username: Optional[str] = None
     phone: Optional[str] = None
+    contact_type: str = "physical"
     notes: Optional[str] = None
 
 
@@ -44,6 +45,7 @@ class PartnerCreateRequest(BaseModel):
     group_id: str
     telegram_username: Optional[str] = None
     phone: Optional[str] = None
+    contact_type: str = "physical"
     notes: Optional[str] = None
 
 
@@ -584,6 +586,7 @@ class ProjectActivateRequest(BaseModel):
     history_id: str
     duration_days: int = 30
     project_partners: Optional[dict[str, List[str]]] = None # {category: [partner_ids]}
+    isolation_settings: Optional[dict[str, dict]] = None # {category: {is_isolated: bool}}
 
 
 class ProjectSetupResponse(BaseModel):
@@ -731,7 +734,8 @@ async def activate_project(
             payload.history_id, 
             strategy_snapshot, 
             payload.duration_days,
-            project_partners=payload.project_partners
+            project_partners=payload.project_partners,
+            isolation_settings=payload.isolation_settings
         )
         
         # Update user focus

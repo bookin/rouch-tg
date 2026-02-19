@@ -48,6 +48,7 @@ class Partner(BaseModel):
     # Contact info
     telegram_username: Optional[str] = None
     phone: Optional[str] = None
+    contact_type: str = "physical"  # physical, online, mental
     
     # Notes
     notes: Optional[str] = None

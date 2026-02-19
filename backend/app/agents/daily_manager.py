@@ -86,12 +86,16 @@ class DailyManagerAgent:
                 
                 # Resolve project partners names if they exist
                 project_partners_map = None
+                partner_contact_types_map = None
+                
                 if active_plan and active_plan.partners_association:
                     # No need to fetch all users partners, we can get them from association if eager loaded
                     # or just fetch what we need. Since lazy="selectin", they are loaded.
                     # We need partner names.
                     
                     project_partners_map = {}
+                    partner_contact_types_map = {}
+                    
                     for assoc in active_plan.partners_association:
                         cat = assoc.category
                         if cat not in project_partners_map:
@@ -99,6 +103,8 @@ class DailyManagerAgent:
                         # assoc.partner is lazy="joined" in model so it should be there
                         if assoc.partner:
                             project_partners_map[cat].append(assoc.partner.name)
+                            # Collect contact type (default to physical if missing)
+                            partner_contact_types_map[assoc.partner.name] = getattr(assoc.partner, 'contact_type', 'physical') or 'physical'
 
                 # 1. Generate AI message
                 ai_message = await generate_morning_message(
@@ -107,7 +113,9 @@ class DailyManagerAgent:
                     streak_days=streak_days,
                     total_seeds=total_seeds,
                     plan_strategy=plan_strategy,
-                    project_partners=project_partners_map
+                    project_partners=project_partners_map,
+                    isolation_settings=active_plan.isolation_settings if active_plan else None,
+                    partner_contact_types=partner_contact_types_map
                 )
 
                 now = datetime.now(UTC)

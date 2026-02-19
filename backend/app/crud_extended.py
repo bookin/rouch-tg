@@ -11,7 +11,8 @@ async def create_karma_plan(
     problem_history_id: str,
     strategy_snapshot: dict,
     duration_days: int = 30,
-    project_partners: dict = None
+    project_partners: dict = None,
+    isolation_settings: dict = None
 ) -> KarmaPlanDB:
     """Create a new Karma Plan (Karmic Project)"""
     from app.models.db_models import KarmaPlanDB, DailyPlanDB
@@ -33,6 +34,7 @@ async def create_karma_plan(
         status="active",
         strategy_snapshot=strategy_snapshot,
         duration_days=duration_days,
+        isolation_settings=isolation_settings,
         start_date=datetime.now(UTC),
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC)
