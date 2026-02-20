@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { getUser } from './api/client'
 import { useTelegram } from './hooks/useTelegram'
@@ -10,39 +10,7 @@ import Practices from './pages/Practices'
 import Problem from './pages/Problem'
 import Meditation from './pages/Meditation'
 import Onboarding from './pages/Onboarding'
-
-function BottomNav() {
-  const location = useLocation()
-
-  return (
-    <nav className="bottom-nav">
-      <Link to="/" className={`nav-item ${location.pathname === '/' ? 'active' : ''}`}>
-        <span className="nav-icon">🏠</span>
-        <span>Главная</span>
-      </Link>
-      <Link to="/calendar" className={`nav-item ${location.pathname === '/calendar' ? 'active' : ''}`}>
-        <span className="nav-icon">📅</span>
-        <span>Календарь</span>
-      </Link>
-      <Link to="/partners" className={`nav-item ${location.pathname === '/partners' ? 'active' : ''}`}>
-        <span className="nav-icon">👥</span>
-        <span>Партнёры</span>
-      </Link>
-      <Link to="/journal" className={`nav-item ${location.pathname === '/journal' ? 'active' : ''}`}>
-        <span className="nav-icon">🌱</span>
-        <span>Журнал</span>
-      </Link>
-      <Link to="/practices" className={`nav-item ${location.pathname === '/practices' ? 'active' : ''}`}>
-        <span className="nav-icon">🧘</span>
-        <span>Практики</span>
-      </Link>
-      <Link to="/problem" className={`nav-item ${location.pathname === '/problem' ? 'active' : ''}`}>
-        <span className="nav-icon">🧩</span>
-        <span>Проблема</span>
-      </Link>
-    </nav>
-  )
-}
+import Layout from './components/Layout'
 
 function AppContent() {
   const { isReady } = useTelegram()
@@ -73,20 +41,14 @@ function AppContent() {
 
   if (checking) {
     return (
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100vh',
-        background: 'var(--tg-theme-bg-color, #fff)'
-      }}>
-        <div style={{ fontSize: '24px' }}>🧘</div>
+      <div className="flex items-center justify-center min-h-screen bg-background text-foreground">
+        <div className="animate-pulse text-4xl">🧘</div>
       </div>
     )
   }
 
   return (
-    <>
+    <Layout>
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/calendar" element={<Calendar />} />
@@ -97,8 +59,7 @@ function AppContent() {
         <Route path="/meditation" element={<Meditation />} />
         <Route path="/onboarding" element={<Onboarding />} />
       </Routes>
-      <ConditionalBottomNav />
-    </>
+    </Layout>
   )
 }
 
@@ -108,13 +69,6 @@ function App() {
       <AppContent />
     </Router>
   )
-}
-
-function ConditionalBottomNav() {
-  const location = useLocation()
-  // Hide nav on onboarding page
-  if (location.pathname === '/onboarding') return null
-  return <BottomNav />
 }
 
 export default App

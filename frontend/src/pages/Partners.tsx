@@ -1,5 +1,11 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { createPartner, getPartners, PartnerCreatePayload } from '../api/client'
+import { Users, UserPlus, NotebookPen, Loader2, Home, Globe } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 
 interface PartnerGroup {
   id: string
@@ -17,13 +23,14 @@ interface Partner {
   telegram_username?: string
   phone?: string
   notes?: string
+  contact_type?: 'physical' | 'online'
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
-  source: 'Источник (Source)',
-  ally: 'Соратник (Ally)',
-  protege: 'Подопечный (Protege)',
-  world: 'Внешний мир (World)'
+  source: 'Источник',
+  ally: 'Соратник',
+  protege: 'Подопечный',
+  world: 'Внешний мир'
 }
 
 const CATEGORY_DESCRIPTIONS: Record<string, string> = {
@@ -31,6 +38,13 @@ const CATEGORY_DESCRIPTIONS: Record<string, string> = {
   ally: 'Те, кто помогает в делах (Коллеги, партнеры, супруги)',
   protege: 'Те, кто зависит от тебя (Клиенты, дети, подчиненные)',
   world: 'Далекие люди или конкуренты'
+}
+
+const CATEGORY_COLORS: Record<string, string> = {
+  source: 'bg-blue-100 text-blue-700 border-blue-200',
+  ally: 'bg-green-100 text-green-700 border-green-200',
+  protege: 'bg-amber-100 text-amber-700 border-amber-200',
+  world: 'bg-slate-100 text-slate-700 border-slate-200'
 }
 
 const CATEGORY_ORDER = ['source', 'ally', 'protege', 'world']
@@ -44,6 +58,10 @@ export default function Partners() {
   const [newPartnerName, setNewPartnerName] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<string>('source')
   const [newPartnerNotes, setNewPartnerNotes] = useState('')
+  const [newPartnerContactType, setNewPartnerContactType] = useState<'physical' | 'online'>('physical')
+
+  // State to toggle notes visibility on click (mobile friendly)
+  const [activeNoteId, setActiveNoteId] = useState<string | null>(null)
 
   const load = async () => {
     try {
@@ -100,7 +118,8 @@ export default function Partners() {
     const payload: PartnerCreatePayload = {
       name: newPartnerName.trim(),
       group_id: targetGroup.id,
-      notes: newPartnerNotes.trim() || undefined
+      notes: newPartnerNotes.trim() || undefined,
+      contact_type: newPartnerContactType
     }
 
     try {
@@ -108,152 +127,208 @@ export default function Partners() {
       await createPartner(payload)
       setNewPartnerName('')
       setNewPartnerNotes('')
+      setNewPartnerContactType('physical')
       await load()
     } catch (err: any) {
       setError(err?.message || 'Failed to create partner')
     }
   }
 
-  if (loading) {
-    return <div className="page">Загрузка...</div>
+  if (loading && groups.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-muted-foreground text-sm">Загружаем твоё окружение...</p>
+      </div>
+    )
   }
 
   return (
-    <div className="page" style={{ paddingBottom: 80 }}>
-      <h1>👥 Кармические Партнёры</h1>
-      <p style={{ opacity: 0.7, fontSize: '0.9rem', marginBottom: 20 }}>
-        Ваши партнеры — это почва, в которую вы сажаете семена для достижения своих целей.
-      </p>
+    <div className="flex flex-col gap-6 p-4 max-w-5xl mx-auto w-full pb-24">
+      <div className="space-y-1 mt-2">
+        <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center gap-3">
+          <Users className="h-8 w-8 text-primary" />
+          Партнёры
+        </h1>
+        <p className="text-muted-foreground leading-relaxed">
+          Твои партнеры — это почва, в которую ты сажаешь семена для достижения своих целей.
+        </p>
+      </div>
 
       {error && (
-        <div style={{ marginTop: 12, color: 'crimson', background: '#fff0f0', padding: 10, borderRadius: 8 }}>
+        <div className="p-3 rounded-lg bg-destructive/10 text-destructive text-sm font-medium border border-destructive/20">
           {error}
         </div>
       )}
 
       {/* Partners List Grouped by Category */}
-      <div style={{ display: 'grid', gap: 24 }}>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {CATEGORY_ORDER.map(cat => {
           const catPartners = partnersByCategory[cat] || []
           const groupInfo = getGroupByCategory(cat)
           
           return (
-            <div key={cat} style={{ background: '#fff', padding: 16, borderRadius: 16, border: '1px solid #eee' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                <div style={{ fontSize: '1.5rem' }}>{groupInfo?.icon || '👤'}</div>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: '1rem' }}>{CATEGORY_LABELS[cat]}</div>
-                  <div style={{ fontSize: '0.8rem', opacity: 0.6 }}>{CATEGORY_DESCRIPTIONS[cat]}</div>
+            <Card key={cat} className="border-none shadow-sm overflow-hidden">
+              <div className={cn("h-1 w-full", CATEGORY_COLORS[cat].split(' ')[0])} />
+              <CardHeader className="pb-3 pt-5 px-5">
+                <div className="flex items-center gap-3">
+                  <div className={cn(
+                    "h-10 w-10 rounded-full flex items-center justify-center text-lg shadow-sm border",
+                    CATEGORY_COLORS[cat]
+                  )}>
+                    {groupInfo?.icon || '👤'}
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">{CATEGORY_LABELS[cat]}</CardTitle>
+                    <CardDescription className="text-xs mt-1">
+                      {CATEGORY_DESCRIPTIONS[cat]}
+                    </CardDescription>
+                  </div>
                 </div>
-              </div>
-
-              <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
-                {catPartners.length === 0 && (
-                  <div style={{ fontSize: '0.85rem', opacity: 0.5, fontStyle: 'italic', paddingLeft: 8 }}>
-                    Пока никого нет
-                  </div>
-                )}
-                {catPartners.map(p => (
-                  <div key={p.id} style={{ 
-                    background: 'var(--tg-theme-secondary-bg-color, #f5f5f5)', 
-                    padding: '10px 14px', 
-                    borderRadius: 10,
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
-                  }}>
-                    <span style={{ fontWeight: 500 }}>{p.name}</span>
-                    {p.notes && <span style={{ fontSize: '0.8rem', opacity: 0.5 }}>📝</span>}
-                  </div>
-                ))}
-              </div>
-            </div>
+              </CardHeader>
+              <CardContent className="px-5 pb-5 pt-0">
+                <div className="grid gap-2">
+                  {catPartners.length === 0 && (
+                    <div className="text-sm text-muted-foreground/60 italic py-2 text-center bg-secondary/30 rounded-lg border border-dashed border-secondary">
+                      Пока никого нет в этой категории
+                    </div>
+                  )}
+                  {catPartners.map(p => (
+                    <div 
+                      key={p.id} 
+                      className="relative flex items-center justify-between p-3 rounded-lg bg-card border hover:border-primary/30 transition-colors shadow-sm"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-foreground">{p.name}</span>
+                        {p.contact_type && (
+                          <div className="text-[10px] bg-secondary px-1.5 py-0.5 rounded text-muted-foreground flex items-center gap-1">
+                            {p.contact_type === 'online' ? <Globe className="h-3 w-3" /> : <Home className="h-3 w-3" />}
+                          </div>
+                        )}
+                      </div>
+                      
+                      {p.notes && (
+                        <>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setActiveNoteId(activeNoteId === p.id ? null : p.id)
+                            }}
+                            className={cn(
+                              "p-1.5 rounded-full transition-colors",
+                              activeNoteId === p.id ? "bg-primary/10 text-primary" : "text-muted-foreground/50 hover:text-primary hover:bg-primary/5"
+                            )}
+                          >
+                            <NotebookPen className="h-4 w-4" />
+                          </button>
+                          
+                          {activeNoteId === p.id && (
+                            <div className="absolute right-0 top-12 z-20 w-48 p-3 bg-popover text-popover-foreground text-xs rounded-md shadow-md border animate-in fade-in zoom-in-95 duration-200">
+                              <div className="font-semibold mb-1 text-primary">Заметки:</div>
+                              {p.notes}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
           )
         })}
       </div>
 
       {/* Add Partner Form */}
-      <div style={{ marginTop: 30, background: '#f0f8ff', padding: 16, borderRadius: 16, border: '1px solid #d0e8ff' }}>
-        <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', color: '#0056b3' }}>➕ Добавить партнёра</h3>
-        <form onSubmit={onCreatePartner} style={{ display: 'grid', gap: 12 }}>
-          
-          <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: 6, fontWeight: 500 }}>Категория</label>
-            <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
-              {CATEGORY_ORDER.map(cat => {
-                const isActive = selectedCategory === cat
-                const g = getGroupByCategory(cat)
-                return (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setSelectedCategory(cat)}
-                    style={{
-                      padding: '8px 12px',
-                      borderRadius: 20,
-                      border: isActive ? '1px solid #0056b3' : '1px solid #ddd',
-                      background: isActive ? '#0056b3' : '#fff',
-                      color: isActive ? '#fff' : '#333',
-                      fontSize: '0.85rem',
-                      whiteSpace: 'nowrap',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {g?.icon} {CATEGORY_LABELS[cat].split('(')[0]}
-                  </button>
-                )
-              })}
+      <Card className="border-primary/20 shadow-md">
+        <CardHeader className="pb-3 bg-secondary/30">
+          <CardTitle className="flex items-center gap-2 text-lg text-primary">
+            <UserPlus className="h-5 w-5" />
+            Добавить партнёра
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-5 space-y-4">
+          <form onSubmit={onCreatePartner} className="space-y-4">
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                Категория
+              </label>
+              <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none mask-linear-fade">
+                {CATEGORY_ORDER.map(cat => {
+                  const isActive = selectedCategory === cat
+                  const g = getGroupByCategory(cat)
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setSelectedCategory(cat)}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all whitespace-nowrap",
+                        isActive 
+                          ? cn("ring-1 ring-offset-1", CATEGORY_COLORS[cat])
+                          : "bg-background border-input hover:bg-accent hover:text-accent-foreground text-muted-foreground"
+                      )}
+                    >
+                      <span>{g?.icon}</span>
+                      <span>{CATEGORY_LABELS[cat].split('(')[0]}</span>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
-          </div>
 
-          <input
-            value={newPartnerName}
-            onChange={(e) => setNewPartnerName(e.target.value)}
-            placeholder="Имя партнёра"
-            style={{
-              padding: 12,
-              borderRadius: 10,
-              border: '1px solid #ccc',
-              fontSize: '1rem',
-              outline: 'none'
-            }}
-          />
-          
-          <textarea
-            value={newPartnerNotes}
-            onChange={(e) => setNewPartnerNotes(e.target.value)}
-            placeholder="Заметки (что он любит, день рождения...)"
-            rows={2}
-            style={{
-              padding: 12,
-              borderRadius: 10,
-              border: '1px solid #ccc',
-              fontSize: '0.9rem',
-              resize: 'none',
-              outline: 'none',
-              fontFamily: 'inherit'
-            }}
-          />
+            <div className="space-y-2">
+              <Input
+                value={newPartnerName}
+                onChange={(e) => setNewPartnerName(e.target.value)}
+                placeholder="Имя партнёра"
+                className="bg-background"
+              />
+            </div>
+            
+            <div className="grid grid-cols-2 gap-3">
+              <Button
+                type="button"
+                variant={newPartnerContactType === 'physical' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setNewPartnerContactType('physical')}
+                className="w-full"
+              >
+                <Home className="mr-2 h-3 w-3" />
+                Лично
+              </Button>
+              <Button
+                type="button"
+                variant={newPartnerContactType === 'online' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setNewPartnerContactType('online')}
+                className="w-full"
+              >
+                <Globe className="mr-2 h-3 w-3" />
+                Онлайн
+              </Button>
+            </div>
+            
+            <div className="space-y-2">
+              <Textarea
+                value={newPartnerNotes}
+                onChange={(e) => setNewPartnerNotes(e.target.value)}
+                placeholder="Заметки (что он любит, день рождения...)"
+                className="resize-none min-h-[80px] bg-background"
+              />
+            </div>
 
-          <button
-            type="submit"
-            disabled={!newPartnerName.trim()}
-            style={{
-              padding: 14,
-              borderRadius: 12,
-              border: 'none',
-              background: newPartnerName.trim() ? '#0056b3' : '#ccc',
-              color: '#fff',
-              fontWeight: 700,
-              fontSize: '1rem',
-              cursor: newPartnerName.trim() ? 'pointer' : 'not-allowed',
-              transition: '0.2s'
-            }}
-          >
-            Сохранить партнёра
-          </button>
-        </form>
-      </div>
+            <Button 
+              type="submit" 
+              className="w-full" 
+              disabled={!newPartnerName.trim()}
+            >
+              Сохранить партнёра
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   )
 }

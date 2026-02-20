@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react'
 import { getSeeds } from '../api/client'
 import { useNavigate } from 'react-router-dom'
+import { Coffee, Sprout, Sparkles, ChevronRight, Star } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { Card, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Progress } from '@/components/ui/progress'
 
 export default function Meditation() {
     const navigate = useNavigate()
@@ -36,7 +41,7 @@ export default function Meditation() {
             desc: 'Вспомни все добрые дела, которые ты сделал сегодня. Каждое из них — это семя будущего успеха.'
         },
         {
-            title: '☕️ Радость (Кофе-медитация)',
+            title: '☕️ Радость',
             desc: 'Порадуйся за каждое действие. Радость — это полив, без которого семена не взойдут.'
         },
         {
@@ -59,85 +64,129 @@ export default function Meditation() {
         )
     }
 
-    if (loading) return <div className="page">Загрузка...</div>
-
-    return (
-        <div className="page" style={{
-            background: 'linear-gradient(180deg, #fff3e0 0%, var(--tg-theme-bg-color, #fff) 100%)',
-            minHeight: '100vh',
-            display: 'flex',
-            flexDirection: 'column'
-        }}>
-            <div style={{ flex: 1, padding: 20 }}>
-                <h1 style={{ textAlign: 'center', color: '#ef6c00' }}>☕️ Кофе-медитация</h1>
-
-                <div style={{
-                    background: '#fff',
-                    borderRadius: 20,
-                    padding: 24,
-                    boxShadow: '0 10px 30px rgba(0,0,0,0.05)',
-                    marginTop: 20
-                }}>
-                    <div style={{ fontSize: '3rem', textAlign: 'center', marginBottom: 16 }}>
-                        {steps[step].title.split(' ')[0]}
-                    </div>
-                    <h2 style={{ margin: '0 0 12px 0', textAlign: 'center' }}>{steps[step].title.split(' ')[1]}</h2>
-                    <p style={{ lineHeight: '1.6', fontSize: '1.1rem', textAlign: 'center', opacity: 0.9 }}>
-                        {steps[step].desc}
-                    </p>
-
-                    {step === 2 && (
-                        <div style={{ marginTop: 24, display: 'grid', gap: 12 }}>
-                            <div style={{ fontWeight: 700, fontSize: '0.9rem', opacity: 0.6, textTransform: 'uppercase' }}>Твои семена сегодня:</div>
-                            {seeds.length === 0 && <div style={{ textAlign: 'center', padding: 20, opacity: 0.5 }}>Сегодня семян еще нет. Но ты можешь вспомнить любое доброе дело!</div>}
-                            {seeds.map(s => (
-                                <div
-                                    key={s.id}
-                                    onClick={() => toggleRejoice(s.id)}
-                                    style={{
-                                        padding: 16,
-                                        borderRadius: 16,
-                                        background: rejoiced.includes(s.id) ? '#fff3e0' : '#f5f5f5',
-                                        border: rejoiced.includes(s.id) ? '2px solid #ff9800' : '2px solid transparent',
-                                        cursor: 'pointer',
-                                        transition: '0.2s',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: 12
-                                    }}
-                                >
-                                    <div style={{ fontSize: '1.5rem' }}>{rejoiced.includes(s.id) ? '🌟' : '🌱'}</div>
-                                    <div style={{ flex: 1 }}>
-                                        <div style={{ fontWeight: 600 }}>{s.action_type === 'start' ? 'Начато' : 'Прекращено'}</div>
-                                        <div style={{ fontSize: '0.9rem', opacity: 0.8 }}>{s.description}</div>
-                                    </div>
-                                    {rejoiced.includes(s.id) && <div style={{ color: '#ef6c00', fontWeight: 800 }}>РАДОСТЬ!</div>}
-                                </div>
-                            ))}
-                        </div>
-                    )}
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-orange-50">
+                <div className="animate-spin text-orange-500">
+                    <Coffee className="h-8 w-8" />
                 </div>
             </div>
+        )
+    }
 
-            <div style={{ padding: 20 }}>
-                <button
+    const progress = ((step + 1) / steps.length) * 100
+
+    return (
+        <div className="min-h-screen bg-gradient-to-b from-orange-50 to-background flex flex-col p-4 pb-8">
+            <div className="flex-1 flex flex-col justify-center max-w-md mx-auto w-full gap-6">
+                
+                {/* Header */}
+                <div className="text-center space-y-2 mb-4 animate-in fade-in slide-in-from-top-4 duration-700">
+                    <div className="inline-flex p-3 rounded-full bg-orange-100 text-orange-600 mb-2 shadow-sm">
+                        <Coffee className="h-8 w-8" />
+                    </div>
+                    <h1 className="text-2xl font-bold text-orange-900">Кофе-медитация</h1>
+                    <Progress value={progress} className="h-1.5 w-full max-w-[120px] mx-auto bg-orange-100" />
+                </div>
+
+                {/* Main Card */}
+                <Card className="border-none shadow-xl bg-white/80 backdrop-blur-md overflow-hidden relative">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-300 to-amber-300" />
+                    <CardContent className="p-8 text-center space-y-6 pt-10">
+                        <div className="text-5xl animate-bounce duration-1000">
+                            {steps[step].title.split(' ')[0]}
+                        </div>
+                        
+                        <div className="space-y-3">
+                            <h2 className="text-2xl font-bold text-foreground">
+                                {steps[step].title.split(' ').slice(1).join(' ')}
+                            </h2>
+                            <p className="text-muted-foreground text-lg leading-relaxed">
+                                {steps[step].desc}
+                            </p>
+                        </div>
+
+                        {step === 2 && (
+                            <div className="text-left space-y-3 pt-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                                <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground text-center mb-2">
+                                    Твои семена сегодня
+                                </div>
+                                
+                                {seeds.length === 0 && (
+                                    <div className="text-center p-4 text-muted-foreground italic bg-secondary/30 rounded-lg">
+                                        Сегодня семян еще нет. Но ты можешь вспомнить любое доброе дело!
+                                    </div>
+                                )}
+
+                                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+                                    {seeds.map(s => {
+                                        const isRejoiced = rejoiced.includes(s.id)
+                                        return (
+                                            <div
+                                                key={s.id}
+                                                onClick={() => toggleRejoice(s.id)}
+                                                className={cn(
+                                                    "p-4 rounded-xl border transition-all cursor-pointer flex items-center gap-3 relative overflow-hidden group",
+                                                    isRejoiced 
+                                                        ? "bg-orange-50 border-orange-200 shadow-sm" 
+                                                        : "bg-background hover:bg-secondary/50 border-transparent hover:border-border"
+                                                )}
+                                            >
+                                                <div className={cn(
+                                                    "h-10 w-10 rounded-full flex items-center justify-center shrink-0 transition-colors",
+                                                    isRejoiced ? "bg-orange-100 text-orange-600" : "bg-secondary text-muted-foreground"
+                                                )}>
+                                                    {isRejoiced ? <Star className="h-5 w-5 fill-current" /> : <Sprout className="h-5 w-5" />}
+                                                </div>
+                                                
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2 mb-0.5">
+                                                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-white/50 text-foreground/80 border">
+                                                            {s.action_type === 'start' ? 'Начато' : 'Действие'}
+                                                        </span>
+                                                        {isRejoiced && (
+                                                            <span className="text-xs font-bold text-orange-600 animate-in fade-in zoom-in">
+                                                                РАДОСТЬ!
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <p className="text-sm font-medium text-foreground truncate">
+                                                        {s.description}
+                                                    </p>
+                                                </div>
+
+                                                {isRejoiced && (
+                                                    <div className="absolute right-0 top-0 bottom-0 w-1 bg-orange-400" />
+                                                )}
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+            </div>
+
+            {/* Navigation */}
+            <div className="max-w-md mx-auto w-full pt-6">
+                <Button 
                     onClick={handleNext}
-                    style={{
-                        width: '100%',
-                        padding: 18,
-                        borderRadius: 16,
-                        border: 'none',
-                        background: '#ef6c00',
-                        color: '#fff',
-                        fontWeight: 700,
-                        fontSize: '1.1rem',
-                        boxShadow: '0 4px 12px rgba(239, 108, 0, 0.3)',
-                        cursor: 'pointer'
-                    }}
+                    className="w-full h-14 text-lg font-bold shadow-lg shadow-orange-200 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 border-0"
                 >
-                    {step === steps.length - 1 ? 'Завершить' : 'Далее'}
-                </button>
-                <div style={{ textAlign: 'center', marginTop: 12, opacity: 0.4, fontSize: '0.8rem' }}>
+                    {step === steps.length - 1 ? (
+                        <>
+                            Завершить
+                            <Sparkles className="ml-2 h-5 w-5" />
+                        </>
+                    ) : (
+                        <>
+                            Далее
+                            <ChevronRight className="ml-2 h-5 w-5" />
+                        </>
+                    )}
+                </Button>
+                <div className="text-center mt-4 text-xs text-muted-foreground font-medium uppercase tracking-widest">
                     Шаг {step + 1} из {steps.length}
                 </div>
             </div>

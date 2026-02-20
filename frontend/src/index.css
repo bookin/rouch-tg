@@ -1,54 +1,193 @@
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+@import "tailwindcss";
+
+@theme {
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
 }
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  background-color: var(--tg-theme-bg-color, #ffffff);
-  color: var(--tg-theme-text-color, #000000);
+@layer base {
+  :root {
+    /* Backgrounds - Off-white for warmer feel */
+    --background: hsl(0 0% 96%); /* #F5F5F5 - Slightly darker than 98% for better contrast with white cards */
+    --foreground: hsl(220 13% 18%); /* #1F2937 - Dark Grey */
+
+    /* Cards - Pure white */
+    --card: hsl(0 0% 100%);
+    --card-foreground: hsl(220 13% 18%);
+
+    /* Popovers */
+    --popover: hsl(0 0% 100%);
+    --popover-foreground: hsl(220 13% 18%);
+
+    /* Primary CTA - Deep Blue/Purple */
+    --primary: hsl(221 83% 53%); /* #2563EB - Blue 600 */
+    --primary-foreground: hsl(210 40% 98%);
+
+    /* Secondary - Light gray/blue for backgrounds of secondary items */
+    --secondary: hsl(210 40% 90%); /* Darkened from 96.1% to 90% for visibility */
+    --secondary-foreground: hsl(222.2 47.4% 11.2%);
+
+    /* Muted - For less important text */
+    --muted: hsl(210 40% 90%); /* Darkened from 96.1% to 90% */
+    --muted-foreground: hsl(215.4 16.3% 46.9%);
+
+    /* Accent - For hover states */
+    --accent: hsl(210 40% 90%);
+    --accent-foreground: hsl(222.2 47.4% 11.2%);
+
+    /* Destructive - Red */
+    --destructive: hsl(0 84.2% 60.2%);
+    --destructive-foreground: hsl(210 40% 98%);
+
+    /* Borders & Inputs */
+    --border: hsl(214.3 31.8% 85%); /* Darkened from 91.4% to 85% */
+    --input: hsl(214.3 31.8% 85%);
+    --ring: hsl(221 83% 53%);
+
+    /* Radius */
+    --radius: 0.75rem; /* 12px - Moderately rounded */
+  }
+
+  .dark {
+    --background: hsl(222.2 84% 4.9%);
+    --foreground: hsl(210 40% 98%);
+
+    --card: hsl(222.2 84% 4.9%);
+    --card-foreground: hsl(210 40% 98%);
+
+    --popover: hsl(222.2 84% 4.9%);
+    --popover-foreground: hsl(210 40% 98%);
+
+    --primary: hsl(217.2 91.2% 59.8%);
+    --primary-foreground: hsl(222.2 47.4% 11.2%);
+
+    --secondary: hsl(217.2 32.6% 17.5%);
+    --secondary-foreground: hsl(210 40% 98%);
+
+    --muted: hsl(217.2 32.6% 17.5%);
+    --muted-foreground: hsl(215 20.2% 65.1%);
+
+    --accent: hsl(217.2 32.6% 17.5%);
+    --accent-foreground: hsl(210 40% 98%);
+
+    --destructive: hsl(0 62.8% 30.6%);
+    --destructive-foreground: hsl(210 40% 98%);
+
+    --border: hsl(217.2 32.6% 17.5%);
+    --input: hsl(217.2 32.6% 17.5%);
+    --ring: hsl(224.3 76.3% 48%);
+  }
+
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
 }
 
-#root {
-  min-height: 100vh;
+/* React Big Calendar Overrides */
+.rbc-calendar {
+  @apply font-sans text-foreground;
 }
 
-.page {
-  padding: 16px;
-  padding-bottom: 80px;
+.rbc-toolbar {
+  @apply mb-4 flex-wrap gap-2;
 }
 
-.bottom-nav {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: var(--tg-theme-secondary-bg-color, #f0f0f0);
-  display: flex;
-  justify-content: space-around;
-  padding: 12px;
-  border-top: 1px solid var(--tg-theme-hint-color, #ccc);
+.rbc-toolbar-label {
+  @apply text-lg font-bold capitalize text-foreground;
 }
 
-.nav-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-decoration: none;
-  color: var(--tg-theme-text-color, #000);
-  font-size: 12px;
-  gap: 4px;
+.rbc-btn-group {
+  @apply shadow-sm rounded-md overflow-hidden border border-input;
 }
 
-.nav-item.active {
-  color: var(--tg-theme-button-color, #3390ec);
+.rbc-btn-group button {
+  @apply bg-background text-foreground border-r border-input py-1.5 px-3 hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer;
+  box-shadow: none;
 }
 
-.nav-icon {
-  font-size: 24px;
+.rbc-btn-group button.rbc-active {
+  @apply bg-primary text-primary-foreground hover:bg-primary/90 shadow-inner;
+}
+
+.rbc-header {
+  @apply py-3 font-semibold text-xs uppercase tracking-wider text-muted-foreground border-b border-border bg-secondary/20;
+}
+
+.rbc-month-view {
+  @apply border border-border rounded-xl overflow-hidden bg-card;
+}
+
+.rbc-day-bg {
+  @apply border-l border-border;
+}
+
+.rbc-off-range-bg {
+  @apply bg-secondary/10;
+}
+
+.rbc-today {
+  @apply bg-primary/5;
+}
+
+.rbc-event {
+  @apply rounded px-1.5 py-0.5 shadow-sm border-none;
+}
+
+.rbc-row-segment {
+  @apply px-1;
+}
+
+/* Custom Utilities for Passion Finder Style */
+@utility shadow-soft {
+  box-shadow: 0 10px 40px -10px rgba(0,0,0,0.08);
+}
+
+@utility glass {
+  @apply bg-white/80 backdrop-blur-md border border-white/20;
+}
+
+/* Container responsive fix */
+@utility container {
+  margin-inline: auto;
+  padding-inline: 1rem;
+  width: 100%;
+  
+  @media (width >= 640px) { max-width: 640px; }
+  @media (width >= 768px) { max-width: 768px; }
+  @media (width >= 1024px) { max-width: 1024px; }
+  @media (width >= 1280px) { max-width: 1280px; }
+  @media (width >= 1536px) { max-width: 1536px; }
 }

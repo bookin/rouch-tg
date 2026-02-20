@@ -2,12 +2,31 @@ import { useEffect, useState } from 'react'
 import { getDailyQuote, getDailyActions, toggleDailyAction } from '../api/client'
 import { useTelegram } from '../hooks/useTelegram'
 import { Link } from 'react-router-dom'
+import { Quote, Coffee, Check, Target, Sparkles, Loader2 } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { Card, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+
+interface DailyAction {
+  id: string
+  partner_name: string
+  description: string
+  why: string
+  completed: boolean
+}
+
+interface QuoteData {
+  text: string
+  author?: string
+  context: string
+}
 
 export default function Dashboard() {
   const { user } = useTelegram()
-  const [quote, setQuote] = useState<any>(null)
-  const [actions, setActions] = useState<any[]>([])
+  const [quote, setQuote] = useState<QuoteData | null>(null)
+  const [actions, setActions] = useState<DailyAction[]>([])
   const [loading, setLoading] = useState(false)
+  const [initialLoading, setInitialLoading] = useState(true)
 
   const fetchData = async () => {
     try {
@@ -19,6 +38,8 @@ export default function Dashboard() {
       setActions(actionsData.actions)
     } catch (error) {
       console.error('Error fetching dashboard data:', error)
+    } finally {
+      setInitialLoading(false)
     }
   }
 
@@ -41,152 +62,154 @@ export default function Dashboard() {
     }
   }
 
-  return (
-    <div className="page" style={{ paddingBottom: 80 }}>
-      <h1>Привет, {user?.first_name || 'друг'}! 👋</h1>
+  if (initialLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-muted-foreground text-sm">Загружаем твой день...</p>
+      </div>
+    )
+  }
 
-      {/* Quote Card */}
-      {quote && (
-        <div style={{
-          background: 'var(--tg-theme-secondary-bg-color, #f5f5f5)',
-          borderRadius: '16px',
-          padding: '20px',
-          margin: '16px 0',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
-          border: '1px solid rgba(0,0,0,0.05)'
-        }}>
-          <div style={{ fontSize: '24px', marginBottom: '12px' }}>💭</div>
-          <p style={{ fontSize: '1.1rem', fontStyle: 'italic', marginBottom: '12px', lineHeight: 1.4, color: 'var(--tg-theme-text-color)' }}>
-            "{quote.text}"
-          </p>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <p style={{ fontSize: '13px', fontWeight: 600, color: 'var(--tg-theme-hint-color)' }}>
-              {quote.author || 'Аноним'}
-            </p>
-            <p style={{ fontSize: '11px', opacity: 0.6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-              {quote.context}
-            </p>
-          </div>
+  return (
+    <div className="flex flex-col gap-6 p-4 max-w-5xl mx-auto w-full">
+      {/* Header */}
+      <div className="space-y-1 mt-2">
+        <h1 className="text-3xl font-bold tracking-tight text-foreground">
+          Привет, {user?.first_name || 'друг'}!
+        </h1>
+        <p className="text-muted-foreground">Твой путь к осознанности начинается здесь.</p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Quote Card */}
+        <div className="lg:col-span-2">
+          {quote && (
+            <Card className="h-full bg-gradient-to-br from-card to-secondary/30 border-none shadow-soft overflow-hidden relative flex flex-col justify-center">
+              <div className="absolute top-0 right-0 p-4 opacity-5">
+                <Quote className="h-24 w-24" />
+              </div>
+              <CardContent className="p-6 relative z-10">
+                <Quote className="h-6 w-6 text-primary mb-3 opacity-80" />
+                <p className="text-lg md:text-xl font-medium italic leading-relaxed text-foreground/90 mb-4">
+                  "{quote.text}"
+                </p>
+                <div className="flex justify-between items-end">
+                  <span className="text-sm font-semibold text-primary">
+                    {quote.author || 'Аноним'}
+                  </span>
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                    {quote.context}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
-      )}
+
+        {/* Quick Actions / Stats Placeholder or Coffee Meditation CTA */}
+        <div className="flex flex-col justify-center gap-4">
+             <Card className="bg-gradient-to-br from-orange-50 to-rose-50 border-none shadow-sm h-full">
+                <CardContent className="p-6 flex flex-col items-center justify-center text-center h-full gap-4">
+                    <div className="p-3 bg-white rounded-full shadow-sm">
+                        <Coffee className="h-8 w-8 text-orange-500" />
+                    </div>
+                    <div>
+                        <h3 className="font-semibold text-foreground">Кофе-медитация</h3>
+                        <p className="text-xs text-muted-foreground mt-1">Заряди свои семена силой радости</p>
+                    </div>
+                    <Button 
+                      variant="default" 
+                      className="w-full rounded-full bg-gradient-to-r from-orange-400 to-rose-500 hover:from-orange-500 hover:to-rose-600 border-0 text-white"
+                      asChild
+                    >
+                      <Link to="/meditation">
+                        Начать
+                      </Link>
+                    </Button>
+                </CardContent>
+             </Card>
+        </div>
+      </div>
 
       {/* Daily Actions Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 32, marginBottom: 16 }}>
-        <h2 style={{ margin: 0, fontSize: '1.4rem' }}>🌱 4 действия</h2>
-        <Link to="/meditation" style={{
-          textDecoration: 'none',
-          background: 'linear-gradient(45deg, #ff9800, #f44336)',
-          color: '#fff',
-          padding: '8px 16px',
-          borderRadius: 25,
-          fontSize: '0.85rem',
-          fontWeight: 700,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          boxShadow: '0 4px 10px rgba(255, 152, 0, 0.3)'
-        }}>
-          ☕️ Кофе-медитация
-        </Link>
+      <div className="flex items-center justify-between mt-2">
+        <div className="flex items-center gap-2">
+          <div className="p-2 bg-primary/10 rounded-full">
+            <Target className="h-5 w-5 text-primary" />
+          </div>
+          <h2 className="text-xl font-semibold">4 действия на сегодня</h2>
+        </div>
       </div>
 
       {/* Actions List */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {actions.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '40px 0', opacity: 0.5 }}>
-            Генерируем советы для тебя...
+          <div className="col-span-full text-center py-12 px-4 rounded-xl border border-dashed border-muted-foreground/20 bg-muted/30">
+            <Sparkles className="h-8 w-8 text-muted-foreground mx-auto mb-3 opacity-50" />
+            <p className="text-muted-foreground">Генерируем лучшие советы для тебя...</p>
           </div>
         ) : (
-          actions.map((action, index) => (
+          actions.map((action) => (
             <div
               key={action.id}
               onClick={() => handleToggleAction(action.id, action.completed)}
-              style={{
-                background: action.completed
-                  ? 'rgba(76, 175, 80, 0.1)'
-                  : 'var(--tg-theme-secondary-bg-color, #f5f5f5)',
-                borderRadius: '16px',
-                padding: '16px',
-                display: 'flex',
-                gap: '16px',
-                alignItems: 'flex-start',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-                border: action.completed
-                  ? '1px solid rgba(76, 175, 80, 0.3)'
-                  : '1px solid transparent',
-                opacity: loading ? 0.7 : 1,
-                position: 'relative',
-                overflow: 'hidden'
-              }}
-            >
-              <div style={{
-                width: 24,
-                height: 24,
-                borderRadius: '6px',
-                border: `2px solid ${action.completed ? '#4CAF50' : '#ddd'}`,
-                background: action.completed ? '#4CAF50' : 'transparent',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-                marginTop: 2
-              }}>
-                {action.completed && <span style={{ color: 'white', fontSize: 14 }}>✓</span>}
-              </div>
-
-              <div style={{ flex: 1 }}>
-                <div style={{
-                  fontWeight: 700,
-                  fontSize: '0.9rem',
-                  color: action.completed ? '#2e7d32' : 'inherit',
-                  marginBottom: 4
-                }}>
-                  {action.partner_name}
-                </div>
-                <div style={{
-                  fontSize: '1rem',
-                  lineHeight: 1.4,
-                  textDecoration: action.completed ? 'line-through' : 'none',
-                  opacity: action.completed ? 0.6 : 1
-                }}>
-                  {action.description}
-                </div>
-                <div style={{
-                  fontSize: '12px',
-                  opacity: 0.6,
-                  marginTop: 8,
-                  fontStyle: 'italic'
-                }}>
-                  🎯 {action.why}
-                </div>
-              </div>
-
-              {/* Seed Shortcut */}
-              {action.completed && (
-                <Link
-                  to={`/seeds?text=${encodeURIComponent(action.description)}`}
-                  onClick={(e) => e.stopPropagation()}
-                  style={{
-                    position: 'absolute',
-                    right: 8,
-                    top: 8,
-                    background: '#fff',
-                    borderRadius: '50%',
-                    width: 32,
-                    height: 32,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    boxShadow: '0 2px 5px rgba(0,0,0,0.1)',
-                    textDecoration: 'none',
-                    fontSize: '18px'
-                  }}
-                  title="Записать в журнал"
-                >
-                  🌱
-                </Link>
+              className={cn(
+                "group relative overflow-hidden rounded-2xl border p-5 transition-all duration-300 cursor-pointer h-full",
+                action.completed
+                  ? "bg-green-50/50 border-green-200 shadow-none"
+                  : "bg-card hover:bg-card/80 border-border/50 shadow-sm hover:shadow-md hover:border-primary/20",
+                loading && "opacity-70 pointer-events-none"
               )}
+            >
+              <div className="flex items-start gap-4 relative z-10 h-full">
+                {/* Checkbox */}
+                <div className={cn(
+                  "flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition-all duration-300 mt-0.5",
+                  action.completed
+                    ? "border-green-500 bg-green-500 text-white"
+                    : "border-muted-foreground/30 group-hover:border-primary/50"
+                )}>
+                  <Check className={cn("h-3.5 w-3.5", action.completed ? "opacity-100" : "opacity-0")} />
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 space-y-2">
+                  <h3 className={cn(
+                    "font-semibold text-base transition-colors",
+                    action.completed ? "text-green-700" : "text-foreground"
+                  )}>
+                    {action.partner_name}
+                  </h3>
+                  <p className={cn(
+                    "text-sm leading-relaxed transition-all",
+                    action.completed ? "text-muted-foreground line-through decoration-muted-foreground/50" : "text-foreground/90"
+                  )}>
+                    {action.description}
+                  </p>
+                  <div className="flex items-center gap-1.5 pt-1">
+                    <Target className="h-3 w-3 text-primary/70" />
+                    <span className="text-xs text-muted-foreground italic">
+                      {action.why}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Seed Action Button */}
+                {action.completed && (
+                  <Button
+                    size="icon"
+                    variant="secondary"
+                    className="h-8 w-8 rounded-full bg-background shadow-sm hover:bg-primary hover:text-primary-foreground absolute right-2 top-2 animate-in fade-in zoom-in duration-300"
+                    asChild
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Link to={`/journal?description=${encodeURIComponent(action.description)}`}>
+                      <Sparkles className="h-4 w-4" />
+                    </Link>
+                  </Button>
+                )}
+              </div>
             </div>
           ))
         )}

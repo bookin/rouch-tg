@@ -1,5 +1,11 @@
 import { useState } from 'react'
 import { ProjectStatusResponse, completeDailyProjectPlan } from '../api/client'
+import { Calendar, Check, Coffee, Sprout, StopCircle, PlayCircle, Trophy, Loader2 } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+import { Progress } from '@/components/ui/progress'
 
 interface Props {
   data: ProjectStatusResponse
@@ -50,194 +56,171 @@ export default function ActiveProjectDashboard({ data, onRefresh }: Props) {
   const progressPercent = Math.min(100, Math.round((project.day_number / project.duration_days) * 100))
 
   return (
-    <div style={{ display: 'grid', gap: 16 }}>
+    <div className="space-y-6">
       
       {/* Header Card */}
-      <div style={{ 
-        background: 'linear-gradient(135deg, var(--tg-theme-button-color, #3390ec) 0%, #2196f3 100%)', 
-        borderRadius: 16, 
-        padding: 20, 
-        color: '#fff', 
-        boxShadow: '0 4px 12px rgba(33, 150, 243, 0.3)'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-          <div>
-            <div style={{ fontSize: '0.8rem', opacity: 0.9, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              Активный проект
+      <Card className="border-none shadow-lg bg-gradient-to-br from-blue-500 to-blue-600 text-white overflow-hidden relative">
+        <div className="absolute top-0 right-0 p-8 opacity-10">
+          <Trophy className="w-32 h-32" />
+        </div>
+        <CardContent className="p-6 relative z-10">
+          <div className="flex justify-between items-start mb-4">
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wider opacity-80 mb-1">
+                Активный проект
+              </div>
+              <h2 className="text-xl font-bold leading-tight">
+                {project.problem}
+              </h2>
             </div>
-            <h2 style={{ margin: '4px 0 0 0', fontSize: '1.25rem', lineHeight: 1.3 }}>
-              {project.problem}
-            </h2>
+            <div className="bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap">
+              День {project.day_number}/{project.duration_days}
+            </div>
           </div>
-          <div style={{ 
-            background: 'rgba(255,255,255,0.2)', 
-            padding: '4px 10px', 
-            borderRadius: 12, 
-            fontSize: '0.85rem', 
-            fontWeight: 700,
-            backdropFilter: 'blur(4px)'
-          }}>
-            День {project.day_number}/{project.duration_days}
-          </div>
-        </div>
 
-        {/* Progress Bar */}
-        <div style={{ background: 'rgba(0,0,0,0.1)', height: 6, borderRadius: 3, overflow: 'hidden', marginTop: 16 }}>
-          <div style={{ 
-            width: `${progressPercent}%`, 
-            height: '100%', 
-            background: '#fff', 
-            borderRadius: 3,
-            transition: 'width 0.5s ease-out'
-          }} />
-        </div>
-      </div>
+          <div className="space-y-2">
+            <div className="flex justify-between text-xs opacity-90">
+              <span>Прогресс</span>
+              <span>{progressPercent}%</span>
+            </div>
+            <Progress value={progressPercent} className="h-2 bg-black/20" />
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Daily Plan Card */}
       {daily_plan ? (
-        <div style={{ 
-          background: 'var(--tg-theme-bg-color, #fff)', 
-          borderRadius: 16, 
-          padding: 16,
-          border: '1px solid var(--tg-theme-secondary-bg-color, #eee)',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-            <div style={{ fontSize: '1.5rem' }}>📅</div>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: '1rem' }}>План на сегодня</div>
-              <div style={{ fontSize: '0.85rem', opacity: 0.6 }}>Качество дня: <span style={{ color: 'var(--tg-theme-button-color, #3390ec)', fontWeight: 600 }}>{daily_plan.focus_quality}</span></div>
+        <Card>
+          <CardHeader className="pb-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                <Calendar className="h-5 w-5" />
+              </div>
+              <div>
+                <CardTitle className="text-lg">План на сегодня</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Качество дня: <span className="font-medium text-primary">{daily_plan.focus_quality}</span>
+                </p>
+              </div>
             </div>
-          </div>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="space-y-3">
+              {daily_plan.tasks.map((task, idx) => {
+                const isChecked = daily_plan.is_completed || completedTasks.includes(task)
+                return (
+                  <div 
+                    key={idx}
+                    onClick={() => handleTaskToggle(task)}
+                    className={cn(
+                      "flex items-start gap-3 p-3 rounded-xl transition-all border cursor-pointer",
+                      isChecked 
+                        ? "bg-green-50 border-green-200" 
+                        : "bg-secondary/30 border-transparent hover:bg-secondary/50",
+                      daily_plan.is_completed && "cursor-default"
+                    )}
+                  >
+                    <div className={cn(
+                      "mt-0.5 h-5 w-5 rounded-md border flex items-center justify-center shrink-0 transition-colors",
+                      isChecked 
+                        ? "bg-green-500 border-green-500 text-white" 
+                        : "border-muted-foreground/30 bg-background"
+                    )}>
+                      {isChecked && <Check className="h-3.5 w-3.5" />}
+                    </div>
+                    <span className={cn(
+                      "text-sm leading-relaxed",
+                      isChecked && "text-muted-foreground line-through"
+                    )}>
+                      {task}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
 
-          <div style={{ display: 'grid', gap: 10 }}>
-            {daily_plan.tasks.map((task, idx) => {
-              const isChecked = daily_plan.is_completed || completedTasks.includes(task)
-              return (
-                <div 
-                  key={idx}
-                  onClick={() => handleTaskToggle(task)}
-                  style={{ 
-                    display: 'flex', 
-                    gap: 12, 
-                    padding: 12, 
-                    borderRadius: 12, 
-                    background: isChecked ? '#f0fff4' : 'var(--tg-theme-secondary-bg-color, #f5f5f5)',
-                    border: isChecked ? '1px solid #c6f6d5' : '1px solid transparent',
-                    cursor: daily_plan.is_completed ? 'default' : 'pointer',
-                    transition: 'all 0.2s'
-                  }}
+            {!daily_plan.is_completed && (
+              <div className="space-y-4 pt-4 border-t">
+                <Textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Заметки к кофе-медитации (как прошел день?)..."
+                  className="min-h-[80px] bg-background"
+                />
+                
+                <Button
+                  onClick={handleCompleteDay}
+                  disabled={isSubmitting || completedTasks.length === 0}
+                  className="w-full font-bold"
+                  size="lg"
                 >
-                  <div style={{ 
-                    minWidth: 22, 
-                    height: 22, 
-                    borderRadius: 6, 
-                    border: isChecked ? 'none' : '2px solid #ccc',
-                    background: isChecked ? '#48bb78' : 'none',
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center',
-                    color: '#fff',
-                    fontSize: '0.9rem'
-                  }}>
-                    {isChecked && '✓'}
-                  </div>
-                  <div style={{ 
-                    fontSize: '0.95rem', 
-                    textDecoration: isChecked ? 'line-through' : 'none',
-                    opacity: isChecked ? 0.6 : 1
-                  }}>
-                    {task}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Сохраняем...
+                    </>
+                  ) : (
+                    <>
+                      <Coffee className="mr-2 h-4 w-4" />
+                      Завершить день
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
 
-          {!daily_plan.is_completed && (
-            <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #eee' }}>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Заметки к кофе-медитации (как прошел день?)..."
-                rows={3}
-                style={{
-                  width: '100%',
-                  padding: 12,
-                  borderRadius: 10,
-                  border: '1px solid var(--tg-theme-hint-color, #ccc)',
-                  fontSize: '0.9rem',
-                  resize: 'none',
-                  outline: 'none',
-                  marginBottom: 12,
-                  fontFamily: 'inherit'
-                }}
-              />
-              
-              <button
-                onClick={handleCompleteDay}
-                disabled={isSubmitting || completedTasks.length === 0}
-                style={{
-                  width: '100%',
-                  padding: '14px',
-                  borderRadius: 12,
-                  border: 'none',
-                  background: completedTasks.length > 0 ? 'var(--tg-theme-button-color, #3390ec)' : '#ccc',
-                  color: '#fff',
-                  fontWeight: 700,
-                  fontSize: '1rem',
-                  cursor: completedTasks.length > 0 ? 'pointer' : 'not-allowed',
-                  opacity: isSubmitting ? 0.7 : 1
-                }}
-              >
-                {isSubmitting ? 'Сохраняем...' : '☕️ Завершить день (Кофе-медитация)'}
-              </button>
-            </div>
-          )}
-
-          {daily_plan.is_completed && (
-            <div style={{ marginTop: 16, padding: 12, background: '#f0fff4', borderRadius: 10, textAlign: 'center', color: '#2f855a', fontWeight: 600, fontSize: '0.9rem' }}>
-              ✨ День завершен! Ты молодец.
-            </div>
-          )}
-        </div>
+            {daily_plan.is_completed && (
+              <div className="bg-green-50 text-green-700 p-3 rounded-lg text-center text-sm font-medium flex items-center justify-center gap-2">
+                <Sprout className="h-4 w-4" />
+                ✨ День завершен! Ты молодец.
+              </div>
+            )}
+          </CardContent>
+        </Card>
       ) : (
-        <div style={{ padding: 20, textAlign: 'center', color: '#888', background: '#f5f5f5', borderRadius: 16 }}>
-          План на сегодня еще не сформирован.
-          <br/>Загляни в утренние сообщения!
-        </div>
+        <Card className="bg-secondary/20 border-dashed">
+          <CardContent className="p-8 text-center text-muted-foreground">
+            <Calendar className="h-8 w-8 mx-auto mb-3 opacity-50" />
+            <p>План на сегодня еще не сформирован.</p>
+            <p className="text-xs mt-1">Загляни в утренние сообщения!</p>
+          </CardContent>
+        </Card>
       )}
 
       {/* Strategy Summary Card */}
-      <div style={{ background: 'var(--tg-theme-secondary-bg-color, #f5f5f5)', borderRadius: 16, padding: 16 }}>
-        <h3 style={{ margin: '0 0 12px 0', fontSize: '1rem', opacity: 0.7 }}>🔑 Стратегия успеха</h3>
-        
-        <div style={{ display: 'grid', gap: 12 }}>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <div style={{ minWidth: 24, fontSize: '1.2rem' }}>🛑</div>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#e65100' }}>STOP</div>
-              <div style={{ fontSize: '0.9rem' }}>{project.strategy.stop_action}</div>
+      <Card className="bg-secondary/30 border-none">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+            <Trophy className="h-4 w-4" />
+            Стратегия успеха
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex gap-3">
+            <StopCircle className="h-5 w-5 text-orange-600 shrink-0" />
+            <div className="space-y-1">
+              <div className="text-xs font-bold text-orange-700">STOP</div>
+              <div className="text-sm text-foreground/90">{project.strategy.stop_action}</div>
             </div>
           </div>
           
-          <div style={{ display: 'flex', gap: 10 }}>
-            <div style={{ minWidth: 24, fontSize: '1.2rem' }}>✅</div>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#2e7d32' }}>START</div>
-              <div style={{ fontSize: '0.9rem' }}>{project.strategy.start_action}</div>
+          <div className="flex gap-3">
+            <PlayCircle className="h-5 w-5 text-green-600 shrink-0" />
+            <div className="space-y-1">
+              <div className="text-xs font-bold text-green-700">START</div>
+              <div className="text-sm text-foreground/90">{project.strategy.start_action}</div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 10 }}>
-            <div style={{ minWidth: 24, fontSize: '1.2rem' }}>🌱</div>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#1565c0' }}>GROW</div>
-              <div style={{ fontSize: '0.9rem' }}>{project.strategy.grow_action}</div>
+          <div className="flex gap-3">
+            <Sprout className="h-5 w-5 text-blue-600 shrink-0" />
+            <div className="space-y-1">
+              <div className="text-xs font-bold text-blue-700">GROW</div>
+              <div className="text-sm text-foreground/90">{project.strategy.grow_action}</div>
             </div>
           </div>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
       
     </div>
   )

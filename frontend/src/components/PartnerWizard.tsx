@@ -1,12 +1,19 @@
-import { useState, useEffect, ChangeEvent } from 'react'
+import { useState, useEffect } from 'react'
 import { 
   getProjectSetup, 
   activateProject, 
   createPartner, 
   ProjectSetupResponse, 
   PartnerOut,
-  ProjectStatusResponse
+  ProjectStatusResponse,
+  getPartners
 } from '../api/client'
+import { Check, ChevronLeft, ChevronRight, Globe, Home, Loader2, Rocket, Sprout, UserPlus } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
 
 interface Props {
   historyId: string
@@ -96,7 +103,7 @@ export default function PartnerWizard({ historyId, onComplete, onCancel }: Props
     try {
       setIsCreating(true)
       // fetch partners to find group
-      const partnersData = await import('../api/client').then(m => m.getPartners())
+      const partnersData = await getPartners()
       const group = partnersData.groups.find((g: any) => g.universal_category === category)
       
       if (!group) {
@@ -163,35 +170,41 @@ export default function PartnerWizard({ historyId, onComplete, onCancel }: Props
   }
 
   if (loading || !setupData) {
-    return <div style={{ padding: 40, textAlign: 'center' }}>Загрузка мастера...</div>
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-muted-foreground text-sm">Подготавливаем мастер выбора партнеров...</p>
+      </div>
+    )
   }
 
   if (step === 'intro') {
     return (
-      <div style={{ padding: 20 }}>
-        <h2>🌱 Почва для семян</h2>
-        <p style={{ lineHeight: '1.5', opacity: 0.8 }}>
-          Чтобы достичь цели <b>{setupData.problem}</b>, нам нужно посадить ментальные семена. 
-          Семена нельзя посадить в пустоту — нужны другие люди.
-        </p>
-        <p style={{ lineHeight: '1.5', opacity: 0.8 }}>
-          Сейчас мы выберем 4 кармических партнеров для этого проекта.
-        </p>
-        <div style={{ marginTop: 30, display: 'flex', gap: 10 }}>
-          <button 
-            onClick={onCancel}
-            style={{ flex: 1, padding: 14, borderRadius: 12, border: 'none', background: '#eee', color: '#333', fontWeight: 600, cursor: 'pointer' }}
-          >
+      <Card className="border-none shadow-none">
+        <CardHeader className="text-center pb-2">
+          <div className="mx-auto bg-primary/10 w-16 h-16 rounded-full flex items-center justify-center mb-4">
+            <Sprout className="h-8 w-8 text-primary" />
+          </div>
+          <CardTitle className="text-2xl">Почва для семян</CardTitle>
+          <CardDescription className="text-base pt-2">
+            Чтобы достичь цели <span className="font-semibold text-foreground">"{setupData.problem}"</span>, нам нужно посадить ментальные семена. 
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="text-center space-y-4 pt-4">
+          <p className="text-muted-foreground">
+            Семена нельзя посадить в пустоту — нужны другие люди. Сейчас мы выберем 4 кармических партнеров для твоего проекта.
+          </p>
+        </CardContent>
+        <CardFooter className="flex gap-3 pt-6">
+          <Button variant="outline" className="flex-1" onClick={onCancel}>
             Отмена
-          </button>
-          <button 
-            onClick={handleNext}
-            style={{ flex: 2, padding: 14, borderRadius: 12, border: 'none', background: 'var(--tg-theme-button-color, #3390ec)', color: '#fff', fontWeight: 600, cursor: 'pointer' }}
-          >
+          </Button>
+          <Button className="flex-[2]" onClick={handleNext}>
             Начать выбор
-          </button>
-        </div>
-      </div>
+            <ChevronRight className="ml-2 h-4 w-4" />
+          </Button>
+        </CardFooter>
+      </Card>
     )
   }
 
@@ -204,154 +217,191 @@ export default function PartnerWizard({ historyId, onComplete, onCancel }: Props
     // If no guide found (should not happen with backend fallback), show generic
     const displayTitle = guide?.title || category.toUpperCase()
     const displayDesc = guide?.description || 'Выберите партнера для этой категории'
-    const fallbackAdvice = guide?.fallback_advice || 'Если нет партнера в этой категории, используйте ментальные семена.'
+    const fallbackAdvice = (guide as any)?.fallback_advice || 'Если нет партнера в этой категории, используйте ментальные семена.'
 
-    const handleIsolationToggle = (e: ChangeEvent<HTMLInputElement>) => {
+    const handleIsolationToggle = (checked: boolean) => {
       setIsolationSettings(prev => ({
         ...prev,
-        [category]: { is_isolated: e.target.checked }
+        [category]: { is_isolated: checked }
       }))
       // If isolated, clear selections
-      if (e.target.checked) {
+      if (checked) {
         setSelections(prev => ({ ...prev, [category]: [] }))
       }
     }
 
     return (
-      <div style={{ padding: 20 }}>
-        <h2 style={{ marginBottom: 10 }}>{displayTitle}</h2>
-        <p style={{ opacity: 0.8, marginBottom: 20, lineHeight: '1.4' }}>
-          {displayDesc}
-        </p>
-        
-        {guide?.examples && guide.examples.length > 0 && (
-          <div style={{ marginBottom: 20, fontSize: '0.9rem', opacity: 0.7, background: '#f5f5f5', padding: 10, borderRadius: 8 }}>
-            💡 Пример: {guide.examples.join(', ')}
-          </div>
-        )}
-
-        <div style={{ marginBottom: 20, padding: 12, borderRadius: 10, background: '#fff3e0', border: '1px solid #ffe0b2' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 600, fontSize: '0.9rem' }}>
-            <input 
-              type="checkbox" 
-              checked={isIsolated} 
-              onChange={handleIsolationToggle}
-              style={{ width: 18, height: 18 }}
-            />
-            У меня нет никого в этой категории / Я в изоляции
-          </label>
-        </div>
-
-        {isIsolated ? (
-          <div style={{ marginBottom: 30, padding: 16, borderRadius: 12, background: '#e8f5e9', border: '1px solid #c8e6c9' }}>
-            <div style={{ fontWeight: 700, color: '#2e7d32', marginBottom: 8 }}>🧘 Что делать:</div>
-            <div style={{ lineHeight: '1.5', fontSize: '0.95rem' }}>{fallbackAdvice}</div>
-          </div>
-        ) : (
-          <>
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ fontWeight: 600, marginBottom: 10 }}>Выбери из списка:</div>
-              {partners.length === 0 && <div style={{ opacity: 0.5, fontStyle: 'italic' }}>Пока никого нет</div>}
-              <div style={{ display: 'grid', gap: 8 }}>
-                {partners.map((p: PartnerOut) => (
-                  <div 
-                    key={p.id}
-                    onClick={() => togglePartner(category, p.id)}
-                    style={{
-                      padding: 12,
-                      borderRadius: 10,
-                      border: selected.includes(p.id) ? '2px solid #3390ec' : '1px solid #ddd',
-                      background: selected.includes(p.id) ? '#f0f8ff' : '#fff',
-                      cursor: 'pointer',
-                      fontWeight: 500,
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center'
-                    }}
-                  >
-                    <div>
-                      {selected.includes(p.id) ? '✅ ' : '⬜️ '} {p.name}
-                    </div>
-                    {p.contact_type && (
-                      <div style={{ fontSize: '0.8rem', padding: '2px 6px', borderRadius: 4, background: '#eee', color: '#666' }}>
-                        {p.contact_type === 'online' ? '🌐 Онлайн' : '🏠 Лично'}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div style={{ marginBottom: 30 }}>
-              <div style={{ fontWeight: 600, marginBottom: 10 }}>Или добавь нового:</div>
-              <div style={{ display: 'grid', gap: 10 }}>
-                <input 
-                  value={newPartnerName}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => setNewPartnerName(e.target.value)}
-                  placeholder="Имя..."
-                  style={{ padding: 10, borderRadius: 8, border: '1px solid #ddd', fontSize: '1rem' }}
+      <Card className="border-none shadow-none">
+        <CardHeader>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              Шаг {['source', 'ally', 'protege', 'world'].indexOf(category) + 1} из 4
+            </span>
+            <div className="flex gap-1">
+              {['source', 'ally', 'protege', 'world'].map((c) => (
+                <div 
+                  key={c} 
+                  className={cn(
+                    "h-1.5 w-6 rounded-full transition-colors",
+                    c === category ? "bg-primary" : "bg-secondary"
+                  )} 
                 />
-                
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <button
-                    onClick={() => setNewPartnerContactType('physical')}
-                    style={{
-                      flex: 1,
-                      padding: 8,
-                      borderRadius: 8,
-                      border: `1px solid ${newPartnerContactType === 'physical' ? '#3390ec' : '#ddd'}`,
-                      background: newPartnerContactType === 'physical' ? '#e3f2fd' : '#fff',
-                      color: newPartnerContactType === 'physical' ? '#1565c0' : '#666',
-                      cursor: 'pointer',
-                      fontSize: '0.9rem'
-                    }}
-                  >
-                    🏠 Лично
-                  </button>
-                  <button
-                    onClick={() => setNewPartnerContactType('online')}
-                    style={{
-                      flex: 1,
-                      padding: 8,
-                      borderRadius: 8,
-                      border: `1px solid ${newPartnerContactType === 'online' ? '#3390ec' : '#ddd'}`,
-                      background: newPartnerContactType === 'online' ? '#e3f2fd' : '#fff',
-                      color: newPartnerContactType === 'online' ? '#1565c0' : '#666',
-                      cursor: 'pointer',
-                      fontSize: '0.9rem'
-                    }}
-                  >
-                    🌐 Онлайн
-                  </button>
-                </div>
-
-                <button 
-                  onClick={() => handleCreatePartner(category)}
-                  disabled={isCreating || !newPartnerName}
-                  style={{ padding: '12px', borderRadius: 8, border: 'none', background: '#3390ec', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
-                >
-                  {isCreating ? 'Создаем...' : 'Добавить и выбрать'}
-                </button>
-              </div>
+              ))}
             </div>
-          </>
-        )}
+          </div>
+          <CardTitle className="text-xl">{displayTitle}</CardTitle>
+          <CardDescription className="text-base">{displayDesc}</CardDescription>
+        </CardHeader>
+        
+        <CardContent className="space-y-6">
+          {guide?.examples && guide.examples.length > 0 && (
+            <div className="bg-secondary/30 p-3 rounded-lg text-sm text-muted-foreground flex gap-2">
+              <span className="shrink-0">💡</span>
+              <span>Пример: {guide.examples.join(', ')}</span>
+            </div>
+          )}
 
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button 
-            onClick={handleBack}
-            style={{ flex: 1, padding: 14, borderRadius: 12, border: 'none', background: '#eee', color: '#333', fontWeight: 600, cursor: 'pointer' }}
-          >
+          <div className="flex items-center space-x-2 bg-amber-50 p-3 rounded-lg border border-amber-100">
+            <Checkbox 
+              id="isolation-mode" 
+              checked={isIsolated}
+              onCheckedChange={handleIsolationToggle}
+              className="border-amber-400 data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500"
+            />
+            <label 
+              htmlFor="isolation-mode" 
+              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-amber-900 cursor-pointer select-none"
+            >
+              У меня нет никого в этой категории
+            </label>
+          </div>
+
+          {isIsolated ? (
+            <div className="p-4 rounded-xl bg-green-50 border border-green-100 space-y-2">
+              <h4 className="text-sm font-bold text-green-800 flex items-center gap-2">
+                <Sprout className="h-4 w-4" />
+                Что делать:
+              </h4>
+              <p className="text-sm text-green-700 leading-relaxed">{fallbackAdvice}</p>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-3">
+                <div className="text-sm font-semibold">Выбери из списка:</div>
+                {partners.length === 0 && (
+                  <div className="text-sm text-muted-foreground italic pl-2">Пока никого нет</div>
+                )}
+                <div className="grid gap-2">
+                  {partners.map((p: PartnerOut) => {
+                    const isSelected = selected.includes(p.id)
+                    return (
+                      <div 
+                        key={p.id}
+                        onClick={() => togglePartner(category, p.id)}
+                        className={cn(
+                          "flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-all",
+                          isSelected 
+                            ? "bg-primary/10 border-primary shadow-sm" 
+                            : "bg-background border-input hover:border-primary/50"
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={cn(
+                            "h-5 w-5 rounded border flex items-center justify-center transition-colors",
+                            isSelected 
+                              ? "bg-primary border-primary text-primary-foreground" 
+                              : "border-muted-foreground/30 bg-background"
+                          )}>
+                            {isSelected && <Check className="h-3.5 w-3.5" />}
+                          </div>
+                          <span className="font-medium text-sm">{p.name}</span>
+                        </div>
+                        
+                        {p.contact_type && (
+                          <div className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-semibold bg-secondary px-2 py-1 rounded text-muted-foreground">
+                            {p.contact_type === 'online' ? <Globe className="h-3 w-3" /> : <Home className="h-3 w-3" />}
+                            {p.contact_type === 'online' ? 'Онлайн' : 'Лично'}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-3 pt-2 border-t">
+                <div className="text-sm font-semibold flex items-center gap-2">
+                  <UserPlus className="h-4 w-4" />
+                  Или добавь нового:
+                </div>
+                <div className="space-y-3">
+                  <Input
+                    value={newPartnerName}
+                    onChange={(e) => setNewPartnerName(e.target.value)}
+                    placeholder="Имя партнера..."
+                    className="bg-background"
+                  />
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    <Button
+                      variant={newPartnerContactType === 'physical' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setNewPartnerContactType('physical')}
+                      className="w-full"
+                    >
+                      <Home className="mr-2 h-3 w-3" />
+                      Лично
+                    </Button>
+                    <Button
+                      variant={newPartnerContactType === 'online' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setNewPartnerContactType('online')}
+                      className="w-full"
+                    >
+                      <Globe className="mr-2 h-3 w-3" />
+                      Онлайн
+                    </Button>
+                  </div>
+
+                  <Button 
+                    onClick={() => handleCreatePartner(category)}
+                    disabled={isCreating || !newPartnerName}
+                    className="w-full"
+                    size="sm"
+                  >
+                    {isCreating ? (
+                      <>
+                        <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                        Создаем...
+                      </>
+                    ) : 'Добавить и выбрать'}
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </CardContent>
+
+        <CardFooter className="flex gap-3 pt-2">
+          <Button variant="outline" className="flex-1" onClick={handleBack}>
+            <ChevronLeft className="mr-2 h-4 w-4" />
             Назад
-          </button>
-          <button 
-            onClick={handleNext}
-            style={{ flex: 2, padding: 14, borderRadius: 12, border: 'none', background: '#3390ec', color: '#fff', fontWeight: 600, cursor: 'pointer' }}
-          >
-            {step === 'world' ? (submitting ? 'Создаем...' : 'Запустить проект 🚀') : 'Далее'}
-          </button>
-        </div>
-      </div>
+          </Button>
+          <Button className="flex-[2]" onClick={handleNext}>
+            {step === 'world' ? (
+              <>
+                {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Rocket className="mr-2 h-4 w-4" />}
+                {submitting ? 'Создаем...' : 'Запустить проект'}
+              </>
+            ) : (
+              <>
+                Далее
+                <ChevronRight className="ml-2 h-4 w-4" />
+              </>
+            )}
+          </Button>
+        </CardFooter>
+      </Card>
     )
   }
 

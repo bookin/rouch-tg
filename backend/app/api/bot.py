@@ -435,27 +435,33 @@ async def _ask_partner_category(message: Message, state: FSMContext, category: s
     project_partners = data.get("project_partners", {})
     selected_in_cat = project_partners.get(category, [])
     
+    isolation_settings = data.get("isolation_settings", {})
+    is_isolated = isolation_settings.get(category, {}).get("is_isolated", False)
+    
     # Find guide item for this category
     guide_item = next((g for g in guide_list if g.get("category") == category), None)
     
     # Fallback texts
     fallbacks = {
-        "source": ("� Источник", "Кто дает тебе ресурсы и основу? (Родители, учителя)"),
-        "ally": ("🤝 Соратник", "Кто помогает тебе в делах? (Коллеги, партнеры)"),
-        "protege": ("🌱 Подопечный", "Кто зависит от тебя? (Клиенты, подчиненные)"),
-        "world": ("🌍 Внешний мир", "Кто-то далекий или конкурент.")
+        "source": ("🙌 Источник", "Кто дает тебе ресурсы и основу? (Родители, учителя)", "Если нет источника: Используй ментальные семена. Посвящай практики учителям прошлого."),
+        "ally": ("🤝 Соратник", "Кто помогает тебе в делах? (Коллеги, партнеры)", "Если нет соратника: Стань соратником для других. Помогай бескорыстно."),
+        "protege": ("🌱 Подопечный", "Кто зависит от тебя? (Клиенты, подчиненные)", "Если нет подопечного: Найди того, кому нужна помощь, даже в малом."),
+        "world": ("🌍 Внешний мир", "Кто-то далекий или конкурент.", "Если изоляция от мира: Делай тайные добрые дела (уборка мусора, пожертвования).")
     }
     
     title = guide_item["title"] if guide_item else fallbacks[category][0]
     desc = guide_item["description"] if guide_item else fallbacks[category][1]
+    fallback_advice = guide_item.get("fallback_advice") if guide_item else fallbacks[category][2]
     examples = guide_item.get("examples", []) if guide_item else []
     
     text = f"**{title}**\n\n{desc}\n"
     if examples:
         text += f"\n💡 Пример: {', '.join(examples)}"
     
-    # Show selected partners names
-    if selected_in_cat:
+    # Show isolation status or selected partners
+    if is_isolated:
+        text += f"\n\n🧘 **Выбрана изоляция / Никого нет**\n_{fallback_advice}_"
+    elif selected_in_cat:
         async with AsyncSessionLocal() as db:
             # Fetch names for display
             res = await db.execute(select(PartnerDB.name).where(PartnerDB.id.in_(selected_in_cat)))
@@ -475,17 +481,22 @@ async def _ask_partner_category(message: Message, state: FSMContext, category: s
     # Build Keyboard
     kb_rows = []
     
-    # Main actions
-    if has_existing:
-        kb_rows.append([InlineKeyboardButton(text="📂 Выбрать из списка", callback_data=f"list_p_{category}")])
-        
-    kb_rows.append([InlineKeyboardButton(text="➕ Добавить нового", callback_data=f"add_p_{category}")])
-    
-    # Navigation
-    if selected_in_cat:
+    if is_isolated:
+        kb_rows.append([InlineKeyboardButton(text="↩️ Отменить изоляцию", callback_data=f"no_iso_p_{category}")])
         kb_rows.append([InlineKeyboardButton(text="➡️ Дальше", callback_data=f"next_p_{category}")])
     else:
-        kb_rows.append([InlineKeyboardButton(text="🤷‍♂️ Пропустить", callback_data=f"skip_p_{category}")])
+        # Main actions
+        if has_existing:
+            kb_rows.append([InlineKeyboardButton(text="📂 Выбрать из списка", callback_data=f"list_p_{category}")])
+            
+        kb_rows.append([InlineKeyboardButton(text="➕ Добавить нового", callback_data=f"add_p_{category}")])
+        
+        # Navigation
+        if selected_in_cat:
+            kb_rows.append([InlineKeyboardButton(text="➡️ Дальше", callback_data=f"next_p_{category}")])
+        else:
+            kb_rows.append([InlineKeyboardButton(text="🧘 Никого нет / Изоляция", callback_data=f"iso_p_{category}")])
+            kb_rows.append([InlineKeyboardButton(text="🤷‍♂️ Пропустить", callback_data=f"skip_p_{category}")])
         
     markup = InlineKeyboardMarkup(inline_keyboard=kb_rows)
     
@@ -502,6 +513,44 @@ async def _ask_partner_category(message: Message, state: FSMContext, category: s
         await message.message.edit_text(text, parse_mode="Markdown", reply_markup=markup)
     else:
         await message.answer(text, parse_mode="Markdown", reply_markup=markup)
+
+
+@router.callback_query(F.data.startswith("iso_p_"))
+async def set_isolation(callback: CallbackQuery, state: FSMContext):
+    """Set isolation for category"""
+    _, _, category = callback.data.split("_")
+    
+    data = await state.get_data()
+    
+    # Update isolation settings
+    isolation_settings = data.get("isolation_settings", {})
+    isolation_settings[category] = {"is_isolated": True}
+    
+    # Clear selected partners for this category
+    project_partners = data.get("project_partners", {})
+    project_partners[category] = []
+    
+    await state.update_data(isolation_settings=isolation_settings, project_partners=project_partners)
+    
+    await _ask_partner_category(callback, state, category)
+    await callback.answer("Режим изоляции выбран")
+
+
+@router.callback_query(F.data.startswith("no_iso_p_"))
+async def unset_isolation(callback: CallbackQuery, state: FSMContext):
+    """Unset isolation for category"""
+    _, _, _, category = callback.data.split("_")
+    
+    data = await state.get_data()
+    
+    # Update isolation settings
+    isolation_settings = data.get("isolation_settings", {})
+    isolation_settings[category] = {"is_isolated": False}
+    
+    await state.update_data(isolation_settings=isolation_settings)
+    
+    await _ask_partner_category(callback, state, category)
+    await callback.answer("Режим изоляции отключен")
 
 
 @router.callback_query(F.data.startswith("list_p_"))
@@ -623,12 +672,62 @@ async def skip_partner_step(callback: CallbackQuery, state: FSMContext):
     await next_partner_step(callback, state)
 
 
-async def _process_partner_input(message: Message, state: FSMContext, current_cat: str, next_cat: str):
-    """Process NEW partner name input"""
+@router.callback_query(F.data.startswith("ctype_"))
+async def process_contact_type(callback: CallbackQuery, state: FSMContext):
+    """Handle contact type selection and create partner"""
+    ctype = callback.data.split("_")[1] # physical/online
+    
+    data = await state.get_data()
+    name = data.get("temp_partner_name")
+    category = data.get("adding_category")
+    
+    if not name or not category:
+        await callback.answer("Данные устарели, попробуй снова")
+        await callback.message.delete()
+        return
+
     from app.database import AsyncSessionLocal
     from app.crud import get_user_by_telegram_id, get_default_partner_group_by_category, create_partner
     from app.models.partner import Partner
     from uuid import uuid4
+
+    async with AsyncSessionLocal() as db:
+        user_db = await get_user_by_telegram_id(db, callback.from_user.id)
+        if not user_db:
+            await callback.answer("Пользователь не найден")
+            return
+            
+        group = await get_default_partner_group_by_category(db, user_db.id, category)
+        if not group:
+            await callback.answer("Группа не найдена")
+            return
+            
+        p = Partner(
+            id=str(uuid4()),
+            name=name,
+            group_id=group.id,
+            user_id=user_db.id,
+            contact_type=ctype
+        )
+        created = await create_partner(db, p)
+        await db.commit()
+        
+        # Add to selection
+        project_partners = data.get("project_partners", {})
+        current_list = project_partners.get(category, [])
+        current_list.append(created.id)
+        project_partners[category] = current_list
+        
+        await state.update_data(project_partners=project_partners, adding_category=None, temp_partner_name=None)
+        
+        await callback.message.edit_text(f"✅ Добавлен и выбран: {name} ({'🏠' if ctype=='physical' else '🌐'})")
+        
+        # Refresh wizard
+        await _ask_partner_category(callback, state, category)
+
+
+async def _process_partner_input(message: Message, state: FSMContext, current_cat: str, next_cat: str):
+    """Process NEW partner name input"""
     
     data = await state.get_data()
     adding_cat = data.get("adding_category")
@@ -642,36 +741,23 @@ async def _process_partner_input(message: Message, state: FSMContext, current_ca
     if not name:
         return
 
-    async with AsyncSessionLocal() as db:
-        user_db = await get_user_by_telegram_id(db, message.from_user.id)
-        if not user_db:
-            return
-            
-        group = await get_default_partner_group_by_category(db, user_db.id, current_cat)
-        if not group:
-            await message.answer("⚠️ Ошибка системы: группа не найдена.")
-            return
-            
-        p = Partner(
-            id=str(uuid4()),
-            name=name,
-            group_id=group.id,
-            user_id=user_db.id
-        )
-        created = await create_partner(db, p)
-        await db.commit()
-        
-        # Add to selection immediately
-        project_partners = data.get("project_partners", {})
-        current_list = project_partners.get(current_cat, [])
-        current_list.append(created.id)
-        project_partners[current_cat] = current_list
-        
-        await state.update_data(project_partners=project_partners, adding_category=None)
-        
-        await message.answer(f"✅ Добавлен и выбран: {name}")
-        # Refresh the wizard view
-        await _ask_partner_category(message, state, current_cat)
+    # Save temp name
+    await state.update_data(temp_partner_name=name)
+    
+    # Ask contact type
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🏠 Лично", callback_data="ctype_physical"),
+            InlineKeyboardButton(text="🌐 Онлайн", callback_data="ctype_online")
+        ],
+        [InlineKeyboardButton(text="🔙 Отмена", callback_data=f"cancel_add_{current_cat}")]
+    ])
+    
+    await message.answer(
+        f"Как ты будешь контактировать с **{name}**?", 
+        reply_markup=kb,
+        parse_mode="Markdown"
+    )
 
 
 async def _finish_project_setup(message: Message, state: FSMContext):
@@ -686,6 +772,7 @@ async def _finish_project_setup(message: Message, state: FSMContext):
     problem_text = data.get("problem_text")
     history_id = data.get("history_id")
     project_partners = data.get("project_partners")
+    isolation_settings = data.get("isolation_settings")
     
     if not solution or not problem_text:
         await message.answer("Данные устарели. Начни заново: /solver")

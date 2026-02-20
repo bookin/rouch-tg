@@ -137,6 +137,7 @@ async def create_partner_group(db: AsyncSession, group: PartnerGroup) -> Partner
         name=group.name,
         icon=group.icon,
         description=group.description,
+        universal_category=group.universal_category,
         is_default=group.is_default,
         user_id=group.user_id,
         created_at=group.created_at

@@ -1,6 +1,10 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import { ArrowRight, Check, ChevronRight, Loader2, Send, User } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 interface OnboardingOption {
     id: string
@@ -180,81 +184,43 @@ export default function Onboarding() {
 
     if (loading) {
         return (
-            <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                height: '100vh',
-                background: 'var(--tg-theme-bg-color, #fff)'
-            }}>
-                <div style={{ fontSize: '24px' }}>🧘</div>
+            <div className="flex items-center justify-center min-h-screen bg-background">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
         )
     }
 
     return (
-        <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            height: '100vh',
-            background: 'var(--tg-theme-bg-color, #fff)'
-        }}>
+        <div className="flex flex-col h-screen bg-background font-sans">
             {/* Header */}
-            <div style={{
-                padding: '16px 20px',
-                background: 'var(--tg-theme-secondary-bg-color, #f5f5f5)',
-                borderBottom: '1px solid rgba(0,0,0,0.05)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px'
-            }}>
-                <div style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '50%',
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '20px'
-                }}>
-                    🧘
+            <div className="px-5 py-4 bg-card/50 backdrop-blur-md border-b flex items-center gap-3 sticky top-0 z-10">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-md">
+                    <User className="h-5 w-5" />
                 </div>
                 <div>
-                    <div style={{ fontWeight: 700, fontSize: '16px' }}>Rouch Karma Manager</div>
-                    <div style={{ fontSize: '12px', opacity: 0.6 }}>
+                    <div className="font-bold text-foreground text-sm">Rouch Karma Manager</div>
+                    <div className="text-xs text-muted-foreground font-medium">
                         {currentStep && `Шаг ${currentStep.step_number} из ${currentStep.total_steps}`}
                     </div>
                 </div>
             </div>
 
             {/* Messages */}
-            <div style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: '16px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '12px'
-            }}>
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-secondary">
                 {messages.map(message => (
-                    <div key={message.id} style={{
-                        display: 'flex',
-                        justifyContent: message.type === 'user' ? 'flex-end' : 'flex-start'
-                    }}>
-                        <div style={{
-                            maxWidth: '85%',
-                            padding: '12px 16px',
-                            borderRadius: message.type === 'user'
-                                ? '18px 18px 4px 18px'
-                                : '18px 18px 18px 4px',
-                            background: message.type === 'user'
-                                ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-                                : 'var(--tg-theme-secondary-bg-color, #f0f0f0)',
-                            color: message.type === 'user' ? '#fff' : 'inherit',
-                            whiteSpace: 'pre-wrap',
-                            lineHeight: 1.5
-                        }}>
+                    <div 
+                        key={message.id} 
+                        className={cn(
+                            "flex w-full animate-in fade-in slide-in-from-bottom-2 duration-300",
+                            message.type === 'user' ? "justify-end" : "justify-start"
+                        )}
+                    >
+                        <div className={cn(
+                            "max-w-[85%] px-4 py-3 shadow-sm text-sm leading-relaxed",
+                            message.type === 'user'
+                                ? "bg-primary text-primary-foreground rounded-2xl rounded-tr-sm"
+                                : "bg-card border text-card-foreground rounded-2xl rounded-tl-sm"
+                        )}>
                             {message.text}
                         </div>
                     </div>
@@ -262,20 +228,11 @@ export default function Onboarding() {
 
                 {/* Typing indicator */}
                 {isTyping && (
-                    <div style={{
-                        display: 'flex',
-                        justifyContent: 'flex-start'
-                    }}>
-                        <div style={{
-                            padding: '12px 16px',
-                            borderRadius: '18px 18px 18px 4px',
-                            background: 'var(--tg-theme-secondary-bg-color, #f0f0f0)',
-                            display: 'flex',
-                            gap: '4px'
-                        }}>
-                            <span style={{ animation: 'bounce 1.4s infinite', animationDelay: '0s' }}>•</span>
-                            <span style={{ animation: 'bounce 1.4s infinite', animationDelay: '0.2s' }}>•</span>
-                            <span style={{ animation: 'bounce 1.4s infinite', animationDelay: '0.4s' }}>•</span>
+                    <div className="flex justify-start animate-in fade-in zoom-in duration-300">
+                        <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-card border flex items-center gap-1.5 h-10 w-16 justify-center">
+                            <div className="w-1.5 h-1.5 bg-muted-foreground/40 rounded-full animate-bounce delay-0" />
+                            <div className="w-1.5 h-1.5 bg-muted-foreground/40 rounded-full animate-bounce delay-150" />
+                            <div className="w-1.5 h-1.5 bg-muted-foreground/40 rounded-full animate-bounce delay-300" />
                         </div>
                     </div>
                 )}
@@ -285,144 +242,87 @@ export default function Onboarding() {
 
             {/* Input area */}
             {currentStep && !currentStep.completed && messages.length > 0 && messages[messages.length - 1].showOptions && (
-                <div style={{
-                    padding: '16px',
-                    borderTop: '1px solid rgba(0,0,0,0.05)',
-                    background: 'var(--tg-theme-secondary-bg-color, #f5f5f5)'
-                }}>
-                    {currentStep.input_type === 'single_choice' || currentStep.input_type === 'confirm' ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div className="p-4 bg-card border-t shadow-[0_-4px_20px_rgba(0,0,0,0.05)] animate-in slide-in-from-bottom-10 duration-500">
+                    
+                    {/* Single Choice & Confirm */}
+                    {(currentStep.input_type === 'single_choice' || currentStep.input_type === 'confirm') && (
+                        <div className="flex flex-col gap-2">
                             {currentStep.options.map(option => (
-                                <button
+                                <Button
                                     key={option.id}
+                                    variant="outline"
                                     onClick={() => handleSingleChoice(option.id, option.label)}
-                                    style={{
-                                        padding: '14px 20px',
-                                        borderRadius: '12px',
-                                        border: 'none',
-                                        background: '#fff',
-                                        color: 'var(--tg-theme-text-color, #000)',
-                                        fontSize: '15px',
-                                        fontWeight: 500,
-                                        cursor: 'pointer',
-                                        boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-                                        transition: 'all 0.2s',
-                                        textAlign: 'left'
-                                    }}
+                                    className="w-full justify-start h-auto py-3.5 text-sm font-medium hover:bg-primary/5 hover:text-primary hover:border-primary/30 transition-all text-left"
                                 >
                                     {option.label}
-                                </button>
+                                </Button>
                             ))}
                         </div>
-                    ) : currentStep.input_type === 'multi_choice' ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            {currentStep.options.map(option => (
-                                <button
-                                    key={option.id}
-                                    onClick={() => handleMultiChoiceToggle(option.id)}
-                                    style={{
-                                        padding: '14px 20px',
-                                        borderRadius: '12px',
-                                        border: selectedMulti.includes(option.id)
-                                            ? '2px solid #667eea'
-                                            : '2px solid transparent',
-                                        background: selectedMulti.includes(option.id)
-                                            ? 'rgba(102, 126, 234, 0.1)'
-                                            : '#fff',
-                                        color: 'var(--tg-theme-text-color, #000)',
-                                        fontSize: '15px',
-                                        fontWeight: 500,
-                                        cursor: 'pointer',
-                                        boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-                                        transition: 'all 0.2s',
-                                        textAlign: 'left',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '10px'
-                                    }}
-                                >
-                                    <span style={{
-                                        width: '20px',
-                                        height: '20px',
-                                        borderRadius: '4px',
-                                        border: '2px solid #667eea',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        background: selectedMulti.includes(option.id) ? '#667eea' : 'transparent',
-                                        color: '#fff',
-                                        fontSize: '12px'
-                                    }}>
-                                        {selectedMulti.includes(option.id) && '✓'}
-                                    </span>
-                                    {option.label}
-                                </button>
-                            ))}
-                            {selectedMulti.length > 0 && (
-                                <button
-                                    onClick={handleMultiChoiceSubmit}
-                                    style={{
-                                        padding: '14px 20px',
-                                        borderRadius: '12px',
-                                        border: 'none',
-                                        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                                        color: '#fff',
-                                        fontSize: '15px',
-                                        fontWeight: 600,
-                                        cursor: 'pointer',
-                                        marginTop: '8px'
-                                    }}
-                                >
-                                    Продолжить →
-                                </button>
-                            )}
+                    )}
+
+                    {/* Multi Choice */}
+                    {currentStep.input_type === 'multi_choice' && (
+                        <div className="flex flex-col gap-2">
+                            {currentStep.options.map(option => {
+                                const isSelected = selectedMulti.includes(option.id)
+                                return (
+                                    <Button
+                                        key={option.id}
+                                        variant="outline"
+                                        onClick={() => handleMultiChoiceToggle(option.id)}
+                                        className={cn(
+                                            "w-full justify-between h-auto py-3.5 text-sm font-medium transition-all group",
+                                            isSelected 
+                                                ? "bg-primary/10 border-primary text-primary hover:bg-primary/15" 
+                                                : "hover:bg-muted"
+                                        )}
+                                    >
+                                        {option.label}
+                                        <div className={cn(
+                                            "w-5 h-5 rounded border flex items-center justify-center transition-colors",
+                                            isSelected ? "bg-primary border-primary text-primary-foreground" : "border-muted-foreground/30"
+                                        )}>
+                                            {isSelected && <Check className="h-3 w-3" />}
+                                        </div>
+                                    </Button>
+                                )
+                            })}
+                            <Button
+                                onClick={handleMultiChoiceSubmit}
+                                disabled={selectedMulti.length === 0}
+                                className="w-full mt-2 font-bold"
+                            >
+                                Продолжить
+                                <ArrowRight className="ml-2 h-4 w-4" />
+                            </Button>
                         </div>
-                    ) : currentStep.input_type === 'text_optional' ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            <input
+                    )}
+
+                    {/* Text Input */}
+                    {currentStep.input_type === 'text_optional' && (
+                        <div className="flex gap-2 items-center">
+                            <Input
                                 type="text"
                                 value={textInput}
                                 onChange={(e) => setTextInput(e.target.value)}
                                 placeholder="Напиши здесь..."
-                                style={{
-                                    padding: '14px 16px',
-                                    borderRadius: '12px',
-                                    border: '1px solid rgba(0,0,0,0.1)',
-                                    fontSize: '15px',
-                                    outline: 'none'
-                                }}
+                                className="bg-background"
+                                onKeyDown={(e) => e.key === 'Enter' && handleTextSubmit()}
                             />
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                                <button
-                                    onClick={handleTextSubmit}
-                                    style={{
-                                        flex: 1,
-                                        padding: '14px',
-                                        borderRadius: '12px',
-                                        border: 'none',
-                                        background: textInput.trim()
-                                            ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-                                            : '#ddd',
-                                        color: '#fff',
-                                        fontSize: '15px',
-                                        fontWeight: 600,
-                                        cursor: 'pointer'
-                                    }}
-                                >
-                                    {textInput.trim() ? 'Отправить' : 'Пропустить'}
-                                </button>
-                            </div>
+                            <Button
+                                onClick={handleTextSubmit}
+                                size="icon"
+                                className={cn(
+                                    "shrink-0 transition-all",
+                                    !textInput.trim() && "opacity-80 bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                                )}
+                            >
+                                {textInput.trim() ? <Send className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                            </Button>
                         </div>
-                    ) : null}
+                    )}
                 </div>
             )}
-
-            <style>{`
-        @keyframes bounce {
-          0%, 80%, 100% { transform: translateY(0); }
-          40% { transform: translateY(-6px); }
-        }
-      `}</style>
         </div>
     )
 }
