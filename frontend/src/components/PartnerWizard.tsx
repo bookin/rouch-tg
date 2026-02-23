@@ -173,25 +173,25 @@ export default function PartnerWizard({ historyId, onComplete, onCancel }: Props
     return (
       <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <p className="text-muted-foreground text-sm">Подготавливаем мастер выбора партнеров...</p>
+        <p className=" text-sm">Подготавливаем мастер выбора партнеров...</p>
       </div>
     )
   }
 
   if (step === 'intro') {
     return (
-      <Card className="border-none shadow-none">
+      <Card>
         <CardHeader className="text-center pb-2">
-          <div className="mx-auto bg-primary/10 w-16 h-16 rounded-full flex items-center justify-center mb-4">
-            <Sprout className="h-8 w-8 text-primary" />
+          <div className="mx-auto bg-primary backdrop-blur-main w-16 h-16 rounded-full flex items-center justify-center mb-4 border border-primary/20">
+            <Sprout className="h-8 w-8 text-white" />
           </div>
           <CardTitle className="text-2xl">Почва для семян</CardTitle>
           <CardDescription className="text-base pt-2">
-            Чтобы достичь цели <span className="font-semibold text-foreground">"{setupData.problem}"</span>, нам нужно посадить ментальные семена. 
+            Чтобы достичь цели <span className="font-semibold text-white/60">"{setupData.problem}"</span>, нам нужно посадить ментальные семена.
           </CardDescription>
         </CardHeader>
         <CardContent className="text-center space-y-4 pt-4">
-          <p className="text-muted-foreground">
+          <p className="">
             Семена нельзя посадить в пустоту — нужны другие люди. Сейчас мы выберем 4 кармических партнеров для твоего проекта.
           </p>
         </CardContent>
@@ -231,10 +231,10 @@ export default function PartnerWizard({ historyId, onComplete, onCancel }: Props
     }
 
     return (
-      <Card className="border-none shadow-none">
+      <Card>
         <CardHeader>
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            <span className="text-xs font-bold uppercase tracking-wider ">
               Шаг {['source', 'ally', 'protege', 'world'].indexOf(category) + 1} из 4
             </span>
             <div className="flex gap-1">
@@ -242,54 +242,54 @@ export default function PartnerWizard({ historyId, onComplete, onCancel }: Props
                 <div 
                   key={c} 
                   className={cn(
-                    "h-1.5 w-6 rounded-full transition-colors",
-                    c === category ? "bg-primary" : "bg-secondary"
+                    "h-1.5 w-6 rounded-full backdrop-blur-main",
+                    c === category ? "bg-primary" : "bg-white/10"
                   )} 
                 />
               ))}
             </div>
           </div>
           <CardTitle className="text-xl">{displayTitle}</CardTitle>
-          <CardDescription className="text-base">{displayDesc}</CardDescription>
+          <CardDescription className="text-base /90">{displayDesc}</CardDescription>
         </CardHeader>
         
         <CardContent className="space-y-6">
           {guide?.examples && guide.examples.length > 0 && (
-            <div className="bg-secondary/30 p-3 rounded-lg text-sm text-muted-foreground flex gap-2">
+            <div className="bg-white/40 backdrop-blur-md p-3 rounded-lg text-sm  flex gap-2 border border-white/30 shadow-sm">
               <span className="shrink-0">💡</span>
               <span>Пример: {guide.examples.join(', ')}</span>
             </div>
           )}
 
-          <div className="flex items-center space-x-2 bg-amber-50 p-3 rounded-lg border border-amber-100">
+          <div className="flex items-center space-x-2 backdrop-blur-main rounded-md border shadow-sm bg-orange-600/20 border-orange-600/40">
             <Checkbox 
               id="isolation-mode" 
               checked={isIsolated}
               onCheckedChange={handleIsolationToggle}
-              className="border-amber-400 data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500"
+              className="border-orange-400 data-[state=checked]:bg-orange-500 data-[state=checked]:border-orange-500 bg-white/50 h-5 w-5 ml-3"
             />
-            <label 
-              htmlFor="isolation-mode" 
-              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-amber-900 cursor-pointer select-none"
+            <label
+              htmlFor="isolation-mode"
+              className="w-full  p-3 text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-white cursor-pointer select-none"
             >
               У меня нет никого в этой категории
             </label>
           </div>
 
           {isIsolated ? (
-            <div className="p-4 rounded-xl bg-green-50 border border-green-100 space-y-2">
+            <div className="p-4 rounded-xl bg-green-50/60 backdrop-blur-main border border-green-100/50 space-y-2 shadow-sm">
               <h4 className="text-sm font-bold text-green-800 flex items-center gap-2">
                 <Sprout className="h-4 w-4" />
                 Что делать:
               </h4>
-              <p className="text-sm text-green-700 leading-relaxed">{fallbackAdvice}</p>
+              <p className="text-sm text-green-800 leading-relaxed">{fallbackAdvice}</p>
             </div>
           ) : (
             <>
               <div className="space-y-3">
                 <div className="text-sm font-semibold">Выбери из списка:</div>
                 {partners.length === 0 && (
-                  <div className="text-sm text-muted-foreground italic pl-2">Пока никого нет</div>
+                  <div className="text-sm  italic pl-2">Пока никого нет</div>
                 )}
                 <div className="grid gap-2">
                   {partners.map((p: PartnerOut) => {
@@ -299,18 +299,18 @@ export default function PartnerWizard({ historyId, onComplete, onCancel }: Props
                         key={p.id}
                         onClick={() => togglePartner(category, p.id)}
                         className={cn(
-                          "flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-all",
-                          isSelected 
-                            ? "bg-primary/10 border-primary shadow-sm" 
-                            : "bg-background border-input hover:border-primary/50"
+                          "flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-all backdrop-blur-main bg-white/10 border-white/30 hover:bg-white/20 hover:border-white/50",
+                          // isSelected
+                          //   ? "border-primary shadow-[0_0_10px_rgba(37,99,235,0.15)]"
+                          //   : " "
                         )}
                       >
                         <div className="flex items-center gap-3">
                           <div className={cn(
-                            "h-5 w-5 rounded border flex items-center justify-center transition-colors",
+                            "h-5 w-5 rounded border-2 flex items-center justify-center transition-colors",
                             isSelected 
                               ? "bg-primary border-primary text-primary-foreground" 
-                              : "border-muted-foreground/30 bg-background"
+                              : "border-white/50 "
                           )}>
                             {isSelected && <Check className="h-3.5 w-3.5" />}
                           </div>
@@ -318,7 +318,7 @@ export default function PartnerWizard({ historyId, onComplete, onCancel }: Props
                         </div>
                         
                         {p.contact_type && (
-                          <div className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-semibold bg-secondary px-2 py-1 rounded text-muted-foreground">
+                          <div className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-semibold bg-white/10 px-2 py-1 rounded ">
                             {p.contact_type === 'online' ? <Globe className="h-3 w-3" /> : <Home className="h-3 w-3" />}
                             {p.contact_type === 'online' ? 'Онлайн' : 'Лично'}
                           </div>
@@ -329,7 +329,7 @@ export default function PartnerWizard({ historyId, onComplete, onCancel }: Props
                 </div>
               </div>
 
-              <div className="space-y-3 pt-2 border-t">
+              <div className="space-y-3 pt-4 border-t">
                 <div className="text-sm font-semibold flex items-center gap-2">
                   <UserPlus className="h-4 w-4" />
                   Или добавь нового:
@@ -339,7 +339,7 @@ export default function PartnerWizard({ historyId, onComplete, onCancel }: Props
                     value={newPartnerName}
                     onChange={(e) => setNewPartnerName(e.target.value)}
                     placeholder="Имя партнера..."
-                    className="bg-background"
+                    className=""
                   />
                   
                   <div className="grid grid-cols-2 gap-3">

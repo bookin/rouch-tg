@@ -1,193 +1,358 @@
 @import "tailwindcss";
 
 @theme {
-  --radius-lg: var(--radius);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-sm: calc(var(--radius) - 4px);
+    --radius-lg: var(--radius);
+    --radius-md: calc(var(--radius) - 2px);
+    --radius-sm: calc(var(--radius) - 4px);
 
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
 
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
 
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
 
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
 
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
 
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
 
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
 
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
+    --color-destructive: var(--destructive);
+    --color-destructive-foreground: var(--destructive-foreground);
 
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-ring: var(--ring);
+
+    --color-white-60: color-mix(in oklab, var(--color-white) 60%, transparent);
 }
 
 @layer base {
-  :root {
-    /* Backgrounds - Off-white for warmer feel */
-    --background: hsl(0 0% 96%); /* #F5F5F5 - Slightly darker than 98% for better contrast with white cards */
-    --foreground: hsl(220 13% 18%); /* #1F2937 - Dark Grey */
+    :root {
+        /* Backgrounds - Gradient for Glassmorphism */
+        --background: hsl(210 40% 98%);
+        --foreground: hsl(126, 15%, 72%);
 
-    /* Cards - Pure white */
-    --card: hsl(0 0% 100%);
-    --card-foreground: hsl(220 13% 18%);
+        /* Glass Cards - Semi-transparent white */
+        --card: hsl(0 0% 100% / 0.7);
+        --card-foreground: hsl(222.2 84% 4.9%);
 
-    /* Popovers */
-    --popover: hsl(0 0% 100%);
-    --popover-foreground: hsl(220 13% 18%);
+        /* Popovers */
+        --popover: hsl(0 0% 100% / 0.8);
+        --popover-foreground: hsl(222.2 84% 4.9%);
 
-    /* Primary CTA - Deep Blue/Purple */
-    --primary: hsl(221 83% 53%); /* #2563EB - Blue 600 */
-    --primary-foreground: hsl(210 40% 98%);
+        /* Primary CTA - Vivid Blue-Purple Gradient Feel */
+        --primary: hsl(147, 45%, 16%);
+        --primary-foreground: hsl(210 40% 98%);
 
-    /* Secondary - Light gray/blue for backgrounds of secondary items */
-    --secondary: hsl(210 40% 90%); /* Darkened from 96.1% to 90% for visibility */
-    --secondary-foreground: hsl(222.2 47.4% 11.2%);
+        /* Secondary */
+        --secondary: hsl(210 40% 96.1%);
+        --secondary-foreground: hsl(222.2 47.4% 11.2%);
 
-    /* Muted - For less important text */
-    --muted: hsl(210 40% 90%); /* Darkened from 96.1% to 90% */
-    --muted-foreground: hsl(215.4 16.3% 46.9%);
+        /* Muted */
+        --muted: hsl(210 40% 96.1%);
+        --muted-foreground: hsl(0, 0%, 69%);
 
-    /* Accent - For hover states */
-    --accent: hsl(210 40% 90%);
-    --accent-foreground: hsl(222.2 47.4% 11.2%);
+        /* Accent */
+        --accent: hsl(210 40% 96.1%);
+        --accent-foreground: hsl(222.2 47.4% 11.2%);
 
-    /* Destructive - Red */
-    --destructive: hsl(0 84.2% 60.2%);
-    --destructive-foreground: hsl(210 40% 98%);
+        /* Destructive */
+        --destructive: hsl(0 84.2% 60.2%);
+        --destructive-foreground: hsl(210 40% 98%);
 
-    /* Borders & Inputs */
-    --border: hsl(214.3 31.8% 85%); /* Darkened from 91.4% to 85% */
-    --input: hsl(214.3 31.8% 85%);
-    --ring: hsl(221 83% 53%);
+        /* Borders & Inputs */
+        --border: hsl(214.3 31.8% 91.4%);
+        --input: hsl(214.3 31.8% 91.4%);
+        --ring: hsl(221 83% 53%);
 
-    /* Radius */
-    --radius: 0.75rem; /* 12px - Moderately rounded */
-  }
+        /* Radius */
+        --radius: 1rem; /* 16px - More rounded for friendly UI */
+    }
 
-  .dark {
-    --background: hsl(222.2 84% 4.9%);
-    --foreground: hsl(210 40% 98%);
+    .dark {
+        --background: hsl(222.2 84% 4.9%);
+        --foreground: hsl(210 40% 98%);
 
-    --card: hsl(222.2 84% 4.9%);
-    --card-foreground: hsl(210 40% 98%);
+        --card: hsl(222.2 84% 4.9% / 0.7);
+        --card-foreground: hsl(210 40% 98%);
 
-    --popover: hsl(222.2 84% 4.9%);
-    --popover-foreground: hsl(210 40% 98%);
+        --popover: hsl(222.2 84% 4.9%);
+        --popover-foreground: hsl(210 40% 98%);
 
-    --primary: hsl(217.2 91.2% 59.8%);
-    --primary-foreground: hsl(222.2 47.4% 11.2%);
+        --primary: hsl(217.2 91.2% 59.8%);
+        --primary-foreground: hsl(222.2 47.4% 11.2%);
 
-    --secondary: hsl(217.2 32.6% 17.5%);
-    --secondary-foreground: hsl(210 40% 98%);
+        --secondary: hsl(217.2 32.6% 17.5%);
+        --secondary-foreground: hsl(210 40% 98%);
 
-    --muted: hsl(217.2 32.6% 17.5%);
-    --muted-foreground: hsl(215 20.2% 65.1%);
+        --muted: hsl(217.2 32.6% 17.5%);
+        --muted-foreground: hsl(215 20.2% 65.1%);
 
-    --accent: hsl(217.2 32.6% 17.5%);
-    --accent-foreground: hsl(210 40% 98%);
+        --accent: hsl(217.2 32.6% 17.5%);
+        --accent-foreground: hsl(210 40% 98%);
 
-    --destructive: hsl(0 62.8% 30.6%);
-    --destructive-foreground: hsl(210 40% 98%);
+        --destructive: hsl(0 62.8% 30.6%);
+        --destructive-foreground: hsl(210 40% 98%);
 
-    --border: hsl(217.2 32.6% 17.5%);
-    --input: hsl(217.2 32.6% 17.5%);
-    --ring: hsl(224.3 76.3% 48%);
-  }
+        --border: hsl(217.2 32.6% 17.5%);
+        --input: hsl(217.2 32.6% 17.5%);
+        --ring: hsl(224.3 76.3% 48%);
+    }
 
-  * {
-    @apply border-border;
-  }
-  body {
-    @apply bg-background text-foreground antialiased;
-    font-feature-settings: "rlig" 1, "calt" 1;
-  }
+    * {
+        @apply border-border;
+    }
+
+    body {
+        @apply text-foreground antialiased;
+        /* Soft Mesh Gradient Background */
+        /*background-image:*/
+        /*    radial-gradient(ellipse 120% 80% at 50% 110%, #e89030 0%, #e8a050 30%, transparent 70%),*/
+        /*    radial-gradient(ellipse 100% 60% at 20% 0%, #8890a8 0%, transparent 70%),*/
+        /*    radial-gradient(ellipse 80% 50% at 90% 20%, #9a98a5 0%, transparent 60%),*/
+        /*    radial-gradient(ellipse 60% 40% at 50% 50%, rgba(200,160,120,0.4) 0%, transparent 70%);*/
+        /*  !*radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), *!*/
+        /*  !*radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), *!*/
+        /*  !*radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%);*!*/
+        /*background-color: #b09a8e; !* Fallback *!*/
+        /*background-attachment: fixed;*/
+        /*font-feature-settings: "rlig" 1, "calt" 1;*/
+    }
+
+    /* Light mode gradient override - Vibrant Passion Finder Style */
+    :root body {
+        background: #0F2A1D;
+        /*background-color: #0F2A1D;*/
+        /*min-height: 100vh;*/
+        /*  background:*/
+        /*radial-gradient(900px 700px at 15% 20%, #6B9071 0%, transparent 58%),*/
+        /*radial-gradient(800px 650px at 85% 18%, #375534 0%, transparent 58%),*/
+        /*radial-gradient(850px 700px at 70% 78%, #AEC3B0 0%, transparent 62%),*/
+        /*radial-gradient(900px 750px at 18% 82%, #E3EED4 0%, transparent 64%),*/
+        /*radial-gradient(900px 800px at 50% 55%, #0F2A1D 0%, transparent 60%);*/
+
+        /*background-image:*/
+        /* 1. Главный неоновый блик снизу */
+        /*radial-gradient(circle at 50% 110%, rgba(0, 242, 255, 0.25) 0%, transparent 60%),*/
+        /*!* 2. Мягкое фиолетовое свечение в центре под лотосом *!*/
+        /*radial-gradient(circle at 50% 45%, rgba(138, 43, 226, 0.1) 0%, transparent 70%),*/
+        /*!* 3. Основной глубокий цвет фона *!*/
+        /*linear-gradient(180deg, #0A0C12 0%, #1A1321 50%, #051A20 100%);*/
+
+        /*radial-gradient(ellipse 120% 80% at 50% 110%, #e89030 0%, #e8a050 30%, transparent 70%),*/
+        /*  radial-gradient(ellipse 100% 60% at 20% 0%, #8890a8 0%, transparent 70%),*/
+        /*  radial-gradient(ellipse 80% 50% at 90% 20%, #9a98a5 0%, transparent 60%),*/
+        /*  radial-gradient(ellipse 60% 40% at 50% 50%, rgba(200,160,120,0.4) 0%, transparent 70%);*/
+        /*background-attachment: fixed;*/
+        /*background-size: 100% 100%;*/
+
+    }
+
+    /* Global Icon Opacity */
+    svg.lucide {
+        /*@apply opacity-60 transition-opacity duration-300;*/
+        @apply transition-opacity duration-300;
+    }
+
+    button:hover svg.lucide,
+    a:hover svg.lucide,
+    .group:hover svg.lucide {
+        @apply opacity-100;
+    }
+
+    /* Selected state for icons should be opaque */
+    [data-state="active"] svg.lucide,
+    .active svg.lucide {
+        @apply opacity-100;
+    }
 }
 
 /* React Big Calendar Overrides */
 .rbc-calendar {
-  @apply font-sans text-foreground;
+    @apply font-sans text-foreground;
 }
 
 .rbc-toolbar {
-  @apply mb-4 flex-wrap gap-2;
+    @apply mb-4 flex-wrap gap-2;
 }
 
 .rbc-toolbar-label {
-  @apply text-lg font-bold capitalize text-foreground;
+    @apply text-lg font-bold capitalize text-foreground;
 }
 
 .rbc-btn-group {
-  @apply shadow-sm rounded-md overflow-hidden border border-input;
+    @apply shadow-sm rounded-md overflow-hidden border border-input;
 }
 
 .rbc-btn-group button {
-  @apply bg-background text-foreground border-r border-input py-1.5 px-3 hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer;
-  box-shadow: none;
+    @apply text-foreground border-r border-input py-1.5 px-3 hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer;
+    box-shadow: none;
+    border: none;
 }
 
 .rbc-btn-group button.rbc-active {
-  @apply bg-primary text-primary-foreground hover:bg-primary/90 shadow-inner;
+    @apply bg-primary text-primary-foreground hover:text-primary-foreground hover:bg-primary/90 shadow-inner;
 }
 
 .rbc-header {
-  @apply py-3 font-semibold text-xs uppercase tracking-wider text-muted-foreground border-b border-border bg-secondary/20;
+    @apply py-3 font-semibold text-xs uppercase tracking-wider  border-b border-border bg-secondary/20;
 }
 
 .rbc-month-view {
-  @apply border border-border rounded-xl overflow-hidden bg-card;
+    @apply border border-border rounded-xl overflow-hidden bg-white/20 text-white;
 }
 
 .rbc-day-bg {
-  @apply border-l border-border;
+    @apply border-l border-border;
 }
 
 .rbc-off-range-bg {
-  @apply bg-secondary/10;
+    @apply bg-secondary/10;
 }
 
 .rbc-today {
-  @apply bg-primary/5;
+    @apply bg-primary/5;
 }
 
 .rbc-event {
-  @apply rounded px-1.5 py-0.5 shadow-sm border-none;
+    @apply rounded px-1.5 py-0.5 shadow-sm border-none;
 }
 
 .rbc-row-segment {
-  @apply px-1;
+    @apply px-1;
 }
 
 /* Custom Utilities for Passion Finder Style */
-@utility shadow-soft {
-  box-shadow: 0 10px 40px -10px rgba(0,0,0,0.08);
+@layer components {
+    .form-element-text{
+       @apply text-white focus:text-primary placeholder:text-white/50 focus:placeholder:text-primary/50;
+    }
+
+    .form-element-bg {
+        @apply border border-white/30 bg-white/20 shadow-sm backdrop-blur-[2px];
+        @apply hover:bg-white/30 focus:bg-white/80;
+        @apply focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring;
+        @apply disabled:cursor-not-allowed disabled:opacity-50;
+    }
+
+    .backdrop-blur-main {
+        @apply backdrop-blur-[2px];
+    }
+
+    .shadow-soft {
+        box-shadow: 0 8px 30px -4px rgba(0, 0, 0, 0.08);
+    }
+
+    .light-glass{
+        @apply bg-white/10 backdrop-blur-xl border border-white/40 shadow-sm;
+    }
+    .light-glass:hover{
+        @apply bg-white/20 border-white/50 transition-all duration-300;
+    }
+
+    .light-glass-primary{
+        @apply bg-primary/40 backdrop-blur-xl border border-primary/20 shadow-sm;
+    }
+
+    .light-glass-primary:hover{
+        @apply bg-primary/50 border-primary/30 transition-all duration-300;
+    }
+
+    .glass {
+        @apply bg-white/70 backdrop-blur-xl border border-white/40 shadow-sm;
+    }
+
+    .glass-hover {
+        @apply hover:bg-white/80 hover:border-white/60 transition-all duration-300;
+    }
+
+    /* Hide scrollbar */
+    .scrollbar-none {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+    }
+
+    .scrollbar-none::-webkit-scrollbar {
+        display: none;
+    }
+
+    /* Container responsive fix */
+    .container {
+        margin-inline: auto;
+        padding-inline: 1rem;
+        width: 100%;
+    }
+
+    @media (min-width: 640px) {
+        .container {
+            max-width: 640px;
+        }
+    }
+    @media (min-width: 768px) {
+        .container {
+            max-width: 768px;
+        }
+    }
+    @media (min-width: 1024px) {
+        .container {
+            max-width: 1024px;
+        }
+    }
+    @media (min-width: 1280px) {
+        .container {
+            max-width: 1280px;
+        }
+    }
+    @media (min-width: 1536px) {
+        .container {
+            max-width: 1536px;
+        }
+    }
 }
 
-@utility glass {
-  @apply bg-white/80 backdrop-blur-md border border-white/20;
+.mesh::before {
+    pointer-events: none;
+    content: "";
+    position: fixed;
+    inset: 0;
+    filter: blur(44px) saturate(120%);
+    transform: translateZ(0);
+    opacity: 0.95;
 }
 
-/* Container responsive fix */
-@utility container {
-  margin-inline: auto;
-  padding-inline: 1rem;
-  width: 100%;
-  
-  @media (width >= 640px) { max-width: 640px; }
-  @media (width >= 768px) { max-width: 768px; }
-  @media (width >= 1024px) { max-width: 1024px; }
-  @media (width >= 1280px) { max-width: 1280px; }
-  @media (width >= 1536px) { max-width: 1536px; }
+.mesh--sand {
+    background: #3E2522;
+}
+
+.mesh--sand::before {
+    background: radial-gradient(900px 700px at 20% 18%, #D3A376 0%, transparent 58%),
+    radial-gradient(850px 650px at 82% 22%, #8C6E63 0%, transparent 58%),
+    radial-gradient(900px 750px at 75% 80%, #FFE0B2 0%, transparent 62%),
+    radial-gradient(950px 800px at 18% 82%, #FFF2DF 0%, transparent 64%),
+    radial-gradient(900px 800px at 52% 55%, #3E2522 0%, transparent 60%);
+    filter: blur(46px) saturate(115%);
+    transform: translateZ(0);
+    opacity: 0.95;
+}
+
+.mesh--green {
+    background: #0F2A1D;
+}
+
+.mesh--green::before {
+    background: radial-gradient(900px 700px at 15% 20%, #6B9071 0%, transparent 58%),
+    radial-gradient(800px 650px at 85% 18%, #375534 0%, transparent 58%),
+    radial-gradient(850px 700px at 70% 78%, #618567 0%, transparent 42%),
+    radial-gradient(900px 750px at 18% 82%, #79aa77 0%, transparent 64%),
+    radial-gradient(900px 800px at 50% 55%, #0F2A1D 0%, transparent 60%);
 }

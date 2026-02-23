@@ -44,7 +44,7 @@ export const useCalendarData = (startDate?: Date, endDate?: Date) => {
         const calendarEvents: CalendarEvent[] = [
           ...data.seeds.map((s: any) => ({
             id: s.id,
-            title: `🌱 ${s.action_type}: ${s.description}`,
+            title: `${s.action_type ? s.action_type + ': ': ''}${s.description}`,
             start: new Date(s.timestamp),
             end: new Date(s.timestamp),
             type: 'seed' as const,
@@ -52,7 +52,7 @@ export const useCalendarData = (startDate?: Date, endDate?: Date) => {
           })),
           ...data.practices.map((p: any) => ({
             id: p.id,
-            title: `🧘 ${p.name}`,
+            title: `${p.name}`,
             start: new Date(p.timestamp),
             end: new Date(p.timestamp),
             type: 'practice' as const,
@@ -60,7 +60,7 @@ export const useCalendarData = (startDate?: Date, endDate?: Date) => {
           })),
           ...data.partnerActions.map((a: any) => ({
             id: a.id,
-            title: `👥 ${a.partner_name}: ${a.action}`,
+            title: `${a.partner_name ?a.partner_name + ': ' : '' }${a.action}`,
             start: new Date(a.timestamp),
             end: new Date(a.timestamp),
             type: 'partner_action' as const,

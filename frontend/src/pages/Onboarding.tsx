@@ -184,29 +184,29 @@ export default function Onboarding() {
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-background">
+            <div className="flex items-center justify-center min-h-screen ">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
         )
     }
 
     return (
-        <div className="flex flex-col h-screen bg-background font-sans">
+        <div className="flex flex-col h-screen bg-transparent font-sans">
             {/* Header */}
-            <div className="px-5 py-4 bg-card/50 backdrop-blur-md border-b flex items-center gap-3 sticky top-0 z-10">
+            <div className="px-5 py-4 bg-white/30 backdrop-blur-xl border-b border-white/30 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-md">
                     <User className="h-5 w-5" />
                 </div>
                 <div>
-                    <div className="font-bold text-foreground text-sm">Rouch Karma Manager</div>
-                    <div className="text-xs text-muted-foreground font-medium">
+                    <div className="font-bold text-sm">Rouch Karma Manager</div>
+                    <div className="text-xs  font-medium">
                         {currentStep && `Шаг ${currentStep.step_number} из ${currentStep.total_steps}`}
                     </div>
                 </div>
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-secondary">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-none">
                 {messages.map(message => (
                     <div 
                         key={message.id} 
@@ -216,10 +216,10 @@ export default function Onboarding() {
                         )}
                     >
                         <div className={cn(
-                            "max-w-[85%] px-4 py-3 shadow-sm text-sm leading-relaxed",
+                            "max-w-[85%] px-4 py-3 shadow-sm text-sm leading-relaxed backdrop-blur-main",
                             message.type === 'user'
-                                ? "bg-primary text-primary-foreground rounded-2xl rounded-tr-sm"
-                                : "bg-card border text-card-foreground rounded-2xl rounded-tl-sm"
+                                ? "bg-primary text-primary-foreground rounded-2xl rounded-tr-sm shadow-md"
+                                : "bg-white/70 border border-white/40 rounded-2xl rounded-tl-sm shadow-sm"
                         )}>
                             {message.text}
                         </div>
@@ -229,7 +229,7 @@ export default function Onboarding() {
                 {/* Typing indicator */}
                 {isTyping && (
                     <div className="flex justify-start animate-in fade-in zoom-in duration-300">
-                        <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-card border flex items-center gap-1.5 h-10 w-16 justify-center">
+                        <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-white/50 border border-white/30 flex items-center gap-1.5 h-10 w-16 justify-center backdrop-blur-main">
                             <div className="w-1.5 h-1.5 bg-muted-foreground/40 rounded-full animate-bounce delay-0" />
                             <div className="w-1.5 h-1.5 bg-muted-foreground/40 rounded-full animate-bounce delay-150" />
                             <div className="w-1.5 h-1.5 bg-muted-foreground/40 rounded-full animate-bounce delay-300" />
@@ -242,7 +242,7 @@ export default function Onboarding() {
 
             {/* Input area */}
             {currentStep && !currentStep.completed && messages.length > 0 && messages[messages.length - 1].showOptions && (
-                <div className="p-4 bg-card border-t shadow-[0_-4px_20px_rgba(0,0,0,0.05)] animate-in slide-in-from-bottom-10 duration-500">
+                <div className="p-4 bg-white/60 border-t border-white/30 backdrop-blur-xl shadow-[0_-4px_20px_rgba(0,0,0,0.05)] animate-in slide-in-from-bottom-10 duration-500">
                     
                     {/* Single Choice & Confirm */}
                     {(currentStep.input_type === 'single_choice' || currentStep.input_type === 'confirm') && (
@@ -252,7 +252,7 @@ export default function Onboarding() {
                                     key={option.id}
                                     variant="outline"
                                     onClick={() => handleSingleChoice(option.id, option.label)}
-                                    className="w-full justify-start h-auto py-3.5 text-sm font-medium hover:bg-primary/5 hover:text-primary hover:border-primary/30 transition-all text-left"
+                                    className="w-full justify-start h-auto py-3.5 text-sm font-medium bg-white/50 hover:bg-primary/10 hover:text-primary border-white/40 hover:border-primary/30 transition-all text-left backdrop-blur-main shadow-sm"
                                 >
                                     {option.label}
                                 </Button>
@@ -271,16 +271,16 @@ export default function Onboarding() {
                                         variant="outline"
                                         onClick={() => handleMultiChoiceToggle(option.id)}
                                         className={cn(
-                                            "w-full justify-between h-auto py-3.5 text-sm font-medium transition-all group",
+                                            "w-full justify-between h-auto py-3.5 text-sm font-medium transition-all group backdrop-blur-main border-white/40 shadow-sm",
                                             isSelected 
                                                 ? "bg-primary/10 border-primary text-primary hover:bg-primary/15" 
-                                                : "hover:bg-muted"
+                                                : "bg-white/50 hover:bg-white/70"
                                         )}
                                     >
                                         {option.label}
                                         <div className={cn(
                                             "w-5 h-5 rounded border flex items-center justify-center transition-colors",
-                                            isSelected ? "bg-primary border-primary text-primary-foreground" : "border-muted-foreground/30"
+                                            isSelected ? "bg-primary border-primary text-primary-foreground" : "border-muted-foreground/30 bg-white/50"
                                         )}>
                                             {isSelected && <Check className="h-3 w-3" />}
                                         </div>
@@ -290,7 +290,7 @@ export default function Onboarding() {
                             <Button
                                 onClick={handleMultiChoiceSubmit}
                                 disabled={selectedMulti.length === 0}
-                                className="w-full mt-2 font-bold"
+                                className="w-full mt-2 font-bold shadow-lg shadow-primary/20"
                             >
                                 Продолжить
                                 <ArrowRight className="ml-2 h-4 w-4" />
@@ -306,15 +306,15 @@ export default function Onboarding() {
                                 value={textInput}
                                 onChange={(e) => setTextInput(e.target.value)}
                                 placeholder="Напиши здесь..."
-                                className="bg-background"
+                                className="bg-white/50 border-white/40 focus:bg-white/80 shadow-inner"
                                 onKeyDown={(e) => e.key === 'Enter' && handleTextSubmit()}
                             />
                             <Button
                                 onClick={handleTextSubmit}
                                 size="icon"
                                 className={cn(
-                                    "shrink-0 transition-all",
-                                    !textInput.trim() && "opacity-80 bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                                    "shrink-0 transition-all shadow-md",
+                                    !textInput.trim() && "opacity-80 bg-secondary hover:bg-secondary/80"
                                 )}
                             >
                                 {textInput.trim() ? <Send className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}

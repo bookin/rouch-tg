@@ -168,4 +168,13 @@ class MessageScheduler:
     
     def stop(self):
         """Stop the scheduler"""
-        self.scheduler.shutdown()
+        from apscheduler.schedulers import SchedulerNotRunningError
+        import logging
+        
+        try:
+            self.scheduler.shutdown()
+        except SchedulerNotRunningError as e:
+            if self.settings.MORNING_ENABLED or self.settings.EVENING_ENABLED:
+                raise e
+            # If both are disabled, it's expected that the scheduler isn't running, so we silently pass.
+

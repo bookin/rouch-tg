@@ -3,6 +3,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 from app.ai.models import get_model
+from app.utils.typing_loader import broadcast_status
 
 
 class ProblemContext(BaseModel):
@@ -260,6 +261,8 @@ async def solve_problem(
         rules=rules,
         practices=practices,
     )
+
+    await broadcast_status("🧠 Анализирую кармические связи и ищу решение...")
 
     prompt = (
         "Проанализируй проблему пользователя, опираясь на переданный внутренний анализ (sphere, desired_outcome, "

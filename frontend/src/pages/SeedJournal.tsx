@@ -119,7 +119,7 @@ export default function SeedJournal() {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <p className="text-muted-foreground text-sm">Открываем журнал...</p>
+        <p className=" text-sm">Открываем журнал...</p>
       </div>
     )
   }
@@ -131,7 +131,7 @@ export default function SeedJournal() {
           <Sprout className="h-8 w-8 text-primary" />
           Журнал семян
         </h1>
-        <p className="text-muted-foreground leading-relaxed">
+        <p className=" leading-relaxed">
           Записывай свои добрые дела, чтобы они проросли в большие результаты.
         </p>
       </div>
@@ -160,7 +160,7 @@ export default function SeedJournal() {
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="Я помог коллеге разобраться с..."
-                    className="min-h-[100px] bg-background"
+                    className="min-h-[100px] "
                   />
                 </div>
 
@@ -168,7 +168,7 @@ export default function SeedJournal() {
                   <div className="space-y-2">
                     <Label>Тип действия</Label>
                     <Select value={actionType} onValueChange={setActionType}>
-                      <SelectTrigger className="bg-background">
+                      <SelectTrigger className="">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -182,7 +182,7 @@ export default function SeedJournal() {
                   <div className="space-y-2">
                     <Label>Кому?</Label>
                     <Select value={partnerGroup} onValueChange={setPartnerGroup}>
-                      <SelectTrigger className="bg-background">
+                      <SelectTrigger className="">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -198,7 +198,7 @@ export default function SeedJournal() {
                   <div className="space-y-3">
                     <div className="flex justify-between">
                       <Label>Сила намерения</Label>
-                      <span className="text-xs font-medium text-muted-foreground">{intentionScore[0]}/10</span>
+                      <span className="text-xs font-medium ">{intentionScore[0]}/10</span>
                     </div>
                     <Slider
                       value={intentionScore}
@@ -213,7 +213,7 @@ export default function SeedJournal() {
                   <div className="space-y-3">
                     <div className="flex justify-between">
                       <Label>Сила эмоции</Label>
-                      <span className="text-xs font-medium text-muted-foreground">{emotionLevel[0]}/10</span>
+                      <span className="text-xs font-medium ">{emotionLevel[0]}/10</span>
                     </div>
                     <Slider
                       value={emotionLevel}
@@ -234,7 +234,7 @@ export default function SeedJournal() {
                   />
                   <Label 
                     htmlFor="understanding" 
-                    className="text-sm font-normal text-muted-foreground cursor-pointer"
+                    className="text-sm font-normal  cursor-pointer"
                   >
                     Я понимаю, как это работает (ручка)
                   </Label>
@@ -265,19 +265,19 @@ export default function SeedJournal() {
         {/* History - Right Column */}
         <div className="lg:col-span-7 xl:col-span-8 space-y-4">
           <h2 className="text-lg font-semibold flex items-center gap-2">
-            <History className="h-5 w-5 text-muted-foreground" />
+            <History className="h-5 w-5 " />
             История посевов
           </h2>
           
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
             {seeds.length === 0 && (
-              <div className="text-center py-10 text-muted-foreground bg-secondary/20 rounded-xl border border-dashed col-span-full">
+              <div className="text-center py-10  bg-secondary/20 rounded-xl border border-dashed col-span-full">
                 Пока нет записей. Посади свое первое семя!
               </div>
             )}
             
             {seeds.map((s) => (
-              <Card key={s.id} className="overflow-hidden border-none shadow-sm hover:shadow-md transition-shadow">
+              <Card key={s.id} className="overflow-hidden border-white/30 bg-white/40 backdrop-blur-main shadow-sm hover:shadow-md transition-all hover:bg-white/60">
                 <div className={cn(
                   "h-1 w-full", 
                   s.action_type === 'kindness' ? "bg-rose-400" :
@@ -287,21 +287,21 @@ export default function SeedJournal() {
                 <CardContent className="p-4">
                   <div className="flex justify-between items-start gap-4 mb-2">
                     <p className="font-medium text-foreground leading-snug">{s.description}</p>
-                    <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                    <span className="text-[10px]  whitespace-nowrap">
                       {new Date(s.timestamp).toLocaleDateString()}
                     </span>
                   </div>
                   
-                  <div className="flex flex-wrap gap-2 text-xs text-muted-foreground mt-3">
-                    <div className="flex items-center gap-1 bg-secondary/50 px-2 py-1 rounded-md">
+                  <div className="flex flex-wrap gap-2 text-xs  mt-3">
+                    <div className="flex items-center gap-1 bg-white/50 border border-white/20 px-2 py-1 rounded-md">
                       <Heart className="h-3 w-3" />
                       {s.action_type}
                     </div>
-                    <div className="flex items-center gap-1 bg-secondary/50 px-2 py-1 rounded-md">
+                    <div className="flex items-center gap-1 bg-white/50 border border-white/20 px-2 py-1 rounded-md">
                       <Users className="h-3 w-3" />
                       {s.partner_group}
                     </div>
-                    <div className="flex items-center gap-1 bg-secondary/50 px-2 py-1 rounded-md ml-auto">
+                    <div className="flex items-center gap-1 bg-white/50 border border-white/20 px-2 py-1 rounded-md ml-auto">
                       <Brain className="h-3 w-3" />
                       {s.strength_multiplier}x
                     </div>

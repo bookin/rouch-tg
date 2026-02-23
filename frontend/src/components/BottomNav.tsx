@@ -15,7 +15,7 @@ export function BottomNav() {
   ]
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-md border-t border-border pb-[env(safe-area-inset-bottom)] md:hidden">
+    <nav className="z-50 fixed bottom-0 left-0 right-0 z-50 bg-white/10 backdrop-blur-xl border-t border-white/20 pb-[env(safe-area-inset-bottom)] md:hidden shadow-[0_-5px_20px_-5px_rgba(0,0,0,0.05)]">
       <div className="flex justify-around items-center h-16 px-2">
         {navItems.map((item) => {
           const isActive = location.pathname === item.path
@@ -27,8 +27,8 @@ export function BottomNav() {
               className={cn(
                 "flex flex-col items-center justify-center w-full h-full gap-1 text-[10px] font-medium transition-colors duration-200",
                 isActive 
-                  ? "text-primary" 
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "text-white"
+                  : " hover:text-foreground"
               )}
             >
               <Icon className={cn("h-6 w-6", isActive && "stroke-[2.5px]")} />

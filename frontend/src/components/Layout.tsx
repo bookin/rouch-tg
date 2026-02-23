@@ -1,34 +1,35 @@
-import { ReactNode } from 'react'
-import { useLocation } from 'react-router-dom'
-import { Sidebar } from './Sidebar'
-import { BottomNav } from './BottomNav'
+import {ReactNode} from 'react'
+import {useLocation} from 'react-router-dom'
+import {Sidebar} from './Sidebar'
+import {BottomNav} from './BottomNav'
 
 interface LayoutProps {
-  children: ReactNode
+	children: ReactNode
 }
 
-export default function Layout({ children }: LayoutProps) {
-  const location = useLocation()
-  const isPlainPage = location.pathname === '/onboarding' || location.pathname === '/meditation'
+export default function Layout({children}: LayoutProps) {
+	const location = useLocation()
+	const isPlainPage = location.pathname === '/onboarding' || location.pathname === '/meditation'
 
-  if (isPlainPage) {
-    return <main className="min-h-screen bg-background">{children}</main>
-  }
 
-  return (
-    <div className="min-h-screen bg-background text-foreground font-sans antialiased">
-      {/* Desktop Sidebar */}
-      <Sidebar />
+	if (isPlainPage) {
+		return <main className="min-h-screen">{children}</main>
+	}
 
-      {/* Main Content Area */}
-      <div className="md:pl-64 min-h-screen flex flex-col transition-all duration-300">
-        <main className="flex-1 w-full max-w-7xl mx-auto p-4 md:p-8 pb-24 md:pb-8">
-          {children}
-        </main>
-      </div>
+	return (
+		<div className="relative min-h-screen text-foreground font-sans antialiased">
+			{/* Desktop Sidebar */}
+			<Sidebar/>
 
-      {/* Mobile Bottom Navigation */}
-      <BottomNav />
-    </div>
-  )
+			{/* Main Content Area */}
+			<div className="md:pl-64 min-h-screen flex flex-col transition-all duration-300">
+				<main className="flex-1 w-full max-w-7xl mx-auto p-4 md:p-8 pb-24 md:pb-8">
+					{children}
+				</main>
+			</div>
+
+			{/* Mobile Bottom Navigation */}
+			<BottomNav/>
+		</div>
+	)
 }

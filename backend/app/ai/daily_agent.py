@@ -3,6 +3,7 @@ from typing import Optional
 from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
 from app.ai.models import get_model
+from app.utils.typing_loader import broadcast_status
 
 
 class MessageContext(BaseModel):
@@ -180,6 +181,7 @@ async def generate_morning_message(
             "Будь воодушевляющим и практичным."
         )
     
+    await broadcast_status("🌅 Генерирую утреннее напутствие...")
     result = await agent.run(prompt, deps=context)
     return result.output
 
@@ -216,5 +218,6 @@ async def generate_evening_message(
         f"Будь спокойным и мудрым."
     )
     
+    await broadcast_status("🌙 Подвожу итоги дня...")
     result = await agent.run(prompt, deps=context)
     return result.output

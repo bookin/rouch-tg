@@ -77,12 +77,12 @@ export default function Meditation() {
     const progress = ((step + 1) / steps.length) * 100
 
     return (
-        <div className="min-h-screen bg-gradient-to-b from-orange-50 to-background flex flex-col p-4 pb-8">
+        <div className="min-h-screen bg-gradient-to-b from-orange-100/60 to-background flex flex-col p-4 pb-8">
             <div className="flex-1 flex flex-col justify-center max-w-md mx-auto w-full gap-6">
                 
                 {/* Header */}
                 <div className="text-center space-y-2 mb-4 animate-in fade-in slide-in-from-top-4 duration-700">
-                    <div className="inline-flex p-3 rounded-full bg-orange-100 text-orange-600 mb-2 shadow-sm">
+                    <div className="inline-flex p-3 rounded-full bg-white/50 text-orange-600 mb-2 shadow-sm backdrop-blur-main border border-white/40">
                         <Coffee className="h-8 w-8" />
                     </div>
                     <h1 className="text-2xl font-bold text-orange-900">Кофе-медитация</h1>
@@ -90,10 +90,10 @@ export default function Meditation() {
                 </div>
 
                 {/* Main Card */}
-                <Card className="border-none shadow-xl bg-white/80 backdrop-blur-md overflow-hidden relative">
+                <Card className="border-white/40 shadow-soft bg-white/70 backdrop-blur-xl overflow-hidden relative">
                     <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-300 to-amber-300" />
                     <CardContent className="p-8 text-center space-y-6 pt-10">
-                        <div className="text-5xl animate-bounce duration-1000">
+                        <div className="text-5xl animate-bounce duration-1000 filter drop-shadow-md">
                             {steps[step].title.split(' ')[0]}
                         </div>
                         
@@ -101,24 +101,24 @@ export default function Meditation() {
                             <h2 className="text-2xl font-bold text-foreground">
                                 {steps[step].title.split(' ').slice(1).join(' ')}
                             </h2>
-                            <p className="text-muted-foreground text-lg leading-relaxed">
+                            <p className=" text-lg leading-relaxed">
                                 {steps[step].desc}
                             </p>
                         </div>
 
                         {step === 2 && (
                             <div className="text-left space-y-3 pt-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                                <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground text-center mb-2">
+                                <div className="text-xs font-bold uppercase tracking-wider  text-center mb-2">
                                     Твои семена сегодня
                                 </div>
                                 
                                 {seeds.length === 0 && (
-                                    <div className="text-center p-4 text-muted-foreground italic bg-secondary/30 rounded-lg">
+                                    <div className="text-center p-4  italic bg-white/40 rounded-lg border border-white/30 backdrop-blur-main">
                                         Сегодня семян еще нет. Но ты можешь вспомнить любое доброе дело!
                                     </div>
                                 )}
 
-                                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+                                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1 scrollbar-none">
                                     {seeds.map(s => {
                                         const isRejoiced = rejoiced.includes(s.id)
                                         return (
@@ -126,15 +126,15 @@ export default function Meditation() {
                                                 key={s.id}
                                                 onClick={() => toggleRejoice(s.id)}
                                                 className={cn(
-                                                    "p-4 rounded-xl border transition-all cursor-pointer flex items-center gap-3 relative overflow-hidden group",
+                                                    "p-4 rounded-xl border transition-all cursor-pointer flex items-center gap-3 relative overflow-hidden group backdrop-blur-main",
                                                     isRejoiced 
-                                                        ? "bg-orange-50 border-orange-200 shadow-sm" 
-                                                        : "bg-background hover:bg-secondary/50 border-transparent hover:border-border"
+                                                        ? "bg-orange-50/80 border-orange-200 shadow-sm" 
+                                                        : "bg-white/40 hover:bg-white/60 border-white/30 hover:border-white/50"
                                                 )}
                                             >
                                                 <div className={cn(
                                                     "h-10 w-10 rounded-full flex items-center justify-center shrink-0 transition-colors",
-                                                    isRejoiced ? "bg-orange-100 text-orange-600" : "bg-secondary text-muted-foreground"
+                                                    isRejoiced ? "bg-orange-100 text-orange-600" : "bg-white/60 "
                                                 )}>
                                                     {isRejoiced ? <Star className="h-5 w-5 fill-current" /> : <Sprout className="h-5 w-5" />}
                                                 </div>
@@ -186,7 +186,7 @@ export default function Meditation() {
                         </>
                     )}
                 </Button>
-                <div className="text-center mt-4 text-xs text-muted-foreground font-medium uppercase tracking-widest">
+                <div className="text-center mt-4 text-xs  font-medium uppercase tracking-widest">
                     Шаг {step + 1} из {steps.length}
                 </div>
             </div>

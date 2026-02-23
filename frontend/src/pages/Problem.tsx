@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import PageHeader from "@/components/ui/PageHeader.tsx";
 
 export default function Problem() {
   const navigate = useNavigate()
@@ -240,19 +241,20 @@ export default function Problem() {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <p className="text-muted-foreground text-sm">Загружаем кармическую историю...</p>
+        <p className=" text-sm">Загружаем кармическую историю...</p>
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col gap-6 p-4 max-w-md mx-auto w-full pb-24">
+    <div className="flex flex-col gap-6 p-4 max-w-3xl mx-auto w-full pb-24">
       <div className="space-y-1 mt-2">
-        <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center gap-3">
-          <Brain className="h-8 w-8 text-primary" />
-          Решение проблемы
-        </h1>
-        <p className="text-muted-foreground leading-relaxed">
+		  <PageHeader text="Решение проблемы" icon={Brain}/>
+        {/*<h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center gap-3">*/}
+        {/*  <Brain className="h-8 w-8 text-primary" />*/}
+        {/*  */}
+        {/*</h1>*/}
+        <p className=" leading-relaxed">
           Система проанализирует запрос и предложит кармический путь исправления.
         </p>
       </div>
@@ -287,9 +289,9 @@ export default function Problem() {
           {showProblemForm && (
             <div className="space-y-6">
               {needsClarification && clarifyingQuestions.length > 0 && (
-                <Card className="border-orange-200 bg-orange-50/50">
+                <Card>
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-lg flex items-center gap-2 text-orange-700">
+                    <CardTitle className="text-lg flex items-center gap-2">
                       <Search className="h-5 w-5" />
                       Нужно чуть больше деталей
                     </CardTitle>
@@ -299,9 +301,9 @@ export default function Problem() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
-                      <div className="pl-4 border-l-2 border-orange-200 space-y-2">
+                      <div className="p-4 border-1 bg-orange-600/20 border-orange-600/40 space-y-2 rounded-md">
                         {clarifyingQuestions.map((q, idx) => (
-                          <p key={idx} className="text-sm font-medium text-orange-800">{q}</p>
+                          <p key={idx} className="text-sm font-medium">{q}</p>
                         ))}
                       </div>
 
@@ -310,7 +312,7 @@ export default function Problem() {
                           value={clarificationText}
                           onChange={(e) => setClarificationText(e.target.value)}
                           placeholder="Напиши свои ответы одним сообщением..."
-                          className="min-h-[100px] bg-background"
+                          className="min-h-[100px] "
                         />
                         <Button 
                           type="submit" 
@@ -336,7 +338,7 @@ export default function Problem() {
                     value={problem}
                     onChange={(e) => setProblem(e.target.value)}
                     placeholder="Опиши проблему как можно точнее..."
-                    className="min-h-[120px] text-base resize-y bg-background"
+                    className="min-h-[120px] text-base resize-y "
                   />
                   <Button 
                     type="submit" 
@@ -362,12 +364,12 @@ export default function Problem() {
           
           {/* HISTORY SECTION - Always visible or collapsable */}
           {history.length > 0 && !needsClarification && !result && (
-            <div className="space-y-2 pt-4 border-t">
+            <div className="space-y-2 pt-4 border-t border-white/20">
               <Button
-                variant="ghost"
+                variant="glass"
                 size="sm"
                 onClick={() => setShowHistory(!showHistory)}
-                className="w-full justify-between text-muted-foreground hover:text-primary"
+                className="w-full justify-between hover:bg-white/40"
               >
                 <span className="flex items-center gap-2">
                   <History className="h-4 w-4" />
@@ -377,22 +379,24 @@ export default function Problem() {
               </Button>
 
               {showHistory && (
-                <div className="grid gap-2 max-h-[300px] overflow-y-auto p-1 animate-in slide-in-from-top-2">
+                <div className="grid gap-2 max-h-[300px] overflow-y-auto p-1 animate-in slide-in-from-top-2 scrollbar-none">
                   {history.map(h => (
                     <div
                       key={h.id}
                       onClick={() => handleActivateHistory(h)}
                       className={cn(
-                        "p-3 rounded-lg border cursor-pointer transition-all hover:border-primary/50 text-sm",
-                        h.is_active ? "bg-primary/5 border-primary/30" : "bg-card hover:bg-accent"
+                        "p-3 rounded-lg border cursor-pointer transition-all backdrop-blur-main",
+                        h.is_active 
+                          ? "light-glass-primary text-white"
+                          : "light-glass text-white"
                       )}
                     >
-                      <div className={cn("font-medium", h.is_active && "text-primary")}>
+                      <div className={cn("font-medium")}>
                         {h.problem_text}
                       </div>
-                      <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                      <div className="flex items-center gap-2 mt-1 text-xs text-white/60">
                         <span>{new Date(h.created_at).toLocaleDateString()}</span>
-                        {h.is_active && <span className="text-primary font-medium">• Активна</span>}
+                        {h.is_active && <span className="text-white font-medium">• Активна</span>}
                       </div>
                     </div>
                   ))}
@@ -419,13 +423,13 @@ export default function Problem() {
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
 
               {/* MAIN CTA: ACTIVATE PROJECT */}
-              <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-100 shadow-md">
+              <Card className="bg-white">
                 <CardHeader>
-                  <CardTitle className="text-blue-700 flex items-center gap-2">
+                  <CardTitle className="text-primary flex items-center gap-2">
                     <Sparkles className="h-5 w-5" />
                     Решение найдено!
                   </CardTitle>
-                  <CardDescription className="text-blue-600/80">
+                  <CardDescription className="text-primary">
                     Хочешь, чтобы я провел тебя через 30-дневный путь исправления этой ситуации? 
                     Я буду давать тебе задания каждый день и поддерживать тебя.
                   </CardDescription>
@@ -434,7 +438,7 @@ export default function Problem() {
                   <Button 
                     onClick={handleStartProject}
                     disabled={loading}
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-200"
+                    className="w-full text-white shadow-lg shadow-primary-200"
                     size="lg"
                   >
                     {loading ? 'Создаю проект...' : 'Начать Кармический Проект'}
@@ -444,31 +448,31 @@ export default function Problem() {
               </Card>
 
               {/* Section: Diagnostics */}
-              <Card>
+              <Card className="text-white">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-lg">
-                    <Search className="h-5 w-5 text-muted-foreground" />
+                    <Search className="h-5 w-5 text-white" />
                     Диагностика
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">Корень проблемы</h4>
-                    <p className="font-medium text-foreground">{result.root_cause}</p>
+                    <h4 className="text-xs font-bold uppercase tracking-wider mb-2">Корень проблемы</h4>
+                    <p className="font-medium">{result.root_cause}</p>
                   </div>
 
                   {result.imprint_logic && (
                     <div>
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">Механизм отпечатка</h4>
-                      <p className="text-sm leading-relaxed text-muted-foreground">{result.imprint_logic}</p>
+                      <h4 className="text-xs font-bold uppercase tracking-wider mb-2">Механизм отпечатка</h4>
+                      <p className="text-sm leading-relaxed">{result.imprint_logic}</p>
                     </div>
                   )}
 
                   <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">С кем практиковать (Партнеры)</h4>
+                    <h4 className="text-xs font-bold uppercase tracking-wider mb-3">С кем практиковать (Партнеры)</h4>
                     <div className="flex flex-wrap gap-2">
                       {partners.length === 0 && (
-                        <span className="text-sm text-muted-foreground italic">У тебя пока нет партнеров</span>
+                        <span className="text-sm italic">У тебя пока нет партнеров</span>
                       )}
                       {partners.map((p: any) => (
                         <button
@@ -489,7 +493,7 @@ export default function Problem() {
 
                   <div className="grid grid-cols-2 gap-3 pt-2">
                     <Button variant="outline" onClick={handleSetFocus} disabled={loading} className="w-full">
-                      <Target className="mr-2 h-4 w-4 text-primary" />
+                      <Target className="mr-2 h-4 w-4" />
                       Просто цель
                     </Button>
                     <Button onClick={handleStartPractice} className="w-full">
@@ -502,29 +506,29 @@ export default function Problem() {
 
               {/* Section: Action Plan STOP-START-GROW */}
               <div className="space-y-4">
-                <h3 className="text-lg font-semibold px-1">🚀 План действий</h3>
+                <h3 className="text-lg font-semibold px-1 text-white">🚀 План действий</h3>
 
-                <Card className="border-l-4 border-l-orange-500 bg-orange-50/30">
+                <Card className="border-l-4 border-l-red-500 text-white">
                   <CardContent className="p-4">
-                    <h4 className="text-sm font-bold text-orange-700 flex items-center gap-2 mb-1">
+                    <h4 className="text-sm font-bold text-red-400 flex items-center gap-2 mb-1">
                       <AlertCircle className="h-4 w-4" /> STOP: Что прекратить
                     </h4>
                     <p className="text-sm">{result.stop_action}</p>
                   </CardContent>
                 </Card>
 
-                <Card className="border-l-4 border-l-green-500 bg-green-50/30">
+                <Card className="border-l-4 border-l-green-500 text-white">
                   <CardContent className="p-4">
-                    <h4 className="text-sm font-bold text-green-700 flex items-center gap-2 mb-1">
+                    <h4 className="text-sm font-bold text-green-400 flex items-center gap-2 mb-1">
                       <CheckCircle2 className="h-4 w-4" /> START: Что начать
                     </h4>
                     <p className="text-sm">{result.start_action}</p>
                   </CardContent>
                 </Card>
 
-                <Card className="border-l-4 border-l-blue-500 bg-blue-50/30">
+                <Card className="border-l-4 border-l-blue-500 text-white">
                   <CardContent className="p-4">
-                    <h4 className="text-sm font-bold text-blue-700 flex items-center gap-2 mb-1">
+                    <h4 className="text-sm font-bold text-blue-400 flex items-center gap-2 mb-1">
                       <Target className="h-4 w-4" /> GROW: Как поливать
                     </h4>
                     <p className="text-sm">{result.grow_action}</p>
@@ -533,13 +537,13 @@ export default function Problem() {
               </div>
 
               {/* Section: Detailed Steps */}
-              <Card>
+              <Card className="text-white">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-lg">📅 План на 30 дней</CardTitle>
                   <Button 
                     variant="ghost" 
                     size="sm" 
-                    className="text-primary h-8"
+                    className="h-8"
                     onClick={handleAddToCalendar}
                     disabled={loading}
                   >
@@ -550,7 +554,7 @@ export default function Problem() {
                 <CardContent className="grid gap-4 pt-2">
                   {result.practice_steps.map((step: string, i: number) => (
                     <div key={i} className="flex gap-3 text-sm">
-                      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-bold">
+                      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold">
                         {i + 1}
                       </div>
                       <p className="leading-relaxed pt-0.5">{step}</p>
@@ -564,7 +568,7 @@ export default function Problem() {
                 {result.expected_outcome && (
                   <Card className="bg-secondary/20 border-none">
                     <CardContent className="p-4">
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">Ожидаемый результат</h4>
+                      <h4 className="text-xs font-bold uppercase tracking-wider mb-2">Ожидаемый результат</h4>
                       <p className="text-sm font-medium">{result.expected_outcome}</p>
                     </CardContent>
                   </Card>
@@ -587,15 +591,15 @@ export default function Problem() {
                   {result.rules?.[0] && (
                     <Card>
                       <CardContent className="p-4">
-                        <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">📜 Правило</h4>
+                        <h4 className="text-xs font-bold uppercase tracking-wider mb-3">📜 Правило</h4>
                         <div className="space-y-1">
                           {result.rules[0].title && (
                             <div className="font-semibold text-sm">{result.rules[0].title}</div>
                           )}
                           {result.rules[0].number && (
-                            <div className="text-xs text-muted-foreground">№ {result.rules[0].number}</div>
+                            <div className="text-xs">№ {result.rules[0].number}</div>
                           )}
-                          <div className="text-sm mt-2 text-muted-foreground">
+                          <div className="text-sm mt-2">
                             {renderContent((result.rules[0].content || '').slice(0, 400))}
                           </div>
                         </div>
@@ -606,15 +610,15 @@ export default function Problem() {
                   {result.practices?.[0] && (
                     <Card>
                       <CardContent className="p-4">
-                        <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">🧘 Практика дня</h4>
+                        <h4 className="text-xs font-bold uppercase tracking-wider mb-3">🧘 Практика дня</h4>
                         <div className="space-y-1">
                           {(result.practices[0].name || result.practices[0].title) && (
                             <div className="font-semibold text-sm">{result.practices[0].name || result.practices[0].title}</div>
                           )}
                           {result.practices[0].duration && (
-                            <div className="text-xs text-muted-foreground">{result.practices[0].duration} мин</div>
+                            <div className="text-xs">{result.practices[0].duration} мин</div>
                           )}
-                          <div className="text-sm mt-2 text-muted-foreground">
+                          <div className="text-sm mt-2">
                             {renderContent((result.practices[0].content || '').slice(0, 400))}
                           </div>
                         </div>
@@ -625,25 +629,25 @@ export default function Problem() {
               )}
 
               {/* Section: Concepts from RAG */}
-              {result.concepts?.length > 0 && (
-                <div className="space-y-3">
-                  <h3 className="text-sm font-semibold text-muted-foreground px-1 uppercase tracking-wider">📖 Полезные концепции</h3>
-                  <div className="grid gap-3">
-                    {result.concepts.map((concept: any, i: number) => (
-                      <Card key={i}>
-                         <CardHeader className="py-3">
-                           <CardTitle className="text-sm font-medium">{concept.title}</CardTitle>
-                         </CardHeader>
-                         <CardContent className="pb-3 pt-0 text-sm text-muted-foreground">
-                           {renderContent(concept.content)}
-                         </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                </div>
-              )}
+              {/*{result.concepts?.length > 0 && (*/}
+              {/*  <div className="space-y-3">*/}
+              {/*    <h3 className="text-sm font-semibold  px-1 uppercase tracking-wider">📖 Полезные концепции</h3>*/}
+              {/*    <div className="grid gap-3">*/}
+              {/*      {result.concepts.map((concept: any, i: number) => (*/}
+              {/*        <Card key={i}>*/}
+              {/*           <CardHeader className="py-3">*/}
+              {/*             <CardTitle className="text-sm font-medium">{concept.title}</CardTitle>*/}
+              {/*           </CardHeader>*/}
+              {/*           <CardContent className="pb-3 pt-0 text-sm ">*/}
+              {/*             {renderContent(concept.content)}*/}
+              {/*           </CardContent>*/}
+              {/*        </Card>*/}
+              {/*      ))}*/}
+              {/*    </div>*/}
+              {/*  </div>*/}
+              {/*)}*/}
 
-              <div className="text-center text-xs text-muted-foreground pb-4">
+              <div className="text-center text-xs text-white/50 pb-4">
                 {result.timeline_days ? `Оценка времени проявления: ~${result.timeline_days} дней` : ''}
               </div>
 

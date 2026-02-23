@@ -13,6 +13,7 @@ from app.ai.problem_agent import (
     solve_problem as ai_solve_problem,
 )
 from app.config import get_settings
+from app.utils.typing_loader import broadcast_status
 
 
 class ProblemSolverAgent:
@@ -127,6 +128,8 @@ class ProblemSolverAgent:
     ) -> Dict[str, Any]:
         """Generate full solution based on completed diagnostic"""
         
+        await broadcast_status("🔍 Подбираю примеры из базы знаний...")
+        
         # Search for correlations based on diagnostic insights
         correlations = await self.qdrant.search_correlation(
             diagnostic_result.normalized_problem,
@@ -221,8 +224,8 @@ class ProblemSolverAgent:
             "Кармический диагност сейчас не может корректно продолжить работу — "
             "это похоже на небольшой сбой в системе. Попробуйте повторить запрос чуть позже."
         )
-        if technical_message:
-            message = f"{message}\n\nТехническая деталь: {technical_message}"
+        # if technical_message:
+        #     message = f"{message}\n\nТехническая деталь: {technical_message}"
 
         return {
             "problem": problem,
@@ -267,5 +270,5 @@ class ProblemSolverAgent:
             "rules": [],
             "practices": [],
             "diagnostic_summary": message,
-            "confidence_score": 0.0,
+            "confidence_score": 0.0
         }

@@ -5,6 +5,7 @@ import re
 from pydantic import BaseModel, Field, validator
 from pydantic_ai import Agent, RunContext
 from app.ai.models import get_model
+from app.utils.typing_loader import broadcast_status
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +197,7 @@ class DiagnosticSession:
         
         # Get correlations if not provided
         if correlations is None:
+            await broadcast_status("🔍 Изучаю базу знаний...")
             correlations = await self.qdrant.search_correlation(problem, limit=10)
         
         if concepts is None:
@@ -218,6 +220,7 @@ class DiagnosticSession:
         )
         
         try:
+            await broadcast_status("🤔 Формулирую первый вопрос...")
             result = await self.agent.run(prompt, deps=context)
             return result.output
         except Exception as e:
@@ -257,8 +260,8 @@ class DiagnosticSession:
         })
         
         # Get fresh correlations based on updated understanding
-        updated_problem = f"{self.state.problem} {answer}"
-        correlations = await self.qdrant.search_correlation(updated_problem, limit=10)
+        await broadcast_status("🔍 Уточняю информацию в базе знаний...")
+        correlations = await self.qdrant.search_correlation(f"{self.state.problem} {answer}", limit=10)
         
         context = DiagnosticContext(
             user_name=user_name,
@@ -277,6 +280,7 @@ class DiagnosticSession:
         )
         
         try:
+            await broadcast_status("🤔 Анализирую ответ...")
             result = await self.agent.run(prompt, deps=context)
             
             # Update state if agent provided new question
@@ -337,3 +341,5 @@ async def continue_karmic_diagnostic(
     """Continue karmic diagnostic with user answer"""
     session = get_diagnostic_session(session_id, qdrant_knowledge_base)
     return await session.continue_diagnostic(user_name, answer)
+
+#update

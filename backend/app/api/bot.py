@@ -19,6 +19,7 @@ from app.workflows.onboarding import (
     get_step_data,
     save_onboarding_progress
 )
+from app.api.middleware.typing_middleware import TypingMiddleware
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -33,6 +34,10 @@ else:
     bot = MockBot()
 dp = Dispatcher()
 router = Router()
+
+# Register middleware
+router.message.middleware(TypingMiddleware())
+router.callback_query.middleware(TypingMiddleware())
 
 
 @dp.error()
@@ -1438,12 +1443,15 @@ async def reset_confirm(callback: CallbackQuery, state: FSMContext):
 dp.include_router(router)
 
 
+shutdown_event = asyncio.Event()
+
 async def start_bot():
     """Start the bot"""
     logger.info("Starting Telegram bot...")
     retry_delay = 5
+    shutdown_event.clear()
     try:
-        while True:
+        while not shutdown_event.is_set():
             try:
                 # Get bot info
                 bot_info = await bot.get_me()
@@ -1462,7 +1470,17 @@ async def start_bot():
                 await bot.set_my_commands(commands)
                 logger.info("Bot commands menu set successfully")
 
-                await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+                await dp.start_polling(
+                    bot, 
+                    allowed_updates=dp.resolve_used_update_types(),
+                    handle_signals=False
+                )
+
+                # ✅ если это штатный shutdown — не рестартим
+                if shutdown_event.is_set():
+                    logger.info("Polling stopped due to shutdown")
+                    break
+
                 logger.warning(
                     "Bot polling stopped without explicit cancellation, restarting in %s seconds",
                     retry_delay,
@@ -1476,7 +1494,10 @@ async def start_bot():
                     exc_info=True,
                 )
 
-            await asyncio.sleep(retry_delay)
+            try:
+                await asyncio.wait_for(shutdown_event.wait(), timeout=retry_delay)
+            except asyncio.TimeoutError:
+                pass
     except asyncio.CancelledError:
         logger.info("Bot polling task cancelled, stopping bot loop")
         raise
@@ -1486,6 +1507,7 @@ async def stop_bot():
     """Stop the bot"""
     logger.info("Stopping Telegram bot...")
     try:
+        shutdown_event.set()
         await bot.session.close()
         logger.info("Bot stopped successfully")
     except Exception as e:

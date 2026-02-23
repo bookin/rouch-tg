@@ -11,6 +11,7 @@ import Problem from './pages/Problem'
 import Meditation from './pages/Meditation'
 import Onboarding from './pages/Onboarding'
 import Layout from './components/Layout'
+import Lotus from "@/components/Lotus.tsx";
 
 function AppContent() {
   const { isReady } = useTelegram()
@@ -41,14 +42,17 @@ function AppContent() {
 
   if (checking) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-background text-foreground">
+      <div className="flex items-center justify-center min-h-screen text-foreground">
         <div className="animate-pulse text-4xl">🧘</div>
       </div>
     )
   }
 
   return (
-    <Layout>
+	  <div className="mesh mesh--green">
+
+		<Lotus/>
+		  <Layout>
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/calendar" element={<Calendar />} />
@@ -60,6 +64,8 @@ function AppContent() {
         <Route path="/onboarding" element={<Onboarding />} />
       </Routes>
     </Layout>
+	  </div>
+
   )
 }
 

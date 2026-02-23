@@ -98,7 +98,7 @@ export default function ActiveProjectDashboard({ data, onRefresh }: Props) {
               </div>
               <div>
                 <CardTitle className="text-lg">План на сегодня</CardTitle>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-sm ">
                   Качество дня: <span className="font-medium text-primary">{daily_plan.focus_quality}</span>
                 </p>
               </div>
@@ -124,13 +124,13 @@ export default function ActiveProjectDashboard({ data, onRefresh }: Props) {
                       "mt-0.5 h-5 w-5 rounded-md border flex items-center justify-center shrink-0 transition-colors",
                       isChecked 
                         ? "bg-green-500 border-green-500 text-white" 
-                        : "border-muted-foreground/30 bg-background"
+                        : "border-muted-foreground/30 "
                     )}>
                       {isChecked && <Check className="h-3.5 w-3.5" />}
                     </div>
                     <span className={cn(
                       "text-sm leading-relaxed",
-                      isChecked && "text-muted-foreground line-through"
+                      isChecked && " line-through"
                     )}>
                       {task}
                     </span>
@@ -145,7 +145,7 @@ export default function ActiveProjectDashboard({ data, onRefresh }: Props) {
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   placeholder="Заметки к кофе-медитации (как прошел день?)..."
-                  className="min-h-[80px] bg-background"
+                  className="min-h-[80px] "
                 />
                 
                 <Button
@@ -179,7 +179,7 @@ export default function ActiveProjectDashboard({ data, onRefresh }: Props) {
         </Card>
       ) : (
         <Card className="bg-secondary/20 border-dashed">
-          <CardContent className="p-8 text-center text-muted-foreground">
+          <CardContent className="p-8 text-center ">
             <Calendar className="h-8 w-8 mx-auto mb-3 opacity-50" />
             <p>План на сегодня еще не сформирован.</p>
             <p className="text-xs mt-1">Загляни в утренние сообщения!</p>
@@ -188,9 +188,9 @@ export default function ActiveProjectDashboard({ data, onRefresh }: Props) {
       )}
 
       {/* Strategy Summary Card */}
-      <Card className="bg-secondary/30 border-none">
+      <Card className="bg-white/30 border-none shadow-sm backdrop-blur-md">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider  flex items-center gap-2">
             <Trophy className="h-4 w-4" />
             Стратегия успеха
           </CardTitle>
