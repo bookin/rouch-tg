@@ -19,27 +19,36 @@ interface Props {
   historyId: string
   onComplete: (projectData: ProjectStatusResponse) => void
   onCancel: () => void
+  existingPartners?: Record<string, string[]>
+  existingIsolation?: Record<string, { is_isolated: boolean }>
 }
 
 type Step = 'intro' | 'source' | 'ally' | 'protege' | 'world' | 'finish'
 
-export default function PartnerWizard({ historyId, onComplete, onCancel }: Props) {
+const categoryFallbacks: Record<string, string[]> = {
+	"source": ["Источник", "Кто дает тебе ресурсы и основу? (Родители, учителя)", "Если нет источника: Используй ментальные семена. Посвящай практики учителям прошлого."],
+	"ally": ["Соратник", "Кто помогает тебе в делах? (Коллеги, партнеры)", "Если нет соратника: Стань соратником для других. Помогай бескорыстно."],
+	"protege": ["Подопечный", "Кто зависит от тебя? (Клиенты, подчиненные)", "Если нет подопечного: Найди того, кому нужна помощь, даже в малом."],
+	"world": ["Внешний мир", "Кто-то далекий или конкурент.", "Если изоляция от мира: Делай тайные добрые дела (уборка мусора, пожертвования)."]
+}
+
+export default function PartnerWizard({ historyId, onComplete, onCancel, existingPartners, existingIsolation }: Props) {
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [setupData, setSetupData] = useState<ProjectSetupResponse | null>(null)
   const [step, setStep] = useState<Step>('intro')
   const [selections, setSelections] = useState<Record<string, string[]>>({
-    source: [],
-    ally: [],
-    protege: [],
-    world: []
+    source: existingPartners?.source || [],
+    ally: existingPartners?.ally || [],
+    protege: existingPartners?.protege || [],
+    world: existingPartners?.world || []
   })
   
   const [isolationSettings, setIsolationSettings] = useState<Record<string, { is_isolated: boolean }>>({
-    source: { is_isolated: false },
-    ally: { is_isolated: false },
-    protege: { is_isolated: false },
-    world: { is_isolated: false }
+    source: existingIsolation?.source || { is_isolated: false },
+    ally: existingIsolation?.ally || { is_isolated: false },
+    protege: existingIsolation?.protege || { is_isolated: false },
+    world: existingIsolation?.world || { is_isolated: false }
   })
 
   // For creating new partner
@@ -50,6 +59,21 @@ export default function PartnerWizard({ historyId, onComplete, onCancel }: Props
   useEffect(() => {
     loadSetup()
   }, [historyId])
+
+  useEffect(() => {
+    if (!existingPartners && !existingIsolation) return
+
+    const categories: Step[] = ['source', 'ally', 'protege', 'world']
+    for (const cat of categories) {
+      const iso = existingIsolation?.[cat]?.is_isolated
+      const ids = existingPartners?.[cat] || []
+      if (!iso && ids.length === 0) {
+        setStep(cat)
+        return
+      }
+    }
+    setStep('world')
+  }, [existingPartners, existingIsolation])
 
   const loadSetup = async () => {
     try {
@@ -66,7 +90,7 @@ export default function PartnerWizard({ historyId, onComplete, onCancel }: Props
   }
 
   const getGuide = (category: string) => {
-    return setupData?.partner_selection_guide?.find((g: any) => g.category === category)
+    return setupData?.partner_selection_guide?.find((g: any) => g.category.toLowerCase() === category.toLowerCase())
   }
 
   const handleNext = async () => {
@@ -215,9 +239,9 @@ export default function PartnerWizard({ historyId, onComplete, onCancel }: Props
     const isIsolated = isolationSettings[category]?.is_isolated || false
 
     // If no guide found (should not happen with backend fallback), show generic
-    const displayTitle = guide?.title || category.toUpperCase()
-    const displayDesc = guide?.description || 'Выберите партнера для этой категории'
-    const fallbackAdvice = (guide as any)?.fallback_advice || 'Если нет партнера в этой категории, используйте ментальные семена.'
+    const displayTitle = guide?.title || categoryFallbacks[category][0].toUpperCase()
+    const displayDesc = guide?.description || categoryFallbacks[category][1]
+    const fallbackAdvice = (guide as any)?.fallback_advice || categoryFallbacks[category][2]
 
     const handleIsolationToggle = (checked: boolean) => {
       setIsolationSettings(prev => ({

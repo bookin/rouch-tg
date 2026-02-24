@@ -136,11 +136,6 @@ export const getProblemsHistory = async () => {
   return response.data
 }
 
-export const activateProblem = async (id: string) => {
-  const response = await api.post(`/api/problems/${id}/activate`)
-  return response.data
-}
-
 export const addProblemToCalendar = async (steps: string[]) => {
   const response = await api.post('/api/problem/add-to-calendar', { steps })
   return response.data
@@ -195,6 +190,8 @@ export interface ProjectStatusResponse {
       problem_text?: string
     }
     partners?: Record<string, string[]>
+    history_id?: string
+    isolation_settings?: Record<string, { is_isolated: boolean }>
   }
   daily_plan?: {
     id: string

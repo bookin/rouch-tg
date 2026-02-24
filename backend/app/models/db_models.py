@@ -189,7 +189,7 @@ class ProblemHistoryDB(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     problem_text = Column(Text, nullable=False)
     solution_json = Column(JSON, nullable=False)
-    is_active = Column(Boolean, default=False, index=True)
+    diagnostic_json = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     
     # Relationships

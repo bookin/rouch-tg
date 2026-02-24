@@ -3,7 +3,7 @@ from sqlalchemy import select, update
 from datetime import datetime, UTC
 from uuid import uuid4
 from typing import Optional, List
-from app.models.db_models import KarmaPlanDB, DailyPlanDB, ProblemHistoryDB
+from app.models.db_models import KarmaPlanDB, DailyPlanDB
 
 async def create_karma_plan(
     db: AsyncSession,
@@ -52,14 +52,7 @@ async def create_karma_plan(
                     category=category
                 )
                 db.add(assoc)
-    
-    # 3. Link problem history to this plan
-    await db.execute(
-        update(ProblemHistoryDB)
-        .where(ProblemHistoryDB.id == problem_history_id)
-        .values(is_active=True)
-    )
-    
+
     await db.flush()
     await db.refresh(plan)
     return plan

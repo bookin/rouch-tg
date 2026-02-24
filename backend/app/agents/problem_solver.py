@@ -176,15 +176,15 @@ class ProblemSolverAgent:
             "stop_action": solution.stop_action,
             "start_action": solution.start_action,
             "grow_action": solution.grow_action,
-            "practice_steps": solution.practice_steps,
+            # "practice_steps": solution.practice_steps,
             "expected_outcome": solution.expected_outcome,
-            "timeline_days": solution.timeline_days,
+            # "timeline_days": solution.timeline_days,
             "success_tip": solution.success_tip,
             "clarity_level": solution.clarity_level,
             "karmic_pattern": solution.karmic_pattern,
             "seed_strategy_summary": solution.seed_strategy_summary,
-            "coffee_meditation_script": solution.coffee_meditation_script,
-            "partner_actions": solution.partner_actions,
+            # "coffee_meditation_script": solution.coffee_meditation_script,
+            # "partner_actions": solution.partner_actions,
             "partner_selection_guide": [
                 g.model_dump() for g in (solution.partner_selection_guide or [])
             ],
@@ -194,6 +194,7 @@ class ProblemSolverAgent:
             "concepts": concepts,
             "rules": rules,
             "practices": practices,
+            "diagnostic": diagnostic_result.model_dump(),
             "diagnostic_summary": diagnostic_result.diagnostic_summary,
             "confidence_score": diagnostic_result.confidence_score,
         }

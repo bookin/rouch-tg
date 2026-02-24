@@ -440,12 +440,17 @@ async def get_problems_history(user: UserProfile = Depends(get_current_user)):
     """Get problem history"""
     from app.database import AsyncSessionLocal
     from app.crud import get_user_by_telegram_id, get_problem_history
+    from app.crud_extended import get_active_karma_plan
     
     async with AsyncSessionLocal() as db:
         user_db = await get_user_by_telegram_id(db, user.telegram_id)
         if not user_db:
             return {"history": []}
         
+        # Determine which history entry (if any) has an active karma plan
+        active_plan = await get_active_karma_plan(db, user_db.id)
+        active_history_id = active_plan.problem_history_id if active_plan else None
+
         history = await get_problem_history(db, user_db.id)
         return {
             "history": [
@@ -453,39 +458,12 @@ async def get_problems_history(user: UserProfile = Depends(get_current_user)):
                     "id": h.id,
                     "problem_text": h.problem_text,
                     "solution": h.solution_json,
-                    "is_active": h.is_active,
+                    # History "activity" is now derived from the active karma plan
+                    "is_active": bool(active_history_id and h.id == active_history_id),
                     "created_at": h.created_at
                 } for h in history
             ]
         }
-
-
-@router.post("/problems/{history_id}/activate")
-async def activate_problem(
-    history_id: str,
-    user: UserProfile = Depends(get_current_user)
-):
-    """Make a historical problem active"""
-    from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id, set_active_problem, update_user_focus
-    
-    async with AsyncSessionLocal() as db:
-        user_db = await get_user_by_telegram_id(db, user.telegram_id)
-        if not user_db:
-            raise HTTPException(status_code=404, detail="User not found")
-            
-        from app.models.db_models import ProblemHistoryDB
-        from sqlalchemy import select
-        res = await db.execute(select(ProblemHistoryDB).where(ProblemHistoryDB.id == history_id))
-        hist = res.scalar_one_or_none()
-        
-        if hist:
-            await set_active_problem(db, user_db.id, history_id)
-            await update_user_focus(db, user_db.id, hist.problem_text)
-            await db.commit()
-            return {"success": True}
-            
-        raise HTTPException(status_code=404, detail="History entry not found")
 
 
 class AddToCalendarRequest(BaseModel):
@@ -758,7 +736,9 @@ async def activate_project(
                 "day_number": 1,
                 "duration_days": plan.duration_days,
                 "strategy": plan.strategy_snapshot,
-                "partners": partners_dict
+                "partners": partners_dict,
+                "history_id": payload.history_id,
+                "isolation_settings": plan.isolation_settings or {},
             }
         }
 
@@ -811,7 +791,9 @@ async def get_active_project(user: UserProfile = Depends(get_current_user)):
                 "day_number": days_passed,
                 "duration_days": plan.duration_days,
                 "strategy": plan.strategy_snapshot,
-                "partners": partners_dict
+                "partners": partners_dict,
+                "history_id": plan.problem_history_id,
+                "isolation_settings": plan.isolation_settings or {},
             },
             "daily_plan": daily_data
         }

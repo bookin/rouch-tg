@@ -59,7 +59,7 @@ export default function ActiveProjectDashboard({ data, onRefresh }: Props) {
     <div className="space-y-6">
       
       {/* Header Card */}
-      <Card className="border-none shadow-lg bg-gradient-to-br from-blue-500 to-blue-600 text-white overflow-hidden relative">
+      <Card className="border-none shadow-lg bg-gradient-to-br from-green-700 to-primary text-white overflow-hidden relative">
         <div className="absolute top-0 right-0 p-8 opacity-10">
           <Trophy className="w-32 h-32" />
         </div>
@@ -83,7 +83,7 @@ export default function ActiveProjectDashboard({ data, onRefresh }: Props) {
               <span>Прогресс</span>
               <span>{progressPercent}%</span>
             </div>
-            <Progress value={progressPercent} className="h-2 bg-black/20" />
+            <Progress value={progressPercent} className="h-2 bg-white/20" />
           </div>
         </CardContent>
       </Card>

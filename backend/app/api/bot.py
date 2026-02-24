@@ -769,7 +769,7 @@ async def _finish_project_setup(message: Message, state: FSMContext):
     """Finish setup and activate project"""
     from app.database import AsyncSessionLocal
     from app.crud_extended import create_karma_plan
-    from app.crud import update_user_focus, set_active_problem, clear_today_suggestions, get_user_by_telegram_id, save_problem_history
+    from app.crud import update_user_focus, clear_today_suggestions, get_user_by_telegram_id, save_problem_history
     from app.knowledge.qdrant import QdrantKnowledgeBase
     
     data = await state.get_data()
@@ -787,11 +787,9 @@ async def _finish_project_setup(message: Message, state: FSMContext):
         async with AsyncSessionLocal() as db:
             user_db = await get_user_by_telegram_id(db, message.from_user.id)
             if user_db:
-                # 1. Activate problem
-                if history_id:
-                    await set_active_problem(db, user_db.id, history_id)
-                else:
-                    history = await save_problem_history(db, user_db.id, problem_text, solution, is_active=True)
+                # 1. Ensure we have a history record for this solution
+                if not history_id:
+                    history = await save_problem_history(db, user_db.id, problem_text, solution)
                     history_id = history.id
                 
                 # Extract strategy
@@ -1072,13 +1070,12 @@ async def _show_complete_solution(message: Message, state: FSMContext, problem_t
     
     try:
         async with AsyncSessionLocal() as db:
-            # Save to database
+            # Save to database (no special active flag on history)
             history = await save_problem_history(
                 db, 
                 user_db.id, 
                 problem_text, 
-                solution, 
-                is_active=False
+                solution,
             )
             await db.commit()
             

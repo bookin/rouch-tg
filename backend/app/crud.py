@@ -286,26 +286,24 @@ async def save_problem_history(
     user_id: int, 
     problem_text: str, 
     solution_json: dict,
-    is_active: bool = True
+    diagnostic_json: dict | None = None,
 ) -> ProblemHistoryDB:
     """Save problem solution to history"""
+    # Не раздуваем solution_json: диагностические данные храним отдельно.
+    clean_solution = dict(solution_json) if solution_json is not None else {}
+
+    # Если diagnostic_json не передали явно, попробуем вытащить его из solution_json
+    if diagnostic_json is None and "diagnostic" in clean_solution:
+        diagnostic_json = clean_solution.pop("diagnostic")
+    
     history = ProblemHistoryDB(
         id=str(uuid4()),
         user_id=user_id,
         problem_text=problem_text,
-        solution_json=solution_json,
-        is_active=is_active
+        solution_json=clean_solution,
+        diagnostic_json=diagnostic_json,
     )
-    
-    if is_active:
-        # Deactivate others only if this one is active
-        from sqlalchemy import update
-        await db.execute(
-            update(ProblemHistoryDB)
-            .where(ProblemHistoryDB.user_id == user_id)
-            .values(is_active=False)
-        )
-    
+
     db.add(history)
     await db.flush()
     await db.refresh(history)

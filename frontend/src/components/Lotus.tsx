@@ -139,7 +139,7 @@ export default function Lotus(): JSX.Element {
 					mix-blend-soft-light
 					[perspective:1000px]
 					text-white
-					opacity-50
+					opacity-30
 					 sm:h-full
 				"
 				style={{

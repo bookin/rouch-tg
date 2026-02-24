@@ -220,9 +220,16 @@ class DiagnosticSession:
         )
         
         try:
-            await broadcast_status("🤔 Формулирую первый вопрос...")
+            await broadcast_status(" Формулирую первый вопрос...")
             result = await self.agent.run(prompt, deps=context)
-            return result.output
+
+            if result.output.next_question:
+                self.state.asked_questions.append(result.output.next_question)
+
+            output = result.output
+            output.asked_questions = self.state.asked_questions
+            output.received_answers = self.state.received_answers
+            return output
         except Exception as e:
             logger.error(f"Agent tool call failed: {e}", exc_info=True)
             # Вернём структурированный результат с флагом ошибки,
@@ -240,6 +247,8 @@ class DiagnosticSession:
                     "это похоже на небольшой сбой в системе. Попробуйте повторить запрос чуть позже."
                 ),
                 has_error=True,
+                asked_questions=[],
+                received_answers=[]
             )
     
     async def continue_diagnostic(
@@ -260,7 +269,7 @@ class DiagnosticSession:
         })
         
         # Get fresh correlations based on updated understanding
-        await broadcast_status("🔍 Уточняю информацию в базе знаний...")
+        await broadcast_status(" Уточняю информацию в базе знаний...")
         correlations = await self.qdrant.search_correlation(f"{self.state.problem} {answer}", limit=10)
         
         context = DiagnosticContext(
@@ -280,14 +289,17 @@ class DiagnosticSession:
         )
         
         try:
-            await broadcast_status("🤔 Анализирую ответ...")
+            await broadcast_status(" Анализирую ответ...")
             result = await self.agent.run(prompt, deps=context)
             
             # Update state if agent provided new question
             if result.output.next_question:
                 self.state.asked_questions.append(result.output.next_question)
-            
-            return result.output
+
+            output = result.output
+            output.asked_questions = self.state.asked_questions
+            output.received_answers = self.state.received_answers
+            return output
         except Exception as e:
             logger.error(f"Agent tool call failed in continue: {e}", exc_info=True)
             # Вернём структурированный результат с флагом ошибки,

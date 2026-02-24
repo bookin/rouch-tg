@@ -275,3 +275,8 @@ MIT
 - "Алмазный огранщик" - Геше Майкл Роуч
 - "Кармический менеджмент" - Геше Майкл Роуч
 - "Тибетская книга йоги" - Геше Майкл Роуч
+
+
+## Scripts
+
+`docker-compose exec backend python -m scripts.regenerate_solution --history-id <ID>`

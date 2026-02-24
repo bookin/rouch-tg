@@ -4,7 +4,6 @@ import {
   solveProblem,
   updateUserFocus,
   getProblemsHistory,
-  activateProblem,
   getPartners,
   addProblemToCalendar,
   getActiveProject,
@@ -42,6 +41,7 @@ export default function Problem() {
   const [showProblemForm, setShowProblemForm] = useState(true)
   const [showWizard, setShowWizard] = useState(false)
   const [initialLoading, setInitialLoading] = useState(true)
+  const [wizardHistoryId, setWizardHistoryId] = useState<string | null>(null)
 
   const loadData = async () => {
     try {
@@ -59,6 +59,24 @@ export default function Problem() {
         setShowProblemForm(false)
       } else {
         setShowProblemForm(true)
+      }
+
+      // Auto-open partner wizard if active project lacks required partners
+      if (projData && projData.has_active_project && projData.project) {
+        const partnersByCategory = projData.project.partners || {}
+        const isolation = projData.project.isolation_settings || {}
+        const categories = ['source', 'ally', 'protege', 'world']
+        const hasMissingPartners = categories.some((cat) => {
+          const catIsolation = isolation[cat]?.is_isolated
+          const catPartners = partnersByCategory[cat] || []
+          return !catIsolation && catPartners.length === 0
+        })
+
+        if (hasMissingPartners && projData.project.history_id) {
+          setWizardHistoryId(projData.project.history_id)
+          setShowWizard(true)
+          setShowProblemForm(false)
+        }
       }
     } catch (e) {
       console.error('Failed to load data', e)
@@ -151,20 +169,23 @@ export default function Problem() {
   }
 
   const handleActivateHistory = async (h: any) => {
-    // This activates the problem in history (legacy) AND shows the result
+    // Выбираем проблему из истории: показываем решение и обновляем фокус без отдельного эндпоинта
     try {
       setLoading(true)
-      await activateProblem(h.id)
+      setError(null)
+
       setResult(h.solution)
       // Ensure result has history_id for project activation
       setResult((prev: any) => ({ ...prev, history_id: h.id }))
-      
+
       setProblem(h.problem_text)
+      await updateUserFocus(h.problem_text)
+
       setSuccess('Проблема выбрана из истории.')
       setShowHistory(false)
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (err: any) {
-      setError('Не удалось активировать проблему')
+      setError('Не удалось открыть проблему из истории')
     } finally {
       setLoading(false)
     }
@@ -175,6 +196,7 @@ export default function Problem() {
       setError('Невозможно создать проект: отсутствует ID истории. Попробуйте обновить страницу.')
       return
     }
+    setWizardHistoryId(result.history_id)
     setShowWizard(true)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -185,11 +207,13 @@ export default function Problem() {
     setResult(null)
     setShowProblemForm(false)
     setShowWizard(false)
+    setWizardHistoryId(null)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   const handleWizardCancel = () => {
     setShowWizard(false)
+    setWizardHistoryId(null)
   }
 
   const togglePartner = (id: string) => {
@@ -259,11 +283,21 @@ export default function Problem() {
         </p>
       </div>
 
-      {showWizard && result?.history_id ? (
+      {showWizard && wizardHistoryId ? (
         <PartnerWizard 
-          historyId={result.history_id}
+          historyId={wizardHistoryId}
           onComplete={handleWizardComplete}
           onCancel={handleWizardCancel}
+          existingPartners={
+            activeProjectData?.project && activeProjectData.project.history_id === wizardHistoryId
+              ? activeProjectData.project.partners
+              : undefined
+          }
+          existingIsolation={
+            activeProjectData?.project && activeProjectData.project.history_id === wizardHistoryId
+              ? activeProjectData.project.isolation_settings
+              : undefined
+          }
         />
       ) : (
         <>
@@ -301,19 +335,21 @@ export default function Problem() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
-                      <div className="p-4 border-1 bg-orange-600/20 border-orange-600/40 space-y-2 rounded-md">
-                        {clarifyingQuestions.map((q, idx) => (
-                          <p key={idx} className="text-sm font-medium">{q}</p>
-                        ))}
-                      </div>
+						{!loading && (
+							<div className="p-4 border-1 bg-orange-600/20 border-orange-600/40 space-y-2 rounded-md">
+								{clarifyingQuestions.map((q, idx) => (
+									<p key={idx} className="text-sm font-medium">{q}</p>
+								))}
+							</div>
+						)}
 
                       <form onSubmit={onClarificationSubmit} className="space-y-4">
-                        <Textarea
+                        {!loading && <Textarea
                           value={clarificationText}
                           onChange={(e) => setClarificationText(e.target.value)}
                           placeholder="Напиши свои ответы одним сообщением..."
                           className="min-h-[100px] "
-                        />
+                        />}
                         <Button 
                           type="submit" 
                           disabled={loading || !clarificationText.trim()}
@@ -536,32 +572,35 @@ export default function Problem() {
                 </Card>
               </div>
 
-              {/* Section: Detailed Steps */}
-              <Card className="text-white">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-lg">📅 План на 30 дней</CardTitle>
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className="h-8"
-                    onClick={handleAddToCalendar}
-                    disabled={loading}
-                  >
-                    <Calendar className="mr-2 h-4 w-4" />
-                    В календарь
-                  </Button>
-                </CardHeader>
-                <CardContent className="grid gap-4 pt-2">
-                  {result.practice_steps.map((step: string, i: number) => (
-                    <div key={i} className="flex gap-3 text-sm">
-                      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold">
-                        {i + 1}
-                      </div>
-                      <p className="leading-relaxed pt-0.5">{step}</p>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
+				{/* Section: Detailed Steps */}
+				{result.practice_steps.length > 0 && (
+					<Card className="text-white">
+						<CardHeader className="flex flex-row items-center justify-between pb-2">
+							<CardTitle className="text-lg">📅 План на 30 дней</CardTitle>
+							<Button
+								variant="ghost"
+								size="sm"
+								className="h-8"
+								onClick={handleAddToCalendar}
+								disabled={loading}
+							>
+								<Calendar className="mr-2 h-4 w-4"/>
+								В календарь
+							</Button>
+						</CardHeader>
+						<CardContent className="grid gap-4 pt-2">
+							{result.practice_steps.map((step: string, i: number) => (
+								<div key={i} className="flex gap-3 text-sm">
+									<div
+										className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold">
+										{i + 1}
+									</div>
+									<p className="leading-relaxed pt-0.5">{step}</p>
+								</div>
+							))}
+						</CardContent>
+					</Card>
+				)}
 
               {/* Section: Outcome & Tips */}
               <div className="grid gap-4 sm:grid-cols-2">
