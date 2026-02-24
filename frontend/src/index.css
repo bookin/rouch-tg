@@ -239,7 +239,7 @@
     }
 
     .form-element-bg {
-        @apply border border-white/30 bg-white/20 shadow-sm backdrop-blur-[2px];
+        @apply border border-white/30 bg-white/10 shadow-sm backdrop-blur-[2px];
         @apply hover:bg-white/30 focus:bg-white/80;
         @apply focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring;
         @apply disabled:cursor-not-allowed disabled:opacity-50;

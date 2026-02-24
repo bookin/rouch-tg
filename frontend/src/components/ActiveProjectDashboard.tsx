@@ -12,6 +12,16 @@ interface Props {
   onRefresh: () => void
 }
 
+const qualityRuMap: Record<string, string> = {
+    'Giving': 'Щедрость',
+    'Ethics': 'Этика',
+    'Patience': 'Терпение',
+    'Effort': 'Усилие',
+    'Concentration': 'Сосредоточенность',
+    'Wisdom': 'Мудрость',
+    'Compassion': 'Сострадание',
+}
+
 export default function ActiveProjectDashboard({ data, onRefresh }: Props) {
   const { project, daily_plan } = data
   const [completedTasks, setCompletedTasks] = useState<string[]>([])
@@ -93,13 +103,13 @@ export default function ActiveProjectDashboard({ data, onRefresh }: Props) {
         <Card>
           <CardHeader className="pb-4">
             <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+              <div className="h-10 w-10 rounded-full bg-white/60 border-white/20 flex items-center justify-center text-primary shadow-md">
                 <Calendar className="h-5 w-5" />
               </div>
               <div>
                 <CardTitle className="text-lg">План на сегодня</CardTitle>
-                <p className="text-sm ">
-                  Качество дня: <span className="font-medium text-primary">{daily_plan.focus_quality}</span>
+                <p className="text-sm text-white/70">
+                  Качество дня: <span className="font-bold">{qualityRuMap[daily_plan.focus_quality]}</span>
                 </p>
               </div>
             </div>
@@ -113,18 +123,18 @@ export default function ActiveProjectDashboard({ data, onRefresh }: Props) {
                     key={idx}
                     onClick={() => handleTaskToggle(task)}
                     className={cn(
-                      "flex items-start gap-3 p-3 rounded-xl transition-all border cursor-pointer",
+                      "flex items-center gap-3 p-3 rounded-xl transition-all border cursor-pointer border-white/30",
                       isChecked 
-                        ? "bg-green-50 border-green-200" 
-                        : "bg-secondary/30 border-transparent hover:bg-secondary/50",
+                        ? "bg-white/20 text-white/50 decoration-muted-foreground/50"
+                        : "bg-white/10 hover:bg-white/20",
                       daily_plan.is_completed && "cursor-default"
                     )}
                   >
                     <div className={cn(
-                      "mt-0.5 h-5 w-5 rounded-md border flex items-center justify-center shrink-0 transition-colors",
+                      "mt-0.5 h-6 w-6 rounded-md border flex items-center justify-center shrink-0 transition-colors",
                       isChecked 
-                        ? "bg-green-500 border-green-500 text-white" 
-                        : "border-muted-foreground/30 "
+                        ? "border-primary/80 bg-primary text-white"
+                        : "border-white/50 "
                     )}>
                       {isChecked && <Check className="h-3.5 w-3.5" />}
                     </div>
@@ -145,7 +155,7 @@ export default function ActiveProjectDashboard({ data, onRefresh }: Props) {
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   placeholder="Заметки к кофе-медитации (как прошел день?)..."
-                  className="min-h-[80px] "
+                  className="min-h-[80px]"
                 />
                 
                 <Button
@@ -178,7 +188,7 @@ export default function ActiveProjectDashboard({ data, onRefresh }: Props) {
           </CardContent>
         </Card>
       ) : (
-        <Card className="bg-secondary/20 border-dashed">
+        <Card className="bg-white/10 border-dashed">
           <CardContent className="p-8 text-center ">
             <Calendar className="h-8 w-8 mx-auto mb-3 opacity-50" />
             <p>План на сегодня еще не сформирован.</p>
@@ -188,7 +198,7 @@ export default function ActiveProjectDashboard({ data, onRefresh }: Props) {
       )}
 
       {/* Strategy Summary Card */}
-      <Card className="bg-white/30 border-none shadow-sm backdrop-blur-md">
+      <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-semibold uppercase tracking-wider  flex items-center gap-2">
             <Trophy className="h-4 w-4" />
@@ -197,26 +207,26 @@ export default function ActiveProjectDashboard({ data, onRefresh }: Props) {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex gap-3">
-            <StopCircle className="h-5 w-5 text-orange-600 shrink-0" />
+            <StopCircle className="h-5 w-5 text-orange-400 shrink-0" />
             <div className="space-y-1">
-              <div className="text-xs font-bold text-orange-700">STOP</div>
-              <div className="text-sm text-foreground/90">{project.strategy.stop_action}</div>
+              <div className="text-xs font-bold text-orange-400">STOP</div>
+              <div className="text-sm">{project.strategy.stop_action}</div>
             </div>
           </div>
           
           <div className="flex gap-3">
-            <PlayCircle className="h-5 w-5 text-green-600 shrink-0" />
+            <PlayCircle className="h-5 w-5 text-green-400 shrink-0" />
             <div className="space-y-1">
-              <div className="text-xs font-bold text-green-700">START</div>
-              <div className="text-sm text-foreground/90">{project.strategy.start_action}</div>
+              <div className="text-xs font-bold text-green-400">START</div>
+              <div className="text-sm">{project.strategy.start_action}</div>
             </div>
           </div>
 
           <div className="flex gap-3">
-            <Sprout className="h-5 w-5 text-blue-600 shrink-0" />
+            <Sprout className="h-5 w-5 text-blue-400 shrink-0" />
             <div className="space-y-1">
-              <div className="text-xs font-bold text-blue-700">GROW</div>
-              <div className="text-sm text-foreground/90">{project.strategy.grow_action}</div>
+              <div className="text-xs font-bold text-blue-400">GROW</div>
+              <div className="text-sm">{project.strategy.grow_action}</div>
             </div>
           </div>
         </CardContent>
