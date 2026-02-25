@@ -1165,7 +1165,7 @@ async def cmd_today(message: Message):
                 streak_days=user_profile.streak_days,
                 total_seeds=user_profile.total_seeds
             )
-            
+
             if actions:
                 text = " Твои действия на сегодня:\n\n"
                 for i, action in enumerate(actions[:4], 1):
@@ -1176,11 +1176,21 @@ async def cmd_today(message: Message):
                         text += f"{i}. {partner_name}: {description} — {why}\n"
                     else:
                         text += f"{i}. {partner_name}: {description}\n"
+
+                await message.answer(text)
             else:
-                text = "🌱 На сегодня:\n\n"
-                text += "Открой приложение 📱 чтобы увидеть полный план дня!"
-            
-            await message.answer(text)
+                text = (
+                    "🌱 На сегодня:\n\n"
+                    "Пока у тебя ещё нет активного кармического проекта, поэтому я не могу честно предложить конкретные шаги.\n\n"
+                    "Давай сначала аккуратно разберёмся с главной задачей, а потом я соберу для тебя точный план на день."
+                )
+
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🧠 Разобрать задачу здесь", callback_data="start_problem_flow")],
+                    [InlineKeyboardButton(text="📱 Открыть приложение", web_app=WebAppInfo(url=f"{settings.WEBAPP_URL}/problem"))],
+                ])
+
+                await message.answer(text, reply_markup=kb)
             logger.info(f"User {message.from_user.id} requested today's actions")
             
     except Exception as e:
@@ -1206,12 +1216,11 @@ async def process_action_done(message: Message, state: FSMContext):
     """Process completed action"""
     from app.database import AsyncSessionLocal
     from app.crud import (
-        get_user_by_telegram_id, 
-        increment_user_seeds_count,
-        toggle_daily_task_completion,
-        update_daily_suggestion_completion,
-        create_seed
-    )
+		get_user_by_telegram_id, 
+		increment_user_seeds_count,
+		toggle_daily_task_completion,
+		create_seed
+	)
     from app.models.db_models import PartnerActionDB
     from app.models.seed import Seed
     from app.agents.daily_manager import DailyManagerAgent
@@ -1263,31 +1272,9 @@ async def process_action_done(message: Message, state: FSMContext):
                             completed=True
                         )
                         # toggle_daily_task_completion handles seed creation internally
-                        
-                    else:
-                        # Classic Mode: DailySuggestionDB
-                        # Update suggestion
-                        await update_daily_suggestion_completion(db, action_id, True)
-                        
-                        # Create generic seed for Classic Mode
-                        seed = Seed(
-                            id=str(uuid.uuid4()),
-                            user_id=user_db.id,
-                            timestamp=datetime.now(UTC),
-                            action_type="daily_action",
-                            description=description,
-                            partner_group=target_action.get("group", "world"),
-                            intention_score=5,
-                            emotion_level=5,
-                            understanding=True,
-                            estimated_maturation_days=21,
-                            strength_multiplier=1.0
-                        )
-                        await create_seed(db, seed)
-                        await increment_user_seeds_count(db, user_db.id)
                     
                     await db.commit()
-                    
+
                     await message.answer(
                         f"✅ Выполнено: {description}\n\n"
                         f"🌱 Семя посажено!\n"

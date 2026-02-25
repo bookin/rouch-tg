@@ -8,7 +8,7 @@ from uuid import uuid4
 from app.models.db_models import (
     UserDB, SeedDB, PartnerDB, PartnerGroupDB,
     HabitDB, HabitCompletionDB, PartnerActionDB,
-    ProblemHistoryDB, DailySuggestionDB, MessageLogDB,
+    ProblemHistoryDB, MessageLogDB,
     DailyTaskDB, DailyPlanDB,
 )
 from app.models.user import UserProfile
@@ -403,53 +403,6 @@ async def create_message_log(
     return log
 
 
-async def get_daily_suggestions(db: AsyncSession, user_id: int, date: datetime) -> List[DailySuggestionDB]:
-    """Get AI suggestions for a specific user and date"""
-    day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
-    day_end = date.replace(hour=23, minute=59, second=59, microsecond=999)
-    
-    result = await db.execute(
-        select(DailySuggestionDB)
-        .where(
-            DailySuggestionDB.user_id == user_id,
-            DailySuggestionDB.date >= day_start,
-            DailySuggestionDB.date <= day_end
-        )
-        .order_by(DailySuggestionDB.group.asc())
-    )
-    return result.scalars().all()
-
-
-async def save_daily_suggestions(db: AsyncSession, user_id: int, suggestions: List[dict]):
-    """Save newly generated AI suggestions"""
-    objs = [
-        DailySuggestionDB(
-            id=str(uuid4()),
-            user_id=user_id,
-            group=s["group"],
-            description=s["description"],
-            why=s["why"],
-            completed=False,
-            date=datetime.now(UTC),
-        )
-        for s in suggestions
-    ]
-    db.add_all(objs)
-    await db.flush()
-    return objs
-
-
-async def update_daily_suggestion_completion(db: AsyncSession, suggestion_id: str, completed: bool):
-    """Update completion status of a daily suggestion"""
-    from sqlalchemy import update
-    await db.execute(
-        update(DailySuggestionDB)
-        .where(DailySuggestionDB.id == suggestion_id)
-        .values(completed=completed)
-    )
-    await db.flush()
-
-
 async def toggle_daily_task_completion(db: AsyncSession, user_id: int, task_id: int, completed: bool) -> bool:
     """
     Toggle completion status of a daily task.
@@ -532,19 +485,6 @@ async def toggle_daily_task_completion(db: AsyncSession, user_id: int, task_id: 
     return True
 
 
-async def clear_today_suggestions(db: AsyncSession, user_id: int):
-    """Delete all suggestions for today (e.g. when focus changes)"""
-    from sqlalchemy import delete
-    # today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    await db.execute(
-        delete(DailySuggestionDB)
-        .where(
-            DailySuggestionDB.user_id == user_id
-        )
-    )
-    await db.flush()
-
-
 async def reset_user_progress(db: AsyncSession, user_id: int):
     """Reset all user progress and delete related data"""
     from sqlalchemy import delete
@@ -559,7 +499,6 @@ async def reset_user_progress(db: AsyncSession, user_id: int):
     await db.execute(delete(PartnerActionDB).where(PartnerActionDB.user_id == user_id))
     
     # Main entities
-    await db.execute(delete(DailySuggestionDB).where(DailySuggestionDB.user_id == user_id))
     await db.execute(delete(ProblemHistoryDB).where(ProblemHistoryDB.user_id == user_id))
     await db.execute(delete(HabitDB).where(HabitDB.user_id == user_id))
     

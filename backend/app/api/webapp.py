@@ -237,12 +237,8 @@ async def update_focus(
             
         success = await update_user_focus(db, user_db.id, payload.focus)
         
-        # Clear today's suggestions so they re-generate with new focus
-        from app.crud import clear_today_suggestions
-        await clear_today_suggestions(db, user_db.id)
-        
         await db.commit()
-        
+
         return {"success": success}
 
 
@@ -261,7 +257,7 @@ async def get_daily_actions(user: UserProfile = Depends(get_current_user)):
         settings = get_settings()
         qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
         agent = DailyManagerAgent(qdrant)
-        
+
         # Now passing all needed fields for persistence check
         actions = await agent.get_daily_actions(
             user_id=user.id,
@@ -270,46 +266,12 @@ async def get_daily_actions(user: UserProfile = Depends(get_current_user)):
             streak_days=user.streak_days,
             total_seeds=user.total_seeds
         )
-        
+
         return {"actions": actions}
     except Exception as e:
         logger.error(f"Error getting daily actions: {e}", exc_info=True)
-        # Fallback to default actions
-        actions = [
-            {
-                "id": "1",
-                "group": "source",
-                "partner_name": "Источник",
-                "description": "Позвони родителям",
-                "why": "Сеешь благодарность → получишь ресурсы",
-                "completed": False
-            },
-            {
-                "id": "2",
-                "group": "ally",
-                "partner_name": "Соратник",
-                "description": "Помоги коллеге",
-                "why": "Сеешь поддержку → получишь помощь",
-                "completed": False
-            },
-            {
-                "id": "3",
-                "group": "protege",
-                "partner_name": "Подопечный",
-                "description": "Научи чему-то",
-                "why": "Сеешь знания → получишь авторитет",
-                "completed": False
-            },
-            {
-                "id": "4",
-                "group": "world",
-                "partner_name": "Внешний мир",
-                "description": "Пожертвуй 100₽",
-                "why": "Сеешь сострадание → получишь гармонию",
-                "completed": False
-            }
-        ]
-        return {"actions": actions}
+        # In case of error не возвращаем статические действия, чтобы не плодить задачи без плана
+        return {"actions": []}
 
 
 class UpdateActionCompletionRequest(BaseModel):
@@ -322,26 +284,21 @@ async def update_action_completion(
     payload: UpdateActionCompletionRequest,
     user: UserProfile = Depends(get_current_user)
 ):
-    """Toggle daily action completion.
-
-    - For classic mode (DailySuggestionDB): action_id is a UUID string.
-    - For project mode (DailyTaskDB): action_id is a numeric string (BigInteger primary key).
-    """
+    """Toggle daily action completion for project tasks (DailyTaskDB only)."""
     from app.database import AsyncSessionLocal
-    from app.crud import update_daily_suggestion_completion, toggle_daily_task_completion
-    
+    from app.crud import toggle_daily_task_completion
+
     async with AsyncSessionLocal() as db:
-        if action_id.isdigit():
-            # Project mode: toggle completion on DailyTaskDB and manage SeedDB links
-            await toggle_daily_task_completion(
-                db,
-                user_id=user.id,
-                task_id=int(action_id),
-                completed=payload.completed,
-            )
-        else:
-            # Classic mode: toggle completion on DailySuggestionDB only
-            await update_daily_suggestion_completion(db, action_id, payload.completed)
+        if not action_id.isdigit():
+            raise HTTPException(status_code=400, detail="Invalid action id for project task")
+
+        # Project mode: toggle completion on DailyTaskDB and manage SeedDB links
+        await toggle_daily_task_completion(
+            db,
+            user_id=user.id,
+            task_id=int(action_id),
+            completed=payload.completed,
+        )
         await db.commit()
         return {"success": True}
 

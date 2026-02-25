@@ -147,7 +147,22 @@ export default function Dashboard() {
 					<div
 						className="col-span-full text-center py-12 px-4 rounded-xl border border-dashed border-muted-foreground/20 bg-white/20 backdrop-blur-main">
 						<Sparkles className="h-8 w-8  mx-auto mb-3 opacity-50"/>
-						<p className="">Генерируем лучшие советы для тебя...</p>
+						<p className="">
+							Сейчас у тебя нет активного кармического проекта или плана на день.
+						</p>
+						<p className="text-xs mt-2 opacity-80">
+							Загляни в раздел <span className="font-semibold">«Проблема»</span>, опиши свою ситуацию и вместе мы
+								соберём для тебя понятный, добрый план действий.
+						</p>
+						<div className="mt-4 flex justify-center">
+							<Button
+								variant="outline"
+								className="rounded-full px-6"
+								asChild
+							>
+								<Link to="/problem">Перейти к главной задаче</Link>
+							</Button>
+						</div>
 					</div>
 				) : (
 					actions.map((action) => (
@@ -158,7 +173,7 @@ export default function Dashboard() {
 								"group relative overflow-hidden rounded-2xl border p-5 transition-all duration-300 cursor-pointer h-full backdrop-blur-main",
 								action.completed
 									? "bg-white/30 shadow-none"
-									: "bg-primary/60 hover:bg-white/20 border-white/30 shadow-sm hover:shadow-md hover:border-white/60",
+									: "bg-white/10 hover:bg-white/20 border-white/30 shadow-sm hover:shadow-md hover:border-white/60",
 								loading && "opacity-70 pointer-events-none"
 							)}
 						>

@@ -38,66 +38,6 @@ class DailyManagerAgent:
         self.personality = personality or ManagerPersonality()
         self.daily_flow = DailyFlowWorkflow(qdrant)
 
-    @staticmethod
-    def _action_templates() -> list[dict[str, str]]:
-        return [
-            {
-                "id": "source",
-                "group": "source",
-                "partner_name": "Источник",
-                "why": "Сеешь благодарность → получишь ресурсы",
-            },
-            {
-                "id": "ally",
-                "group": "ally",
-                "partner_name": "Соратник",
-                "why": "Сеешь поддержку → получишь помощь",
-            },
-            {
-                "id": "protege",
-                "group": "protege",
-                "partner_name": "Подопечный",
-                "why": "Сеешь заботу → получишь рост",
-            },
-            {
-                "id": "world",
-                "group": "world",
-                "partner_name": "Внешний мир",
-                "why": "Сеешь сострадание → получишь гармонию",
-            },
-        ]
-
-    @staticmethod
-    def _infer_task_group(description: str, project_partners_map: dict[str, list[str]] | None) -> str:
-        """Infer project task group (source/ally/protege/world/project) from description and partners map."""
-        if not project_partners_map:
-            return "project"
-
-        text = description.lower()
-        for category, names in project_partners_map.items():
-            for name in names:
-                if name.lower() in text:
-                    return category
-        return "project"
-
-    @staticmethod
-    def _build_project_tasks_data(
-        actions: list[str],
-        project_partners_map: dict[str, list[str]] | None,
-    ) -> list[dict[str, str]]:
-        """Convert raw AI actions to structured project tasks with group/why filled."""
-        tasks: list[dict[str, str]] = []
-        for text in actions:
-            group = DailyManagerAgent._infer_task_group(text, project_partners_map)
-            tasks.append(
-                {
-                    "description": text,
-                    "group": group,
-                    "why": "Кармический проект",
-                }
-            )
-        return tasks
-
     async def get_daily_actions(
         self,
         user_id: int,
@@ -113,7 +53,6 @@ class DailyManagerAgent:
         (webapp /daily/actions, команда /today и т.п.).
         """
         from app.database import AsyncSessionLocal
-        from app.crud import get_daily_suggestions, save_daily_suggestions
         from app.crud_extended import get_active_karma_plan, get_daily_plan, create_daily_plan
 
         try:
@@ -285,81 +224,13 @@ class DailyManagerAgent:
 
                     return actions
 
-                # --- CLASSIC MODE (no active project) ---
-                existing_suggestions = await get_daily_suggestions(db, user_id, now)
-
-                if existing_suggestions:
-                    actions = [
-                        {
-                            "id": s.id,
-                            "group": s.group,
-                            "partner_name": self._get_partner_name(s.group),
-                            "description": s.description,
-                            "why": s.why,
-                            "completed": s.completed,
-                        }
-                        for s in existing_suggestions
-                    ]
-                else:
-                    # Static suggestions without LLM/Qdrant, но сохраняем в БД
-                    templates = self._action_templates()
-                    descriptions = [
-                        "Позвони родителям и узнай как дела",
-                        "Предложи помощь коллеге",
-                        "Научи кого-то чему-то новому",
-                        "Пожертвуй 100₽ в благотворительность",
-                    ]
-                    to_save = []
-                    # Take up to 4 actions
-                    for template, desc in zip(templates, descriptions):
-                        to_save.append(
-                            {
-                                "group": template["group"],
-                                "description": desc,
-                                "why": template["why"],
-                            }
-                        )
-
-                    saved_objs = await save_daily_suggestions(db, user_id, to_save)
-                    await db.commit()
-
-                    actions = [
-                        {
-                            "id": s.id,
-                            "group": s.group,
-                            "partner_name": self._get_partner_name(s.group),
-                            "description": s.description,
-                            "why": s.why,
-                            "completed": s.completed,
-                        }
-                        for s in saved_objs
-                    ]
-
-                return actions
+                # No active Karma Plan → нет задач на день
+                return []
 
         except Exception as e:
             logger.error(f"Error getting daily actions for user {user_id}: {e}", exc_info=True)
-
-            # Very simple fully static fallback (no DB, no external calls)
-            templates = self._action_templates()
-            descriptions = [
-                "Позвони родителям и узнай как дела",
-                "Предложи помощь коллеге",
-                "Научи кого-то чему-то новому",
-                "Пожертвуй 100₽ в благотворительность",
-            ]
-            actions = [
-                {
-                    "id": template["id"],
-                    "group": template["group"],
-                    "partner_name": template["partner_name"],
-                    "description": desc,
-                    "why": template["why"],
-                    "completed": False,
-                }
-                for template, desc in zip(templates, descriptions)
-            ]
-            return actions
+            # On error we просто не возвращаем задач, чтобы не плодить "висящие" действия без плана
+            return []
 
     async def morning_message(
         self,
@@ -373,21 +244,20 @@ class DailyManagerAgent:
     ) -> Dict[str, Any]:
         """Generate morning message with quote and daily actions.
 
-        Project mode (есть активный Karma Plan):
+        Если есть активный Karma Plan (проектный режим):
         - Задачи дня берутся из DailyPlanDB.tasks (создаются/обновляются отдельно).
         - Полный текст сообщения (greeting/motivation/closing + quote + actions) кешируется
           в таблице MessageLogDB (message_type="morning", channel).
         - При повторных вызовах за тот же день по умолчанию читаем из MessageLogDB
           (если regenerate=False), без повторного вызова LLM и Qdrant.
 
-        Classic mode (нет активного Karma Plan):
-        - Не вызываем LLM и внешние сервисы, генерим простой статический текст + базовые действия.
-        - Результат также логируется в MessageLogDB и может переиспользоваться в течение дня.
+        Если активного плана нет:
+        - Не генерируем задачи дня.
+        - Отправляем короткое сообщение с подсказкой активировать Кармический Проект
+          через раздел «Проблема» в веб‑приложении.
         """
         from app.database import AsyncSessionLocal
         from app.crud import (
-            get_daily_suggestions,
-            save_daily_suggestions,
             get_latest_message_log,
             create_message_log,
         )
@@ -603,88 +473,23 @@ class DailyManagerAgent:
 
                     return payload
 
-                # --- CLASSIC MODE (no active project) ---
-                # Try cache first (per-day per-channel)
-                if not regenerate:
-                    cached = await get_latest_message_log(
-                        db,
-                        user_id=user_id,
-                        message_type="morning",
-                        channel=channel,
-                        date=now,
-                        karma_plan_id=None,
-                    )
-                    if cached and cached.payload:
-                        return cached.payload
-
-                existing_suggestions = await get_daily_suggestions(db, user_id, now)
-
-                if existing_suggestions:
-                    actions = [
-                        {
-                            "id": s.id,
-                            "group": s.group,
-                            "partner_name": self._get_partner_name(s.group),
-                            "description": s.description,
-                            "why": s.why,
-                            "completed": s.completed,
-                        }
-                        for s in existing_suggestions
-                    ]
-                else:
-                    # Generate static suggestions without LLM, but persist for completion tracking
-                    templates = self._action_templates()
-                    descriptions = [
-                        "Позвони родителям и узнай как дела",
-                        "Предложи помощь коллеге",
-                        "Научи кого-то чему-то новому",
-                        "Пожертвуй 100₽ в благотворительность",
-                    ]
-                    to_save = []
-                    # Take up to 4 actions
-                    for template, desc in zip(templates, descriptions):
-                        to_save.append(
-                            {
-                                "group": template["group"],
-                                "description": desc,
-                                "why": template["why"],
-                            }
-                        )
-                    
-                    saved_objs = await save_daily_suggestions(db, user_id, to_save)
-                    await db.commit()
-                    
-                    actions = [
-                        {
-                            "id": s.id,
-                            "group": s.group,
-                            "partner_name": self._get_partner_name(s.group),
-                            "description": s.description,
-                            "why": s.why,
-                            "completed": s.completed,
-                        }
-                        for s in saved_objs
-                    ]
-
-                # Simple stub message for users without active project (no LLM, no external services)
+                # --- NO ACTIVE PROJECT (classic mode отключён) ---
+                # Простой месседж без задач, мягко направляющий пользователя к разбору проблемы в приложении
                 message = (
                     f"☀️ Доброе утро, {first_name}!\n\n"
                     "Сейчас у тебя нет активного Кармического Проекта.\n"
-                    "Зайди в приложение, реши главную задачу и активируй проект — тогда я буду присылать точный план на день.\n\n"
-                    "А пока вот базовые добрые действия на сегодня:\n"
+                    "Открой приложение, зайди в раздел «Проблема» и спокойно разберись с главной задачей — "
+                    "после этого я смогу готовить для тебя конкретный план на день.\n\n"
+                    "Пока просто будь внимателен к людям вокруг и посей сегодня несколько добрых семян."
                 )
-                for i, action in enumerate(actions, 1):
-                    message += f"{i}. {action['partner_name']}: {action['description']}\n"
-                message += "\nХорошего дня! 🌱"
 
                 payload = {
                     "message": message,
                     "quote": None,
-                    "actions": actions,
+                    "actions": [],
                     "time": "morning",
                 }
 
-                # Log classic stub as well (для единой аналитики/кеша)
                 await create_message_log(
                     db,
                     user_id=user_id,
@@ -701,20 +506,17 @@ class DailyManagerAgent:
             
         except Exception as e:
             logger.error(f"Error generating morning message for user {user_id}: {e}", exc_info=True)
-            # Fallback to workflow if AI fails
-            user = UserProfile(
-                id=user_id,
-                telegram_id=0,
-                first_name=first_name,
-                current_focus=focus,
-                streak_days=streak_days,
-                total_seeds=total_seeds,
+            # В случае ошибки не генерируем отдельные задачи, только мягкое текстовое сообщение
+            message = (
+                f"☀️ Доброе утро, {first_name}!\n\n"
+                "Сейчас мне не удалось сформировать подробный утренний план. "
+                "Сделай сегодня несколько простых добрых действий и при первой возможности "
+                "активируй или пересоздай Кармический Проект в веб‑приложении."
             )
-            result = await self.daily_flow.morning_workflow(user)
             return {
-                "message": result["message"],
-                "quote": result["quote"],
-                "actions": result["actions"],
+                "message": message,
+                "quote": None,
+                "actions": [],
                 "time": "morning",
             }
     
