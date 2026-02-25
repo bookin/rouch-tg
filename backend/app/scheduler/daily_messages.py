@@ -96,7 +96,13 @@ class MessageScheduler:
                             and user_time.minute == self.settings.MORNING_MINUTE
                         ):
                             
-                            msg = await self.manager.morning_message(user)
+                            msg = await self.manager.morning_message(
+                                user_id=user.id,
+                                first_name=user.first_name,
+                                focus=user.current_focus,
+                                streak_days=user.streak_days,
+                                total_seeds=user.total_seeds,
+                            )
                             success = await safe_send_message(
                                 self.bot,
                                 user.telegram_id,

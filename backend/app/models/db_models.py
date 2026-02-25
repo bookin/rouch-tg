@@ -247,6 +247,7 @@ class DailyPlanDB(Base):
     
     focus_quality = Column(String, nullable=True) # e.g. "Giving", "Ethics"
     tasks = Column(JSON, default=list) # List of generated tasks
+    message_snapshot = Column(JSON, nullable=True) # AI morning message snapshot
     
     is_completed = Column(Boolean, default=False)
     completion_notes = Column(Text, nullable=True)

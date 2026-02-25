@@ -158,7 +158,7 @@ export default function Dashboard() {
 								"group relative overflow-hidden rounded-2xl border p-5 transition-all duration-300 cursor-pointer h-full backdrop-blur-main",
 								action.completed
 									? "bg-white/30 shadow-none"
-									: "bg-white/10 hover:bg-white/20 border-white/30 shadow-sm hover:shadow-md hover:border-white/60",
+									: "bg-primary/60 hover:bg-white/20 border-white/30 shadow-sm hover:shadow-md hover:border-white/60",
 								loading && "opacity-70 pointer-events-none"
 							)}
 						>
