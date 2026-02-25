@@ -247,7 +247,6 @@ class DailyPlanDB(Base):
     
     focus_quality = Column(String, nullable=True) # e.g. "Giving", "Ethics"
     tasks = Column(JSON, default=list) # List of generated tasks
-    message_snapshot = Column(JSON, nullable=True) # AI morning message snapshot
     
     is_completed = Column(Boolean, default=False)
     completion_notes = Column(Text, nullable=True)
@@ -274,6 +273,24 @@ class DailySuggestionDB(Base):
     
     # Relationships
     user = relationship("UserDB", back_populates="daily_suggestions")
+
+
+class MessageLogDB(Base):
+    """Log of generated messages (morning, evening, etc.) for caching and analytics"""
+    __tablename__ = "message_logs"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    karma_plan_id = Column(String, ForeignKey("karma_plans.id", ondelete="CASCADE"), nullable=True, index=True)
+    daily_plan_id = Column(String, ForeignKey("daily_plans.id", ondelete="CASCADE"), nullable=True, index=True)
+
+    message_type = Column(String, nullable=False, index=True)  # morning, evening, etc.
+    channel = Column(String, nullable=False, default="system")  # telegram, webapp, system
+    payload = Column(JSON, nullable=False)  # full structured message payload
+
+    sent_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 # LangGraph Checkpoint Tables
 class LangGraphCheckpointDB(Base):

@@ -96,7 +96,6 @@ async def create_daily_plan(
     date: datetime,
     focus_quality: str,
     tasks: list,
-    message_snapshot: Optional[dict] = None,
 ) -> DailyPlanDB:
     """Create a new daily plan"""
     from app.models.db_models import DailyPlanDB
@@ -108,7 +107,6 @@ async def create_daily_plan(
         date=date,
         focus_quality=focus_quality,
         tasks=tasks,
-        message_snapshot=message_snapshot,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC)
     )

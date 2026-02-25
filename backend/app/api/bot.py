@@ -1152,24 +1152,22 @@ async def cmd_today(message: Message):
                 daily_minutes=user_db.daily_minutes or 30,
                 current_focus=user_db.current_focus,
                 streak_days=user_db.streak_days,
-                total_seeds=user_db.total_seeds
             )
             
-            # Use agent to generate actions
+            # Use agent to generate actions only (без полного сообщения)
             qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
             agent = DailyManagerAgent(qdrant)
             
-            morning_msg = await agent.morning_message(
+            actions = await agent.get_daily_actions(
                 user_id=user_profile.id,
                 first_name=user_profile.first_name,
                 focus=user_profile.current_focus,
                 streak_days=user_profile.streak_days,
                 total_seeds=user_profile.total_seeds
             )
-            actions = morning_msg.get("actions", [])
             
             if actions:
-                text = "🌱 Твои действия на сегодня:\n\n"
+                text = " Твои действия на сегодня:\n\n"
                 for i, action in enumerate(actions[:4], 1):
                     partner_name = action.get("partner_name", "Партнёр")
                     description = action.get("description", "")

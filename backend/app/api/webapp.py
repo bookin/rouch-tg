@@ -263,14 +263,13 @@ async def get_daily_actions(user: UserProfile = Depends(get_current_user)):
         agent = DailyManagerAgent(qdrant)
         
         # Now passing all needed fields for persistence check
-        result = await agent.morning_message(
+        actions = await agent.get_daily_actions(
             user_id=user.id,
             first_name=user.first_name,
             focus=user.current_focus,
             streak_days=user.streak_days,
             total_seeds=user.total_seeds
         )
-        actions = result.get("actions", [])
         
         return {"actions": actions}
     except Exception as e:

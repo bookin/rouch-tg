@@ -102,6 +102,7 @@ class MessageScheduler:
                                 focus=user.current_focus,
                                 streak_days=user.streak_days,
                                 total_seeds=user.total_seeds,
+                                channel="telegram",
                             )
                             success = await safe_send_message(
                                 self.bot,
@@ -142,7 +143,10 @@ class MessageScheduler:
                             and user_time.minute == self.settings.EVENING_MINUTE
                         ):
                             
-                            msg = await self.manager.evening_message(user)
+                            msg = await self.manager.evening_message(
+                                user,
+                                channel="telegram",
+                            )
                             success = await safe_send_message(
                                 self.bot,
                                 user.telegram_id,

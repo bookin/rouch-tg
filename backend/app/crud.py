@@ -8,7 +8,7 @@ from uuid import uuid4
 from app.models.db_models import (
     UserDB, SeedDB, PartnerDB, PartnerGroupDB,
     HabitDB, HabitCompletionDB, PartnerActionDB,
-    ProblemHistoryDB, DailySuggestionDB
+    ProblemHistoryDB, DailySuggestionDB, MessageLogDB
 )
 from app.models.user import UserProfile
 from app.models.seed import Seed
@@ -338,6 +338,68 @@ async def set_active_problem(db: AsyncSession, user_id: int, history_id: str) ->
     )
     await db.flush()
     return result.rowcount > 0
+
+
+async def get_latest_message_log(
+    db: AsyncSession,
+    user_id: int,
+    message_type: str,
+    channel: str,
+    date: datetime,
+    karma_plan_id: str | None = None,
+) -> MessageLogDB | None:
+    """Get latest message log for user/type/channel/day (optionally for specific karma plan)."""
+    day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = date.replace(hour=23, minute=59, second=59, microsecond=999)
+
+    query = (
+        select(MessageLogDB)
+        .where(
+            MessageLogDB.user_id == user_id,
+            MessageLogDB.message_type == message_type,
+            MessageLogDB.channel == channel,
+            MessageLogDB.sent_at >= day_start,
+            MessageLogDB.sent_at <= day_end,
+        )
+        .order_by(MessageLogDB.sent_at.desc())
+        .limit(1)
+    )
+
+    if karma_plan_id is not None:
+        query = query.where(MessageLogDB.karma_plan_id == karma_plan_id)
+    else:
+        query = query.where(MessageLogDB.karma_plan_id.is_(None))
+
+    result = await db.execute(query)
+    return result.scalar_one_or_none()
+
+
+async def create_message_log(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    message_type: str,
+    channel: str,
+    payload: dict,
+    karma_plan_id: str | None = None,
+    daily_plan_id: str | None = None,
+    sent_at: datetime | None = None,
+) -> MessageLogDB:
+    """Create new message log entry for caching and analytics."""
+    log = MessageLogDB(
+        id=str(uuid4()),
+        user_id=user_id,
+        karma_plan_id=karma_plan_id,
+        daily_plan_id=daily_plan_id,
+        message_type=message_type,
+        channel=channel,
+        payload=payload,
+        sent_at=sent_at or datetime.now(UTC),
+    )
+    db.add(log)
+    await db.flush()
+    await db.refresh(log)
+    return log
 
 
 async def get_daily_suggestions(db: AsyncSession, user_id: int, date: datetime) -> List[DailySuggestionDB]:
