@@ -151,6 +151,14 @@ export interface PartnerOut {
   contact_type?: 'physical' | 'online'
 }
 
+export interface ProjectDailyTask {
+  id: string
+  description: string
+  why?: string | null
+  group?: string | null
+  completed: boolean
+}
+
 export interface ProjectSetupResponse {
   problem: string
   partner_selection_guide?: Array<{
@@ -197,7 +205,7 @@ export interface ProjectStatusResponse {
     id: string
     day_number: number
     focus_quality: string
-    tasks: string[]
+    tasks: ProjectDailyTask[]
     is_completed: boolean
   }
 }

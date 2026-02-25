@@ -1202,64 +1202,146 @@ async def cmd_done(message: Message, state: FSMContext):
         logger.error(f"Error in cmd_done: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Попробуй еще раз.")
 
-
-@router.message(ActionState.waiting_for_action_id)
 async def process_action_done(message: Message, state: FSMContext):
     """Process completed action"""
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id, increment_user_seeds_count
+    from app.crud import (
+        get_user_by_telegram_id, 
+        increment_user_seeds_count,
+        toggle_daily_task_completion,
+        update_daily_suggestion_completion,
+        create_seed
+    )
     from app.models.db_models import PartnerActionDB
+    from app.models.seed import Seed
+    from app.agents.daily_manager import DailyManagerAgent
+    from app.knowledge.qdrant import QdrantKnowledgeBase
     from datetime import datetime, UTC
     import uuid
     
     text = message.text.strip()
     
     try:
+        settings = get_settings()
+        
         async with AsyncSessionLocal() as db:
             user_db = await get_user_by_telegram_id(db, message.from_user.id)
             
-            if user_db:
-                partner_name = None
-                action_text = text
-
-                # If user sends a number 1-4, store a meaningful label
-                if text.isdigit() and text in {"1", "2", "3", "4"}:
-                    idx = int(text)
-                    partner_name_map = {
-                        1: "Коллега",
-                        2: "Клиент",
-                        3: "Поставщик",
-                        4: "Мир",
-                    }
-                    partner_name = partner_name_map.get(idx)
-                    action_text = f"Daily action #{idx} completed"
-
-                # Save partner action to database
-                action = PartnerActionDB(
-                    id=str(uuid.uuid4()),
-                    user_id=user_db.id,
-                    partner_id=None,
-                    partner_name=partner_name,
-                    action=action_text,
-                    timestamp=datetime.now(UTC),
-                    completed=True,
-                )
-                db.add(action)
-                
-                # Increment seeds count
-                await increment_user_seeds_count(db, user_db.id)
-                
-                await db.commit()
-                
-                logger.info(f"User {message.from_user.id} completed action: {action_text}")
-                
-                await message.answer(
-                    f"✅ Отлично! Записал: {action_text}\n\n"
-                    f"Всего семян посеяно: {user_db.total_seeds} 🌱\n"
-                    "Продолжай в том же духе!"
-                )
-            else:
+            if not user_db:
                 await message.answer("Ошибка: пользователь не найден. Нажми /start")
+                return
+
+            # Check if user sent a number corresponding to a daily task
+            if text.isdigit() and text in {"1", "2", "3", "4"}:
+                idx = int(text) - 1 # 0-indexed
+                
+                # Fetch actions to get the ID
+                # We need to reconstruct the agent to get the same actions
+                # This is a bit heavy but ensures we get the right IDs
+                qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
+                agent = DailyManagerAgent(qdrant)
+                
+                actions = await agent.get_daily_actions(
+                    user_id=user_db.id,
+                    first_name=user_db.first_name,
+                    focus=user_db.current_focus,
+                    streak_days=user_db.streak_days,
+                    total_seeds=user_db.total_seeds
+                )
+                
+                if 0 <= idx < len(actions):
+                    target_action = actions[idx]
+                    action_id = target_action["id"]
+                    description = target_action["description"]
+                    
+                    if action_id.isdigit():
+                        # Project Mode: DailyTaskDB
+                        await toggle_daily_task_completion(
+                            db,
+                            user_id=user_db.id,
+                            task_id=int(action_id),
+                            completed=True
+                        )
+                        # toggle_daily_task_completion handles seed creation internally
+                        
+                    else:
+                        # Classic Mode: DailySuggestionDB
+                        # Update suggestion
+                        await update_daily_suggestion_completion(db, action_id, True)
+                        
+                        # Create generic seed for Classic Mode
+                        seed = Seed(
+                            id=str(uuid.uuid4()),
+                            user_id=user_db.id,
+                            timestamp=datetime.now(UTC),
+                            action_type="daily_action",
+                            description=description,
+                            partner_group=target_action.get("group", "world"),
+                            intention_score=5,
+                            emotion_level=5,
+                            understanding=True,
+                            estimated_maturation_days=21,
+                            strength_multiplier=1.0
+                        )
+                        await create_seed(db, seed)
+                        await increment_user_seeds_count(db, user_db.id)
+                    
+                    await db.commit()
+                    
+                    await message.answer(
+                        f"✅ Выполнено: {description}\n\n"
+                        f"🌱 Семя посажено!\n"
+                        "Продолжай в том же духе!"
+                    )
+                    await state.clear()
+                    return
+
+            # Fallback: Custom text or number out of range (treat as custom text)
+            partner_name = None
+            action_text = text
+
+            # Save partner action to database
+            action = PartnerActionDB(
+                id=str(uuid.uuid4()),
+                user_id=user_db.id,
+                partner_id=None,
+                partner_name=partner_name,
+                action=action_text,
+                timestamp=datetime.now(UTC),
+                completed=True,
+            )
+            db.add(action)
+            
+            # Create a Seed for this custom action too? 
+            # The prompt implies "marking in UI... create seed". 
+            # If user manually types "Done X", it's good to treat as seed too.
+            seed = Seed(
+                id=str(uuid.uuid4()),
+                user_id=user_db.id,
+                timestamp=datetime.now(UTC),
+                action_type="custom_action",
+                description=action_text,
+                partner_group="world",
+                intention_score=5,
+                emotion_level=5,
+                understanding=True,
+                estimated_maturation_days=21,
+                strength_multiplier=1.0
+            )
+            await create_seed(db, seed)
+            
+            # Increment seeds count
+            await increment_user_seeds_count(db, user_db.id)
+            
+            await db.commit()
+            
+            logger.info(f"User {message.from_user.id} completed action: {action_text}")
+            
+            await message.answer(
+                f"✅ Отлично! Записал: {action_text}\n\n"
+                f"Всего семян посеяно: {user_db.total_seeds + 1} 🌱\n"
+                "Продолжай в том же духе!"
+            )
                 
     except Exception as e:
         logger.error(f"Error saving action: {e}", exc_info=True)

@@ -1,6 +1,6 @@
 """CRUD operations for database"""
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from typing import Optional, List
 from datetime import datetime, UTC
 from uuid import uuid4
@@ -8,7 +8,8 @@ from uuid import uuid4
 from app.models.db_models import (
     UserDB, SeedDB, PartnerDB, PartnerGroupDB,
     HabitDB, HabitCompletionDB, PartnerActionDB,
-    ProblemHistoryDB, DailySuggestionDB, MessageLogDB
+    ProblemHistoryDB, DailySuggestionDB, MessageLogDB,
+    DailyTaskDB, DailyPlanDB,
 )
 from app.models.user import UserProfile
 from app.models.seed import Seed
@@ -447,6 +448,88 @@ async def update_daily_suggestion_completion(db: AsyncSession, suggestion_id: st
         .values(completed=completed)
     )
     await db.flush()
+
+
+async def toggle_daily_task_completion(db: AsyncSession, user_id: int, task_id: int, completed: bool) -> bool:
+    """
+    Toggle completion status of a daily task.
+    - Updates DailyTaskDB.
+    - Creates/Deletes associated SeedDB record.
+    - Updates UserDB stats (total_seeds).
+    """
+    # 1. Get the task with context
+    result = await db.execute(
+        select(DailyTaskDB, DailyPlanDB)
+        .join(DailyPlanDB, DailyTaskDB.daily_plan_id == DailyPlanDB.id)
+        .where(DailyTaskDB.id == task_id)
+    )
+    row = result.first()
+    if not row:
+        return False
+        
+    task, plan = row
+    
+    # Verify user ownership via KarmaPlan (needs another join or separate query)
+    # Actually DailyPlanDB -> KarmaPlanDB -> user_id
+    from app.models.db_models import KarmaPlanDB
+    kp_result = await db.execute(
+        select(KarmaPlanDB).where(KarmaPlanDB.id == plan.karma_plan_id)
+    )
+    karma_plan = kp_result.scalar_one_or_none()
+    
+    if not karma_plan or karma_plan.user_id != user_id:
+        return False
+
+    # 2. Update Task
+    if task.completed == completed:
+        return True # No change needed
+
+    task.completed = completed
+    task.completed_at = datetime.now(UTC) if completed else None
+    
+    # 3. Handle Seed
+    if completed:
+        # Create Seed
+        seed = SeedDB(
+            id=str(uuid4()),
+            user_id=user_id,
+            timestamp=datetime.now(UTC),
+            action_type="project_task",
+            description=task.description,
+            partner_group=task.group or "project",
+            intention_score=5,
+            emotion_level=5,
+            understanding=True,
+            # Context links
+            karma_plan_id=karma_plan.id,
+            daily_plan_id=plan.id,
+            daily_task_id=task.id,
+            
+            estimated_maturation_days=21,
+            strength_multiplier=1.0
+        )
+        db.add(seed)
+        
+        # Increment user seeds
+        await increment_user_seeds_count(db, user_id)
+        
+    else:
+        # Delete associated Seed
+        # Find seed by daily_task_id
+        await db.execute(
+            delete(SeedDB).where(SeedDB.daily_task_id == task.id)
+        )
+        
+        # Decrement user seeds
+        # We need to decrement carefully
+        user_result = await db.execute(select(UserDB).where(UserDB.id == user_id))
+        user = user_result.scalar_one_or_none()
+        if user and user.total_seeds > 0:
+            user.total_seeds -= 1
+            user.updated_at = datetime.now(UTC)
+
+    await db.flush()
+    return True
 
 
 async def clear_today_suggestions(db: AsyncSession, user_id: int):

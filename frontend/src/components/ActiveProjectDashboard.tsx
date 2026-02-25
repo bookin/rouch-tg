@@ -30,17 +30,14 @@ export default function ActiveProjectDashboard({ data, onRefresh }: Props) {
   
   if (!project) return null
 
-  // Initialize completed tasks if daily plan is already completed
-  
-  const handleTaskToggle = (task: string) => {
+  const handleTaskToggle = (taskId: string) => {
     if (daily_plan?.is_completed) return // Read only if already completed today
-    
+
     setCompletedTasks((prev: string[]) => {
-      if (prev.includes(task)) {
-        return prev.filter((t: string) => t !== task)
-      } else {
-        return [...prev, task]
+      if (prev.includes(taskId)) {
+        return prev.filter((t: string) => t !== taskId)
       }
+      return [...prev, taskId]
     })
   }
 
@@ -116,12 +113,13 @@ export default function ActiveProjectDashboard({ data, onRefresh }: Props) {
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-3">
-              {daily_plan.tasks.map((task, idx) => {
-                const isChecked = daily_plan.is_completed || completedTasks.includes(task)
+              {daily_plan.tasks.map((task) => {
+                const isChecked =
+                  daily_plan.is_completed || task.completed || completedTasks.includes(task.id)
                 return (
                   <div 
-                    key={idx}
-                    onClick={() => handleTaskToggle(task)}
+                    key={task.id}
+                    onClick={() => handleTaskToggle(task.id)}
                     className={cn(
                       "flex items-center gap-3 p-3 rounded-xl transition-all border cursor-pointer border-white/30",
                       isChecked 
@@ -142,7 +140,7 @@ export default function ActiveProjectDashboard({ data, onRefresh }: Props) {
                       "text-sm leading-relaxed",
                       isChecked && " line-through"
                     )}>
-                      {task}
+                      {task.description}
                     </span>
                   </div>
                 )

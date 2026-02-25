@@ -29,6 +29,11 @@ class Seed(BaseModel):
     estimated_maturation_days: int = 21  # 14-30 days typically
     strength_multiplier: float = 1.0  # Calculated from factors above
     
+    # Context links
+    karma_plan_id: Optional[str] = None
+    daily_plan_id: Optional[str] = None
+    daily_task_id: Optional[int] = None
+
     model_config = ConfigDict(from_attributes=True)
 
 

@@ -1,5 +1,5 @@
 """SQLAlchemy ORM models for database"""
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, Text, JSON, ForeignKey, LargeBinary, PrimaryKeyConstraint, func
+from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, Text, JSON, ForeignKey, LargeBinary, PrimaryKeyConstraint, func, BigInteger
 from sqlalchemy.orm import relationship
 from datetime import datetime, UTC
 from app.database import Base
@@ -69,8 +69,14 @@ class SeedDB(Base):
     estimated_maturation_days = Column(Integer, default=21)
     strength_multiplier = Column(Float, default=1.0)
     
+    # Context links (Requested by user)
+    karma_plan_id = Column(String, ForeignKey("karma_plans.id", ondelete="SET NULL"), nullable=True)
+    daily_plan_id = Column(String, ForeignKey("daily_plans.id", ondelete="SET NULL"), nullable=True)
+    daily_task_id = Column(Integer, ForeignKey("daily_tasks.id", ondelete="SET NULL"), nullable=True)
+
     # Relationships
     user = relationship("UserDB", back_populates="seeds")
+    daily_task = relationship("DailyTaskDB", back_populates="seeds")
 
 
 class PartnerGroupDB(Base):
@@ -246,7 +252,7 @@ class DailyPlanDB(Base):
     date = Column(DateTime(timezone=True), nullable=False)
     
     focus_quality = Column(String, nullable=True) # e.g. "Giving", "Ethics"
-    tasks = Column(JSON, default=list) # List of generated tasks
+    # tasks = Column(JSON, default=list) # Removed in favor of DailyTaskDB
     
     is_completed = Column(Boolean, default=False)
     completion_notes = Column(Text, nullable=True)
@@ -256,6 +262,31 @@ class DailyPlanDB(Base):
     
     # Relationships
     karma_plan = relationship("KarmaPlanDB", back_populates="daily_plans")
+    tasks = relationship("DailyTaskDB", back_populates="daily_plan", cascade="all, delete-orphan", lazy="selectin")
+
+
+class DailyTaskDB(Base):
+    """Individual task within a Daily Plan"""
+    __tablename__ = "daily_tasks"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    daily_plan_id = Column(String, ForeignKey("daily_plans.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    description = Column(Text, nullable=False)
+    why = Column(Text, nullable=True)
+    group = Column(String, default="project") # project, source, ally, protege, world
+    
+    completed = Column(Boolean, default=False, index=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    order = Column(Integer, default=0)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    daily_plan = relationship("DailyPlanDB", back_populates="tasks")
+    seeds = relationship("SeedDB", back_populates="daily_task")
 
 
 class DailySuggestionDB(Base):

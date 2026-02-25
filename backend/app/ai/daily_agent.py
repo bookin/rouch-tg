@@ -1,6 +1,6 @@
 """Daily AI Agent using Pydantic AI"""
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 from app.ai.models import get_model
 from app.utils.typing_loader import broadcast_status
@@ -19,11 +19,25 @@ class MessageContext(BaseModel):
     partner_contact_types: Optional[dict[str, str]] = None # {Partner Name: "online"/"physical"}
 
 
+class ProjectAction(BaseModel):
+    """Структурированная задача проекта (элемент project_actions в DailyMessage)."""
+    group: str = Field(
+        ..., description="Группа партнёра: 'source', 'ally', 'protege', 'world' или 'project' для общих шагов"
+    )
+    description: str = Field(
+        ..., description="Одно конкретное действие на сегодня в рамках Кармического Проекта"
+    )
+    why: str = Field(
+        ..., description="Краткое кармическое объяснение, зачем это действие важно именно для этого проекта"
+    )
+
+
 class DailyMessage(BaseModel):
     """Structured daily message output"""
     greeting: str
     motivation: str
     actions: list[str]
+    project_actions: list[ProjectAction] | None = None
     closing: str
 
 
@@ -49,7 +63,13 @@ def create_daily_agent() -> Agent[MessageContext, DailyMessage]:
             "Если у пользователя есть Активный Кармический Проект (Karma Plan), твои советы и действия "
             "должны быть СТРОГО направлены на реализацию его стратегии (STOP/START/GROW). "
             "Иначе включай действия для 4 универсальных категорий партнёров. "
-            "\n\nВАЖНО ПРО ИЗОЛЯЦИЮ И ТИПЫ КОНТАКТА:\n"
+            "\n\nКатегории партнёров:\n"
+            "- source (Источник) — тот, кто даёт ресурсы, возможности, поддержку.\n"
+            "- ally (Соратник) — партнёр, с кем вы вместе двигаете дела.\n"
+            "- protege (Подопечный) — тот, кому ты помогаешь расти и развиваться.\n"
+            "- world (Внешний мир) — незнакомые люди, общество в целом.\n"
+            "В `project_actions.group` всегда используй эти значения или 'project' для общих шагов без конкретного партнёра.\n"
+            "\nВАЖНО ПРО ИЗОЛЯЦИЮ И ТИПЫ КОНТАКТА:\n"
             "1. Проверяй `isolation_settings` для каждой категории.\n"
             "   - Если категория помечена как изолированная (`is_isolated: true`), НЕ предлагай социальные действия.\n"
             "   - Вместо этого предлагай: МЕНТАЛЬНЫЕ семена (пожелания счастья), АНОНИМНУЮ помощь, или действия для категории 'Внешний мир'.\n"
@@ -93,7 +113,7 @@ def create_daily_agent() -> Agent[MessageContext, DailyMessage]:
                             ctype = context.partner_contact_types.get(name, 'physical')
                             prompt += f"  ({name}: {ctype})\n"
             
-            prompt += "Твоя задача на утро: сгенерировать 3 конкретных микро-действия на сегодня, " \
+            prompt += "Твоя задача на утро: сгенерировать 4 конкретных микро-действия на сегодня, " \
                       "которые помогут пользователю реализовать эту стратегию. " \
                       "Действия должны быть простыми, выполнимыми за день и разнообразными.\n" \
                       "Строго следуй ограничениям изоляции и типа контактов (online/physical)!\n"
@@ -169,10 +189,11 @@ async def generate_morning_message(
     if plan_strategy:
         prompt = (
             "Создай утреннее сообщение с мотивацией и стратегическим планом для участника Кармического Проекта. "
-            "Включи 3 конкретных действия (tasks), которые продвинут его стратегию сегодня. "
+            "Включи 4 конкретных действия (tasks), которые продвинут его стратегию сегодня. "
             "Если переданы имена партнеров, используй их в формулировках задач. "
             "УЧИТЫВАЙ настройки изоляции и типы контактов (online/physical). "
-            "Будь сфокусированным на его цели."
+            "Будь сфокусированным на его цели. "
+            "Отдельно сформируй project_actions — 4 задачи на сегодня с полями group, description и why."
         )
     else:
         prompt = (

@@ -1,5 +1,6 @@
 """Database connection and session management"""
 import sqlalchemy as sa
+from sqlalchemy import MetaData
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from typing import AsyncGenerator
@@ -33,11 +34,19 @@ AsyncSessionLocal = async_sessionmaker(
     autoflush=False
 )
 
+convention = {
+    "ix": "ix_%(table_name)s_%(column_0_name)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
 
 # Modern SQLAlchemy 2.0 Base class
 class Base(DeclarativeBase):
     """Base class for all database models"""
-    pass
+    metadata = MetaData(naming_convention=convention)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

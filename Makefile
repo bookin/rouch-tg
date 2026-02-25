@@ -30,6 +30,10 @@ init-knowledge:
 migrate-up:
 	docker-compose exec backend alembic upgrade head
 
+migrate-down:
+	docker-compose exec backend alembic downgrade -1
+
+
 migrate-create:
 	docker-compose exec backend alembic revision --autogenerate -m "$(m)"
 

@@ -5,6 +5,7 @@ import logging
 import asyncio
 from pydantic import BaseModel
 from app.models.user import UserProfile
+from app.models.db_models import DailyTaskDB
 from app.knowledge.qdrant import QdrantKnowledgeBase
 from app.workflows.daily_flow import DailyFlowWorkflow
 from app.ai import generate_morning_message, generate_evening_message
@@ -66,6 +67,37 @@ class DailyManagerAgent:
             },
         ]
 
+    @staticmethod
+    def _infer_task_group(description: str, project_partners_map: dict[str, list[str]] | None) -> str:
+        """Infer project task group (source/ally/protege/world/project) from description and partners map."""
+        if not project_partners_map:
+            return "project"
+
+        text = description.lower()
+        for category, names in project_partners_map.items():
+            for name in names:
+                if name.lower() in text:
+                    return category
+        return "project"
+
+    @staticmethod
+    def _build_project_tasks_data(
+        actions: list[str],
+        project_partners_map: dict[str, list[str]] | None,
+    ) -> list[dict[str, str]]:
+        """Convert raw AI actions to structured project tasks with group/why filled."""
+        tasks: list[dict[str, str]] = []
+        for text in actions:
+            group = DailyManagerAgent._infer_task_group(text, project_partners_map)
+            tasks.append(
+                {
+                    "description": text,
+                    "group": group,
+                    "why": "Кармический проект",
+                }
+            )
+        return tasks
+
     async def get_daily_actions(
         self,
         user_id: int,
@@ -120,8 +152,27 @@ class DailyManagerAgent:
                     daily_plan = await get_daily_plan(db, active_plan.id, now)
 
                     if daily_plan and daily_plan.tasks and not regenerate:
-                        # Tasks already exist for today – просто используем их
-                        tasks = list(daily_plan.tasks or [])
+                        # Tasks already exist for today – utilize DailyTaskDB objects
+                        # Convert DB objects to simple strings for local processing if needed, 
+                        # but for actions construction we use IDs
+                        tasks_db = daily_plan.tasks # List[DailyTaskDB]
+                        
+                        actions = [
+                            {
+                                "id": str(t.id), # Return ID as string for consistency
+                                "group": t.group or "project",
+                                "partner_name": "Проект",
+                                "description": t.description,
+                                "why": t.why or "Шаг к цели",
+                                "completed": t.completed,
+                            }
+                            for t in tasks_db
+                        ]
+                        # Sort by order if available
+                        actions.sort(key=lambda x: x.get("order", 0))
+                        
+                        return actions
+
                     else:
                         # Need to generate AI message once for this day to get tasks
                         ai_message = await generate_morning_message(
@@ -134,8 +185,27 @@ class DailyManagerAgent:
                             isolation_settings=active_plan.isolation_settings if active_plan else None,
                             partner_contact_types=partner_contact_types_map,
                         )
-
-                        tasks = ai_message.actions[:3]  # Expecting 3 tasks for project
+                        # Prefer structured project_actions from AI; fallback to legacy string actions
+                        project_actions = getattr(ai_message, "project_actions", None) or []
+                        if project_actions:
+                            tasks_data = [
+                                {
+                                    "description": a.description,
+                                    "group": a.group,
+                                    "why": a.why,
+                                }
+                                for a in project_actions
+                            ]
+                        else:
+                            raw_tasks = ai_message.actions  # Expecting 3 tasks for project
+                            tasks_data = [
+                                {
+                                    "description": text,
+                                    "group": "project",
+                                    "why": "Кармический проект",
+                                }
+                                for text in raw_tasks
+                            ]
 
                         # Determine day number & quality
                         day_number = (now - active_plan.start_date).days + 1
@@ -152,40 +222,65 @@ class DailyManagerAgent:
                         quality = quality_map.get(day_of_week, "General")
 
                         if daily_plan:
-                            # Обновляем существующий план
-                            daily_plan.tasks = tasks
-                            daily_plan.focus_quality = quality
-                            daily_plan.updated_at = now
+                            # Plan exists but has no tasks yet (e.g. after migration) – create tasks for it
+                            for i, task_data in enumerate(tasks_data):
+                                description = (
+                                    task_data
+                                    if isinstance(task_data, str)
+                                    else task_data.get("description", "")
+                                )
+                                why = None
+                                group = "project"
+                                if isinstance(task_data, dict):
+                                    why = task_data.get("why")
+                                    group = task_data.get("group", "project")
+
+                                task = DailyTaskDB(
+                                    daily_plan_id=daily_plan.id,
+                                    description=description,
+                                    why=why,
+                                    group=group,
+                                    order=i,
+                                )
+                                db.add(task)
                         else:
-                            # Создаем новый план с задачами
+                            # Create new plan with tasks
                             daily_plan = await create_daily_plan(
                                 db,
                                 active_plan.id,
                                 day_number,
                                 now,
                                 quality,
-                                tasks,
+                                tasks_data,
                             )
 
-                            # Также сохраним в DailySuggestionDB для бэкенд-совместимости
+                            # Also save to DailySuggestionDB for backward compatibility / fallback UI
                             to_save = [
-                                {"group": "project", "description": t, "why": "Кармический проект"}
-                                for t in tasks
+                                {
+                                    "group": (t.get("group") or "project"),
+                                    "description": t.get("description", ""),
+                                    "why": t.get("why") or "Кармический проект",
+                                }
+                                for t in tasks_data
                             ]
                             await save_daily_suggestions(db, user_id, to_save)
 
                         await db.commit()
+                        # Refresh to get tasks with IDs
+                        await db.refresh(daily_plan)
+                        
+                        tasks_db = daily_plan.tasks
 
                     actions = [
                         {
-                            "id": f"task_{i}",
-                            "group": "project",
+                            "id": str(t.id),
+                            "group": t.group or "project",
                             "partner_name": "Проект",
-                            "description": task,
-                            "why": "Шаг к цели",
-                            "completed": False,
+                            "description": t.description,
+                            "why": t.why or "Шаг к цели",
+                            "completed": t.completed,
                         }
-                        for i, task in enumerate(tasks)
+                        for t in tasks_db
                     ]
 
                     return actions
@@ -349,9 +444,9 @@ class DailyManagerAgent:
                     daily_plan = await get_daily_plan(db, active_plan.id, now)
 
                     if daily_plan and daily_plan.tasks:
-                        tasks = list(daily_plan.tasks or [])
+                        # Tasks already exist for today – just reuse them and generate text/quote
+                        tasks_db = daily_plan.tasks  # List[DailyTaskDB]
 
-                        # Generate only message (tasks уже есть) + quote in parallel
                         ai_task = generate_morning_message(
                             user_name=first_name,
                             focus=focus,
@@ -379,7 +474,27 @@ class DailyManagerAgent:
                         quote_task = self.qdrant.get_daily_quote(focus)
                         ai_message, quote = await asyncio.gather(ai_task, quote_task)
 
-                        tasks = ai_message.actions[:3]  # Expecting 3 tasks for project
+                        # Use structured project_actions from AI if available; otherwise fallback to plain strings
+                        project_actions = getattr(ai_message, "project_actions", None) or []
+                        if project_actions:
+                            tasks_data = [
+                                {
+                                    "description": a.description,
+                                    "group": a.group,
+                                    "why": a.why,
+                                }
+                                for a in project_actions
+                            ]
+                        else:
+                            raw_tasks = ai_message.actions
+                            tasks_data = [
+                                {
+                                    "description": text,
+                                    "group": "project",
+                                    "why": "Кармический проект",
+                                }
+                                for text in raw_tasks
+                            ]
 
                         # Determine day number & quality
                         day_number = (now - active_plan.start_date).days + 1
@@ -396,9 +511,20 @@ class DailyManagerAgent:
                         quality = quality_map.get(day_of_week, "General")
 
                         if daily_plan:
-                            daily_plan.tasks = tasks
-                            daily_plan.focus_quality = quality
-                            daily_plan.updated_at = now
+                            # Plan exists but has no tasks yet (e.g. after migration) – create tasks for it
+                            for i, task_data in enumerate(tasks_data):
+                                description = task_data.get("description", "")
+                                group = task_data.get("group", "project")
+                                why = task_data.get("why")
+
+                                task = DailyTaskDB(
+                                    daily_plan_id=daily_plan.id,
+                                    description=description,
+                                    why=why,
+                                    group=group,
+                                    order=i,
+                                )
+                                db.add(task)
                         else:
                             daily_plan = await create_daily_plan(
                                 db,
@@ -406,29 +532,37 @@ class DailyManagerAgent:
                                 day_number,
                                 now,
                                 quality,
-                                tasks,
+                                tasks_data,
                             )
 
                             # Also save to DailySuggestionDB for backward compatibility / fallback UI
                             to_save = [
-                                {"group": "project", "description": t, "why": "Кармический проект"}
-                                for t in tasks
+                                {
+                                    "group": (t.get("group") or "project"),
+                                    "description": t.get("description", ""),
+                                    "why": t.get("why") or "Кармический проект",
+                                }
+                                for t in tasks_data
                             ]
                             await save_daily_suggestions(db, user_id, to_save)
 
                         await db.commit()
+                        await db.refresh(daily_plan)
+                        tasks_db = daily_plan.tasks
 
                     actions = [
                         {
-                            "id": f"task_{i}",
-                            "group": "project",
+                            "id": str(t.id),
+                            "group": t.group or "project",
                             "partner_name": "Проект",
-                            "description": task,
-                            "why": "Шаг к цели",
-                            "completed": False,
+                            "description": t.description,
+                            "why": t.why or "Шаг к цели",
+                            "completed": t.completed,
                         }
-                        for i, task in enumerate(tasks)
+                        for t in tasks_db
                     ]
+                    # Sort by order
+                    actions.sort(key=lambda x: x.get("order", 0))
 
                     greeting = ai_message.greeting
                     motivation = ai_message.motivation

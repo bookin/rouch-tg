@@ -322,12 +322,26 @@ async def update_action_completion(
     payload: UpdateActionCompletionRequest,
     user: UserProfile = Depends(get_current_user)
 ):
-    """Toggle daily action completion"""
+    """Toggle daily action completion.
+
+    - For classic mode (DailySuggestionDB): action_id is a UUID string.
+    - For project mode (DailyTaskDB): action_id is a numeric string (BigInteger primary key).
+    """
     from app.database import AsyncSessionLocal
-    from app.crud import update_daily_suggestion_completion
+    from app.crud import update_daily_suggestion_completion, toggle_daily_task_completion
     
     async with AsyncSessionLocal() as db:
-        await update_daily_suggestion_completion(db, action_id, payload.completed)
+        if action_id.isdigit():
+            # Project mode: toggle completion on DailyTaskDB and manage SeedDB links
+            await toggle_daily_task_completion(
+                db,
+                user_id=user.id,
+                task_id=int(action_id),
+                completed=payload.completed,
+            )
+        else:
+            # Classic mode: toggle completion on DailySuggestionDB only
+            await update_daily_suggestion_completion(db, action_id, payload.completed)
         await db.commit()
         return {"success": True}
 
@@ -766,11 +780,28 @@ async def get_active_project(user: UserProfile = Depends(get_current_user)):
         
         daily_data = None
         if daily:
+            # Serialize tasks from DB objects to dicts
+            tasks_data = []
+            if daily.tasks:
+                # Sort by order if available (DailyTaskDB has 'order' column)
+                sorted_tasks = sorted(daily.tasks, key=lambda t: t.order if t.order is not None else 0)
+                
+                tasks_data = [
+                    {
+                        "id": str(t.id),
+                        "description": t.description,
+                        "why": t.why,
+                        "group": t.group,
+                        "completed": t.completed
+                    }
+                    for t in sorted_tasks
+                ]
+
             daily_data = {
                 "id": daily.id,
                 "day_number": daily.day_number,
                 "focus_quality": daily.focus_quality,
-                "tasks": daily.tasks,
+                "tasks": tasks_data,
                 "is_completed": daily.is_completed
             }
             
@@ -814,6 +845,7 @@ async def complete_daily_plan(
     from app.models.db_models import DailyPlanDB
     from sqlalchemy import select, update
     from datetime import datetime, UTC
+    from app.crud import toggle_daily_task_completion
     
     async with AsyncSessionLocal() as db:
         active_plan = await get_active_karma_plan(db, user.id) 
@@ -826,7 +858,7 @@ async def complete_daily_plan(
         if not daily:
              raise HTTPException(status_code=404, detail="Daily plan for today not found")
              
-        # Update completion
+        # Update completion status of the plan itself
         await db.execute(
             update(DailyPlanDB)
             .where(DailyPlanDB.id == daily.id)
@@ -837,11 +869,17 @@ async def complete_daily_plan(
             )
         )
         
-        # Also increment seeds/streak for the user
-        from app.crud import increment_user_seeds_count
-        
-        for _ in payload.completed_tasks:
-            await increment_user_seeds_count(db, active_plan.user_id)
+        # Process individual tasks to ensure seeds are created/linked
+        for task_id_str in payload.completed_tasks:
+            if task_id_str.isdigit():
+                # For each task marked as completed in the Coffee Meditation, ensure it's toggled to True
+                # This will create the seed if it doesn't exist, and update user stats
+                await toggle_daily_task_completion(
+                    db,
+                    user_id=user.id,
+                    task_id=int(task_id_str),
+                    completed=True
+                )
             
         await db.commit()
         return {"success": True}

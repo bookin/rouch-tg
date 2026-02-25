@@ -97,8 +97,8 @@ async def create_daily_plan(
     focus_quality: str,
     tasks: list,
 ) -> DailyPlanDB:
-    """Create a new daily plan"""
-    from app.models.db_models import DailyPlanDB
+    """Create a new daily plan with tasks"""
+    from app.models.db_models import DailyPlanDB, DailyTaskDB
     
     daily = DailyPlanDB(
         id=str(uuid4()),
@@ -106,11 +106,45 @@ async def create_daily_plan(
         day_number=day_number,
         date=date,
         focus_quality=focus_quality,
-        tasks=tasks,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC)
     )
     db.add(daily)
     await db.flush()
+    
+    # Create tasks
+    for i, task_data in enumerate(tasks):
+        # task_data can be a string (description) or a dict
+        description = task_data if isinstance(task_data, str) else task_data.get("description", "")
+        why = None
+        group = "project"
+        
+        if isinstance(task_data, dict):
+             why = task_data.get("why")
+             group = task_data.get("group", "project")
+
+        task = DailyTaskDB(
+            daily_plan_id=daily.id,
+            description=description,
+            why=why,
+            group=group,
+            order=i,
+            completed=False,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC)
+        )
+        db.add(task)
+    
+    await db.flush()
     await db.refresh(daily)
     return daily
+
+
+async def get_daily_task(db: AsyncSession, task_id: int):
+    """Get daily task by ID"""
+    from app.models.db_models import DailyTaskDB
+    result = await db.execute(
+        select(DailyTaskDB).where(DailyTaskDB.id == task_id)
+    )
+    return result.scalar_one_or_none()
+
