@@ -118,16 +118,22 @@ async def create_daily_plan(
         description = task_data if isinstance(task_data, str) else task_data.get("description", "")
         why = None
         group = "project"
+        partner_id = None
+        action_type = None
         
         if isinstance(task_data, dict):
-             why = task_data.get("why")
-             group = task_data.get("group", "project")
+            why = task_data.get("why")
+            group = task_data.get("group", "project")
+            partner_id = task_data.get("partner_id")
+            action_type = task_data.get("action_type")
 
         task = DailyTaskDB(
             daily_plan_id=daily.id,
             description=description,
             why=why,
             group=group,
+            partner_id=partner_id,
+            action_type=action_type,
             order=i,
             completed=False,
             created_at=datetime.now(UTC),

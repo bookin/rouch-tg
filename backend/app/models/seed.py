@@ -5,6 +5,17 @@ from datetime import datetime, UTC
 from uuid import uuid4
 
 
+# Centralized action types for karmic seeds
+ACTION_TYPES: dict[str, str] = {
+    "giving": "Тёплое щедрое действие для блага другого человека",
+    "kindness": "Этичный, добрый поступок, который бережно относится к другим",
+    "patience": "Терпение и устойчивость, когда что-то идёт не так, как хочется",
+    "effort": "Осознанное усилие и настойчивость в правильном направлении",
+    "concentration": "Собранность внимания и присутствие в моменте",
+    "wisdom": "Мудрое решение или взгляд, который помогает видеть корень ситуации",
+}
+
+
 class Seed(BaseModel):
     """Karmic seed planted by user"""
     

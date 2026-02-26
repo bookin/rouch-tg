@@ -12,7 +12,7 @@ from app.models.db_models import (
     DailyTaskDB, DailyPlanDB,
 )
 from app.models.user import UserProfile
-from app.models.seed import Seed
+from app.models.seed import Seed, ACTION_TYPES
 from app.models.partner import Partner, PartnerGroup
 from app.models.partner import DEFAULT_GROUPS
 
@@ -442,14 +442,30 @@ async def toggle_daily_task_completion(db: AsyncSession, user_id: int, task_id: 
     
     # 3. Handle Seed
     if completed:
+        # Derive action_type for seed строго из task.action_type
+        raw_action_type = getattr(task, "action_type", None) or ""
+        seed_action_type = raw_action_type.strip().lower()
+
+        # Если по какой-то причине в задаче нет action_type,
+        # мягко считаем это добрым действием
+        if not seed_action_type:
+            seed_action_type = "kindness"
+
+        # Clamp to centralized ACTION_TYPES keys to avoid "плавающих" значений
+        if seed_action_type not in ACTION_TYPES:
+            seed_action_type = "kindness"
+
+        partner_group = task.group or "project"
+
         # Create Seed
         seed = SeedDB(
             id=str(uuid4()),
             user_id=user_id,
             timestamp=datetime.now(UTC),
-            action_type="project_task",
+            action_type=seed_action_type,
             description=task.description,
-            partner_group=task.group or "project",
+            partner_id=getattr(task, "partner_id", None),
+            partner_group=partner_group,
             intention_score=5,
             emotion_level=5,
             understanding=True,
@@ -457,9 +473,8 @@ async def toggle_daily_task_completion(db: AsyncSession, user_id: int, task_id: 
             karma_plan_id=karma_plan.id,
             daily_plan_id=plan.id,
             daily_task_id=task.id,
-            
             estimated_maturation_days=21,
-            strength_multiplier=1.0
+            strength_multiplier=1.0,
         )
         db.add(seed)
         

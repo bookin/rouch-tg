@@ -1,9 +1,9 @@
 """SQLAlchemy ORM models for database"""
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, Text, JSON, ForeignKey, LargeBinary, PrimaryKeyConstraint, func, BigInteger
+from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, Text, JSON, ForeignKey, LargeBinary, PrimaryKeyConstraint, func, BigInteger, \
+    Sequence
 from sqlalchemy.orm import relationship
 from datetime import datetime, UTC
 from app.database import Base
-
 
 class UserDB(Base):
     """User database model"""
@@ -44,7 +44,7 @@ class UserDB(Base):
     habits = relationship("HabitDB", back_populates="user", lazy="selectin")
     partners = relationship("PartnerDB", back_populates="user", lazy="selectin")
     problem_history = relationship("ProblemHistoryDB", back_populates="user", lazy="selectin")
-    daily_suggestions = relationship("DailySuggestionDB", back_populates="user", lazy="selectin")
+    # daily_tasks = relationship("DailyTaskDB", back_populates="user", lazy="selectin")
     karma_plans = relationship("KarmaPlanDB", back_populates="user", lazy="selectin")
 
 
@@ -275,6 +275,8 @@ class DailyTaskDB(Base):
     description = Column(Text, nullable=False)
     why = Column(Text, nullable=True)
     group = Column(String, default="project") # project, source, ally, protege, world
+    partner_id = Column(String, ForeignKey("partners.id", ondelete="SET NULL"), nullable=True)
+    action_type = Column(String, nullable=True, index=True)
     
     completed = Column(Boolean, default=False, index=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
@@ -289,21 +291,21 @@ class DailyTaskDB(Base):
     seeds = relationship("SeedDB", back_populates="daily_task")
 
 
-class DailySuggestionDB(Base):
-    """Daily AI suggestion database model"""
-    __tablename__ = "daily_suggestions"
-    
-    id = Column(String, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    group = Column(String, nullable=False)
-    description = Column(Text, nullable=False)
-    why = Column(Text, nullable=False)
-    completed = Column(Boolean, default=False, index=True)
-    date = Column(DateTime(timezone=True), server_default=func.now(), index=True)
-    seed_id = Column(String, ForeignKey("seeds.id", ondelete="SET NULL"), nullable=True)
-    
-    # Relationships
-    user = relationship("UserDB", back_populates="daily_suggestions")
+# class DailySuggestionDB(Base):
+#     """Daily AI suggestion database model"""
+#     __tablename__ = "daily_suggestions"
+#
+#     id = Column(String, primary_key=True)
+#     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+#     group = Column(String, nullable=False)
+#     description = Column(Text, nullable=False)
+#     why = Column(Text, nullable=False)
+#     completed = Column(Boolean, default=False, index=True)
+#     date = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+#     seed_id = Column(String, ForeignKey("seeds.id", ondelete="SET NULL"), nullable=True)
+#
+#     # Relationships
+#     user = relationship("UserDB", back_populates="daily_suggestions")
 
 
 class MessageLogDB(Base):

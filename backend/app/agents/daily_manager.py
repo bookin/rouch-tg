@@ -67,9 +67,10 @@ class DailyManagerAgent:
                     # --- PROJECT MODE ---
                     plan_strategy = active_plan.strategy_snapshot
 
-                    # Resolve project partners names if they exist
+                    # Resolve project partners ids/names if they exist
                     project_partners_map = None
                     partner_contact_types_map = None
+                    partner_name_by_id = {}
 
                     if active_plan.partners_association:
                         project_partners_map = {}
@@ -78,10 +79,13 @@ class DailyManagerAgent:
                         for assoc in active_plan.partners_association:
                             cat = assoc.category
                             if cat not in project_partners_map:
-                                project_partners_map[cat] = []
+                                project_partners_map[cat] = {}
                             if assoc.partner:
-                                project_partners_map[cat].append(assoc.partner.name)
-                                partner_contact_types_map[assoc.partner.name] = getattr(
+                                pid = assoc.partner.id
+                                pname = assoc.partner.name
+                                project_partners_map[cat][pid] = pname
+                                partner_name_by_id[pid] = pname
+                                partner_contact_types_map[pid] = getattr(
                                     assoc.partner,
                                     "contact_type",
                                     "physical",
@@ -127,14 +131,24 @@ class DailyManagerAgent:
                         # Prefer structured project_actions from AI; fallback to legacy string actions
                         project_actions = getattr(ai_message, "project_actions", None) or []
                         if project_actions:
-                            tasks_data = [
-                                {
-                                    "description": a.description,
-                                    "group": a.group,
-                                    "why": a.why,
-                                }
-                                for a in project_actions
-                            ]
+                            tasks_data = []
+                            for a in project_actions:
+                                partner_id = getattr(a, "partner_id", None)
+
+                                # Мягкая валидация: используем только те id, которые реально присутствуют в плане
+                                if partner_id and project_partners_map and a.group in project_partners_map:
+                                    if partner_id not in project_partners_map[a.group]:
+                                        partner_id = None
+
+                                tasks_data.append(
+                                    {
+                                        "description": a.description,
+                                        "group": a.group,
+                                        "why": a.why,
+                                        "partner_id": partner_id,
+                                        "action_type": getattr(a, "action_type", None),
+                                    }
+                                )
                         else:
                             raw_tasks = ai_message.actions  # Expecting 3 tasks for project
                             tasks_data = [
@@ -170,15 +184,21 @@ class DailyManagerAgent:
                                 )
                                 why = None
                                 group = "project"
+                                partner_id = None
+                                action_type = None
                                 if isinstance(task_data, dict):
                                     why = task_data.get("why")
                                     group = task_data.get("group", "project")
+                                    partner_id = task_data.get("partner_id")
+                                    action_type = task_data.get("action_type")
 
                                 task = DailyTaskDB(
                                     daily_plan_id=daily_plan.id,
                                     description=description,
                                     why=why,
                                     group=group,
+                                    partner_id=partner_id,
+                                    action_type=action_type,
                                     order=i,
                                 )
                                 db.add(task)
@@ -193,17 +213,6 @@ class DailyManagerAgent:
                                 tasks_data,
                             )
 
-                            # Also save to DailySuggestionDB for backward compatibility / fallback UI
-                            to_save = [
-                                {
-                                    "group": (t.get("group") or "project"),
-                                    "description": t.get("description", ""),
-                                    "why": t.get("why") or "Кармический проект",
-                                }
-                                for t in tasks_data
-                            ]
-                            await save_daily_suggestions(db, user_id, to_save)
-
                         await db.commit()
                         # Refresh to get tasks with IDs
                         await db.refresh(daily_plan)
@@ -214,7 +223,11 @@ class DailyManagerAgent:
                         {
                             "id": str(t.id),
                             "group": t.group or "project",
-                            "partner_name": "Проект",
+                            "partner_name": (
+                                partner_name_by_id.get(t.partner_id)
+                                if getattr(t, "partner_id", None) and partner_name_by_id
+                                else self._get_partner_name(t.group or "project")
+                            ),
                             "description": t.description,
                             "why": t.why or "Шаг к цели",
                             "completed": t.completed,
@@ -275,23 +288,27 @@ class DailyManagerAgent:
                     # --- PROJECT MODE ---
                     plan_strategy = active_plan.strategy_snapshot
 
-                    # Resolve project partners names if they exist
+                    # Resolve project partners ids/names if they exist
                     project_partners_map = None
                     partner_contact_types_map = None
-                    
+                    partner_name_by_id = {}
+
                     if active_plan.partners_association:
                         project_partners_map = {}
                         partner_contact_types_map = {}
-                        
+
                         for assoc in active_plan.partners_association:
                             cat = assoc.category
                             if cat not in project_partners_map:
-                                project_partners_map[cat] = []
+                                project_partners_map[cat] = {}
                             # assoc.partner is lazy="joined" in model so it should be there
                             if assoc.partner:
-                                project_partners_map[cat].append(assoc.partner.name)
+                                pid = assoc.partner.id
+                                pname = assoc.partner.name
+                                project_partners_map[cat][pid] = pname
+                                partner_name_by_id[pid] = pname
                                 # Collect contact type (default to physical if missing)
-                                partner_contact_types_map[assoc.partner.name] = getattr(
+                                partner_contact_types_map[pid] = getattr(
                                     assoc.partner,
                                     "contact_type",
                                     "physical",
@@ -347,14 +364,24 @@ class DailyManagerAgent:
                         # Use structured project_actions from AI if available; otherwise fallback to plain strings
                         project_actions = getattr(ai_message, "project_actions", None) or []
                         if project_actions:
-                            tasks_data = [
-                                {
-                                    "description": a.description,
-                                    "group": a.group,
-                                    "why": a.why,
-                                }
-                                for a in project_actions
-                            ]
+                            tasks_data = []
+                            for a in project_actions:
+                                partner_id = getattr(a, "partner_id", None)
+
+                                # Мягкая валидация: используем только те id, которые реально присутствуют в плане
+                                if partner_id and project_partners_map and a.group in project_partners_map:
+                                    if partner_id not in project_partners_map[a.group]:
+                                        partner_id = None
+
+                                tasks_data.append(
+                                    {
+                                        "description": a.description,
+                                        "group": a.group,
+                                        "why": a.why,
+                                        "partner_id": partner_id,
+                                        "action_type": getattr(a, "action_type", None),
+                                    }
+                                )
                         else:
                             raw_tasks = ai_message.actions
                             tasks_data = [
@@ -386,12 +413,16 @@ class DailyManagerAgent:
                                 description = task_data.get("description", "")
                                 group = task_data.get("group", "project")
                                 why = task_data.get("why")
+                                partner_id = task_data.get("partner_id")
+                                action_type = task_data.get("action_type")
 
                                 task = DailyTaskDB(
                                     daily_plan_id=daily_plan.id,
                                     description=description,
                                     why=why,
                                     group=group,
+                                    partner_id=partner_id,
+                                    action_type=action_type,
                                     order=i,
                                 )
                                 db.add(task)
@@ -405,17 +436,6 @@ class DailyManagerAgent:
                                 tasks_data,
                             )
 
-                            # Also save to DailySuggestionDB for backward compatibility / fallback UI
-                            to_save = [
-                                {
-                                    "group": (t.get("group") or "project"),
-                                    "description": t.get("description", ""),
-                                    "why": t.get("why") or "Кармический проект",
-                                }
-                                for t in tasks_data
-                            ]
-                            await save_daily_suggestions(db, user_id, to_save)
-
                         await db.commit()
                         await db.refresh(daily_plan)
                         tasks_db = daily_plan.tasks
@@ -424,7 +444,11 @@ class DailyManagerAgent:
                         {
                             "id": str(t.id),
                             "group": t.group or "project",
-                            "partner_name": "Проект",
+                            "partner_name": (
+                                partner_name_by_id.get(t.partner_id)
+                                if getattr(t, "partner_id", None) and partner_name_by_id
+                                else self._get_partner_name(t.group or "project")
+                            ),
                             "description": t.description,
                             "why": t.why or "Шаг к цели",
                             "completed": t.completed,

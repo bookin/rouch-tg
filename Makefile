@@ -28,14 +28,14 @@ init-knowledge:
 	docker-compose exec backend python -m app.knowledge.init_knowledge
 
 migrate-up:
-	docker-compose exec backend alembic upgrade head
+	docker-compose exec backend uv run alembic upgrade head
 
 migrate-down:
-	docker-compose exec backend alembic downgrade -1
+	docker-compose exec backend uv run alembic downgrade -1
 
 
 migrate-create:
-	docker-compose exec backend alembic revision --autogenerate -m "$(m)"
+	docker-compose exec backend uv run alembic revision --autogenerate -m "$(m)"
 
 clean-data:
 	docker-compose down -v

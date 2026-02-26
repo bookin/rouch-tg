@@ -769,7 +769,7 @@ async def _finish_project_setup(message: Message, state: FSMContext):
     """Finish setup and activate project"""
     from app.database import AsyncSessionLocal
     from app.crud_extended import create_karma_plan
-    from app.crud import update_user_focus, clear_today_suggestions, get_user_by_telegram_id, save_problem_history
+    from app.crud import update_user_focus, get_user_by_telegram_id, save_problem_history
     from app.knowledge.qdrant import QdrantKnowledgeBase
     
     data = await state.get_data()
@@ -810,14 +810,12 @@ async def _finish_project_setup(message: Message, state: FSMContext):
                     history_id,
                     strategy_snapshot,
                     duration_days=30,
-                    project_partners=project_partners
+                    project_partners=project_partners,
+                    isolation_settings=isolation_settings
                 )
                 
                 # 3. Update Focus
                 await update_user_focus(db, user_db.id, problem_text)
-                
-                # 4. Clear old suggestions
-                await clear_today_suggestions(db, user_db.id)
                 
                 await db.commit()
                 
