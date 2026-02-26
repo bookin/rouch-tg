@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { getUser } from './api/client'
 import { useTelegram } from './hooks/useTelegram'
 import Dashboard from './pages/Dashboard'
-import Calendar from './pages/Calendar'
+// import Calendar from './pages/Calendar'
 import Partners from './pages/Partners'
 import SeedJournal from './pages/SeedJournal'
 import Practices from './pages/Practices'
@@ -55,7 +55,7 @@ function AppContent() {
 		  <Layout>
       <Routes>
         <Route path="/" element={<Dashboard />} />
-        <Route path="/calendar" element={<Calendar />} />
+        {/*<Route path="/calendar" element={<Calendar />} />*/}
         <Route path="/partners" element={<Partners />} />
         <Route path="/journal" element={<SeedJournal />} />
         <Route path="/practices" element={<Practices />} />

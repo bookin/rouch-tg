@@ -60,7 +60,7 @@
 
         /* Muted */
         --muted: hsl(210 40% 96.1%);
-        --muted-foreground: hsl(0, 0%, 69%);
+        --muted-foreground: hsl(0 0% 100% / 0.7);
 
         /* Accent */
         --accent: hsl(210 40% 96.1%);

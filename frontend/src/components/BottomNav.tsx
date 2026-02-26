@@ -7,7 +7,7 @@ export function BottomNav() {
 
   const navItems = [
     { path: '/', icon: Home, label: 'Главная' },
-    { path: '/calendar', icon: CalendarIcon, label: 'Календарь' },
+    // { path: '/calendar', icon: CalendarIcon, label: 'Календарь' },
     { path: '/partners', icon: Users, label: 'Партнёры' },
     { path: '/journal', icon: Sprout, label: 'Журнал' },
     { path: '/practices', icon: Brain, label: 'Практики' },
@@ -26,7 +26,7 @@ export function BottomNav() {
               to={item.path}
               className={cn(
                 "flex flex-col items-center justify-center w-full h-full gap-1 text-[10px] font-medium transition-colors duration-200",
-                isActive 
+                isActive
                   ? "text-white"
                   : " hover:text-foreground"
               )}

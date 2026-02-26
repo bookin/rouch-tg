@@ -8,7 +8,7 @@ export function Sidebar() {
 
   const navItems = [
     { path: '/', icon: Home, label: 'Главная' },
-    { path: '/calendar', icon: CalendarIcon, label: 'Календарь' },
+    // { path: '/calendar', icon: CalendarIcon, label: 'Календарь' },
     { path: '/partners', icon: Users, label: 'Партнёры' },
     { path: '/journal', icon: Sprout, label: 'Журнал' },
     { path: '/practices', icon: Brain, label: 'Практики' },
