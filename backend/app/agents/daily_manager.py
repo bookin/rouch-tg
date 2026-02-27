@@ -273,6 +273,7 @@ class DailyManagerAgent:
         from app.crud import (
             get_latest_message_log,
             create_message_log,
+            get_user_practice_progress,
         )
         from app.crud_extended import get_active_karma_plan, get_daily_plan, create_daily_plan
         
@@ -457,6 +458,21 @@ class DailyManagerAgent:
                     ]
                     # Sort by order
                     actions.sort(key=lambda x: x.get("order", 0))
+
+                    # Add practice tracking actions
+                    practice_progress_list = await get_user_practice_progress(db, user_id)
+                    active_practices = [p for p in practice_progress_list if not p.is_habit]
+                    
+                    for practice in active_practices[:3]:  # Limit to 3 practices
+                        actions.append({
+                            "id": f"practice_{practice.practice_id}",
+                            "group": "practice",
+                            "partner_name": None,
+                            "description": f"Практика: {practice.practice.name if practice.practice else 'Unknown'}",
+                            "why": f"Прогресс: {practice.habit_score}% • Серия: {practice.streak_days} дней",
+                            "completed": False,
+                            "order": 100 + len(actions),
+                        })
 
                     greeting = ai_message.greeting
                     motivation = ai_message.motivation

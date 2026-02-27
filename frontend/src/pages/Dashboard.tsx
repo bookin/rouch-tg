@@ -1,8 +1,8 @@
 import {useEffect, useState} from 'react'
-import {getDailyQuote, getDailyActions, toggleDailyAction} from '../api/client'
+import {getDailyQuote, getDailyActions, toggleDailyAction, getPracticesProgress, completePractice} from '../api/client'
 import {useTelegram} from '../hooks/useTelegram'
 import {Link} from 'react-router-dom'
-import {Quote, Coffee, Check, Target, Sparkles, Loader2} from 'lucide-react'
+import {Quote, Coffee, Check, Target, Sparkles, Loader2, Flame, TrendingUp, Play} from 'lucide-react'
 import {cn} from '@/lib/utils'
 import {Card, CardContent} from '@/components/ui/card'
 import {Button} from '@/components/ui/button'
@@ -15,6 +15,16 @@ interface DailyAction {
 	completed: boolean
 }
 
+interface PracticeProgress {
+	practice_id: string
+	practice_name: string
+	habit_score: number
+	streak_days: number
+	total_completions: number
+	last_completed?: string
+	is_habit: boolean
+}
+
 interface QuoteData {
 	text: string
 	author?: string
@@ -25,17 +35,35 @@ export default function Dashboard() {
 	const {user} = useTelegram()
 	const [quote, setQuote] = useState<QuoteData | null>(null)
 	const [actions, setActions] = useState<DailyAction[]>([])
+	const [practices, setPractices] = useState<PracticeProgress[]>([])
 	const [loading, setLoading] = useState(false)
+	const [practiceLoading, setPracticeLoading] = useState<string | null>(null)
 	const [initialLoading, setInitialLoading] = useState(true)
+
+	const handleCompletePractice = async (practiceId: string) => {
+		try {
+			setPracticeLoading(practiceId)
+			await completePractice(practiceId)
+			// Перезагружаем практики чтобы обновить прогресс
+			const practicesData = await getPracticesProgress()
+			setPractices(practicesData.progress || [])
+		} catch (error) {
+			console.error('Error completing practice:', error)
+		} finally {
+			setPracticeLoading(null)
+		}
+	}
 
 	const fetchData = async () => {
 		try {
-			const [quoteData, actionsData] = await Promise.all([
+			const [quoteData, actionsData, practicesData] = await Promise.all([
 				getDailyQuote(),
-				getDailyActions()
+				getDailyActions(),
+				getPracticesProgress()
 			])
 			setQuote(quoteData)
 			setActions(actionsData.actions)
+			setPractices(practicesData.progress || [])
 		} catch (error) {
 			console.error('Error fetching dashboard data:', error)
 		} finally {
@@ -228,6 +256,94 @@ export default function Dashboard() {
 					))
 				)}
 			</div>
+
+			{/* Practices Header */}
+			{practices.length > 0 && (
+				<div className="flex items-center justify-between mt-6">
+					<div className="flex items-center gap-2 text-white">
+						<Flame className="h-5 w-5"/>
+						<h2 className="text-xl font-semibold">Твои практики</h2>
+					</div>
+					<Button
+						variant="outline"
+						className="rounded-full px-4 text-xs border-white/30 text-white hover:bg-white/10"
+						asChild
+					>
+						<Link to="/practices">Все практики</Link>
+					</Button>
+				</div>
+			)}
+
+			{/* Practices List */}
+			{practices.length > 0 && (
+				<div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+					{practices.slice(0, 4).map((practice) => (
+						<Card
+							key={practice.practice_id}
+							className={cn(
+								"group relative overflow-hidden rounded-2xl border p-5 transition-all duration-300 cursor-pointer h-full backdrop-blur-main",
+								practice.is_habit
+									? "bg-green-500/20 border-green-400/30"
+									: "bg-white/10 hover:bg-white/20 border-white/30 shadow-sm hover:shadow-md hover:border-white/60",
+								practiceLoading === practice.practice_id && "opacity-70 pointer-events-none"
+							)}
+							onClick={() => !practice.is_habit && handleCompletePractice(practice.practice_id)}
+						>
+							<div className="flex items-start gap-4 relative z-10 h-full">
+								{/* Practice Icon */}
+								<div className={cn(
+									"flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-white font-bold",
+									practice.is_habit 
+										? "bg-green-500/30 border-2 border-green-400/50" 
+										: "bg-white/20 border-2 border-white/40"
+								)}>
+									{practice.is_habit ? "🌿" : "🧘"}
+								</div>
+								
+								{/* Practice Content */}
+								<div className="flex-1 min-w-0">
+									<h3 className="font-semibold text-white mb-2">
+										{practice.practice_name}
+									</h3>
+									
+									{/* Progress */}
+									<div className="flex items-center gap-3 text-xs text-white/80">
+										{practice.streak_days > 0 && (
+											<span className="flex items-center gap-1">
+												<Flame className="h-3 w-3 text-orange-300"/>
+												{practice.streak_days} дней
+											</span>
+										)}
+										{practice.habit_score > 0 && (
+											<span className="flex items-center gap-1">
+												<TrendingUp className="h-3 w-3 text-blue-300"/>
+												{practice.habit_score}%
+											</span>
+										)}
+									</div>
+									
+									{practice.is_habit && (
+										<div className="mt-2 text-xs text-green-300 font-medium">
+											✅ Сформированная привычка
+										</div>
+									)}
+								</div>
+								
+								{/* Action Button */}
+								{!practice.is_habit && (
+									<div className="flex-shrink-0">
+										{practiceLoading === practice.practice_id ? (
+											<Loader2 className="h-5 w-5 text-white/60 animate-spin"/>
+										) : (
+											<Play className="h-5 w-5 text-white/60 group-hover:text-white transition-colors"/>
+										)}
+									</div>
+								)}
+							</div>
+						</Card>
+					))}
+				</div>
+			)}
 		</div>
 	)
 }

@@ -1421,6 +1421,61 @@ async def process_seed(message: Message, state: FSMContext):
     await state.clear()
 
 
+@router.message(Command("practice"))
+async def cmd_practice(message: Message):
+    """Show practice progress"""
+    from app.database import AsyncSessionLocal
+    from app.crud import get_user_by_telegram_id, get_user_practice_progress
+    
+    try:
+        async with AsyncSessionLocal() as db:
+            user = await get_user_by_telegram_id(db, message.from_user.id)
+            if not user:
+                await message.answer("Сначала начни с команды /start")
+                return
+            
+            progress_list = await get_user_practice_progress(db, user.id)
+            
+            if not progress_list:
+                await message.answer(
+                    "🧘 *Твои практики:*\n\n"
+                    "У тебя пока нет активных практик.\n"
+                    "Зайди в приложение → Практики, чтобы начать!",
+                    parse_mode="Markdown"
+                )
+                return
+            
+            # Separate active and completed habits
+            active_practices = [p for p in progress_list if not p.is_habit]
+            habit_practices = [p for p in progress_list if p.is_habit]
+            
+            text = "🧘 *Твои практики:*\n\n"
+            
+            if active_practices:
+                text += "🔄 *В процессе:*\n"
+                for p in active_practices[:5]:  # Limit to 5
+                    name = p.practice.name if p.practice else "Unknown"
+                    status = "🔥" if p.streak_days > 0 else "⏸️"
+                    progress = f"📊 {p.habit_score}%" if p.habit_score > 0 else ""
+                    text += f"{status} {name} {progress}\n"
+                text += "\n"
+            
+            if habit_practices:
+                text += "✅ *Сформированные привычки:*\n"
+                for p in habit_practices[:5]:  # Limit to 5
+                    name = p.practice.name if p.practice else "Unknown"
+                    text += f"🌿 {name}\n"
+            
+            if len(active_practices) > 5 or len(habit_practices) > 5:
+                text += f"\n_И ещё {len(active_practices) + len(habit_practices) - 5}_"
+            
+            await message.answer(text, parse_mode="Markdown")
+            
+    except Exception as e:
+        logger.error(f"Error in cmd_practice: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при загрузке практик. Попробуй позже.")
+
+
 @router.message(Command("app"))
 async def cmd_app(message: Message):
     """Open Mini App"""

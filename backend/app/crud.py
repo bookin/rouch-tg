@@ -5,11 +5,13 @@ from typing import Optional, List
 from datetime import datetime, UTC
 from uuid import uuid4
 
+from sqlalchemy.orm import selectinload
+
 from app.models.db_models import (
     UserDB, SeedDB, PartnerDB, PartnerGroupDB,
     HabitDB, HabitCompletionDB, PartnerActionDB,
     ProblemHistoryDB, MessageLogDB,
-    DailyTaskDB, DailyPlanDB,
+    DailyTaskDB, DailyPlanDB, PracticeProgressDB,
 )
 from app.models.user import UserProfile
 from app.models.seed import Seed, ACTION_TYPES
@@ -555,3 +557,133 @@ async def reset_user_progress(db: AsyncSession, user_id: int):
         user.updated_at = datetime.now(UTC)
         
     await db.flush()
+
+
+# =============================================================================
+# Practice Progress CRUD
+# =============================================================================
+
+async def get_or_create_practice_progress(db: AsyncSession, user_id: int, practice_id: str) -> PracticeProgressDB:
+    """Get existing practice progress or create new one"""
+    result = await db.execute(
+        select(PracticeProgressDB)
+        .where(PracticeProgressDB.user_id == user_id, PracticeProgressDB.practice_id == practice_id)
+        .limit(1)
+    )
+    progress = result.scalar_one_or_none()
+    
+    if not progress:
+        progress = PracticeProgressDB(
+            id=str(uuid4()),
+            user_id=user_id,
+            practice_id=practice_id
+        )
+        db.add(progress)
+        await db.commit()
+        await db.flush()
+        await db.refresh(progress)
+    
+    return progress
+
+
+async def update_practice_progress(db: AsyncSession, user_id: int, practice_id: str) -> PracticeProgressDB:
+    """Update practice progress after completion"""
+    progress = await get_or_create_practice_progress(db, user_id, practice_id)
+    
+    # Check if already completed today
+    now = datetime.now(UTC)
+    if progress.last_completed:
+        # Check if last completion was today (same calendar day)
+        if progress.last_completed.date() == now.date():
+            # Already completed today, don't update
+            return progress
+    
+    # Update completion metrics
+    progress.total_completions += 1
+    
+    # Calculate streak based on previous last_completed
+    if progress.last_completed:
+        days_since_last = (now.date() - progress.last_completed.date()).days
+        if days_since_last == 1:  # Yesterday
+            progress.streak_days += 1
+        elif days_since_last > 1:  # Gap of 2+ days
+            progress.streak_days = 1
+        # If days_since_last == 0, this shouldn't happen due to check above
+    else:
+        # First completion
+        progress.streak_days = 1
+    
+    # Update last completed timestamp
+    progress.last_completed = now
+    
+    # Calculate habit score
+    progress.habit_score = calculate_habit_score(progress)
+    
+    # Check if habit is formed
+    if progress.habit_score >= 70 and progress.streak_days >= 14:
+        progress.is_habit = True
+    
+    await db.commit()
+    await db.refresh(progress)
+    return progress
+
+
+def calculate_habit_score(progress: PracticeProgressDB) -> int:
+    """Calculate habit transformation score"""
+    # Base factors
+    streak_bonus = min(progress.streak_days * 2, 40)  # up to 40 points
+    completion_bonus = min(progress.total_completions, 30)  # up to 30 points
+    consistency_bonus = 30 if progress.streak_days >= 7 else 0  # 30 points
+    
+    score = streak_bonus + completion_bonus + consistency_bonus
+    return min(score, 100)
+
+
+async def get_user_practice_progress(db: AsyncSession, user_id: int) -> List[PracticeProgressDB]:
+    """Get all practice progress for user"""
+    result = await db.execute(
+        select(PracticeProgressDB)
+        .options(selectinload(PracticeProgressDB.practice))
+        .where(PracticeProgressDB.user_id == user_id)
+        .order_by(PracticeProgressDB.created_at.desc())
+    )
+    return result.scalars().all()
+
+
+async def complete_practice_and_create_seed(
+    db: AsyncSession, 
+    user_id: int, 
+    practice_id: str,
+    emotion_score: int = 5
+) -> dict:
+    """Complete practice and create linked seed"""
+    # Update practice progress
+    progress = await update_practice_progress(db, user_id, practice_id)
+    
+    # Create seed linked to practice
+    seed = Seed(
+        description=f"Практика: {progress.practice.name if progress.practice else 'Unknown'}",
+        action_type="effort",  # Практики = усилие
+        user_id=user_id,
+        timestamp=datetime.now(UTC),
+        partner_id=None,
+        partner_group="practice",
+        # Правильные поля из Seed модели
+        intention_score=emotion_score,
+        emotion_level=emotion_score,
+        understanding=False,
+        estimated_maturation_days=21,
+        strength_multiplier=1.0,
+    )
+    
+    seed_db = await create_seed(db, seed)
+    
+    await db.commit()
+    await db.refresh(progress)
+    await db.refresh(seed_db)
+    
+    return {
+        "progress": progress,
+        "seed": seed_db,
+        "is_new_habit": progress.is_habit and progress.habit_score >= 70
+    }

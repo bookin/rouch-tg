@@ -55,7 +55,13 @@ services:
     container_name: rouch_backend
     env_file: .env
     environment:
-      - WATCHFILES_FORCE_POLLING=true
+        HF_HOME: /app/.cache/hf
+        TRANSFORMERS_CACHE: /app/.cache/hf/transformers
+        SENTENCE_TRANSFORMERS_HOME: /app/.cache/hf/sentence_transformers
+        HF_HUB_OFFLINE: 1
+        TRANSFORMERS_OFFLINE: 1
+#      - WATCHFILES_FORCE_POLLING=true
+
     # environment:
     #   - DATABASE_URL=postgresql://rouch_user:${POSTGRES_PASSWORD}@postgres:5432/rouch
     #   - QDRANT_URL=${QDRANT_URL}

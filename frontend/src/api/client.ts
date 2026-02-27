@@ -230,3 +230,41 @@ export const completeDailyProjectPlan = async (payload: DailyCompletePayload) =>
   const response = await api.post('/api/projects/daily/complete', payload)
   return response.data
 }
+
+// Practice Progress API
+export interface PracticeProgress {
+  practice_id: string
+  practice_name: string
+  habit_score: number
+  streak_days: number
+  total_completions: number
+  last_completed?: string
+  is_habit: boolean
+  can_complete_today: boolean  // Новое поле!
+}
+
+export interface PracticeCompleteRequest {
+  emotion_score?: number
+}
+
+export const startPracticeTracking = async (practiceId: string) => {
+  const response = await api.post(`/api/practices/${practiceId}/start`)
+  return response.data
+}
+
+export const completePractice = async (practiceId: string, emotionScore: number = 5) => {
+  const response = await api.post(`/api/practices/${practiceId}/complete`, {
+    emotion_score: emotionScore
+  })
+  return response.data
+}
+
+export const getPracticesProgress = async (): Promise<{ progress: PracticeProgress[] }> => {
+  const response = await api.get('/api/practices/progress')
+  return response.data
+}
+
+export const getPracticeRecommendations = async () => {
+  const response = await api.get('/api/practices/recommend')
+  return response.data
+}

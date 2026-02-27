@@ -51,3 +51,4 @@ alembic/versions/*.pyc
 
 /postgres_data
 /redis_data
+/backend/.cache

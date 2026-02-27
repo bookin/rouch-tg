@@ -1,6 +1,21 @@
 """SQLAlchemy ORM models for database"""
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, Text, JSON, ForeignKey, LargeBinary, PrimaryKeyConstraint, func, BigInteger, \
-    Sequence
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Boolean,
+    Float,
+    DateTime,
+    Text,
+    JSON,
+    ForeignKey,
+    LargeBinary,
+    PrimaryKeyConstraint,
+    func,
+    BigInteger,
+    Sequence,
+    Index,
+)
 from sqlalchemy.orm import relationship
 from datetime import datetime, UTC
 from app.database import Base
@@ -46,6 +61,7 @@ class UserDB(Base):
     problem_history = relationship("ProblemHistoryDB", back_populates="user", lazy="selectin")
     # daily_tasks = relationship("DailyTaskDB", back_populates="user", lazy="selectin")
     karma_plans = relationship("KarmaPlanDB", back_populates="user", lazy="selectin")
+    practice_progress = relationship("PracticeProgressDB", back_populates="user", lazy="selectin")
 
 
 class SeedDB(Base):
@@ -131,7 +147,7 @@ class PracticeDB(Base):
     duration_minutes = Column(Integer, nullable=False)
     requires_morning = Column(Boolean, default=False)
     requires_silence = Column(Boolean, default=False)
-    physical_intensity = Column(String, default="low")
+    physical_intensity = Column(String, default="low")    # 'low', 'medium', 'high'
     
     source = Column(String, nullable=True)
 
@@ -185,6 +201,32 @@ class PartnerActionDB(Base):
     timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     action = Column(Text, nullable=False)
     completed = Column(Boolean, default=False, index=True)
+
+class PracticeProgressDB(Base):
+    """Practice progress tracking for habit transformation"""
+
+    __tablename__ = "practice_progress"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    practice_id = Column(String, ForeignKey("practices.id"), nullable=False)
+
+    # Progress metrics
+    habit_score = Column(Integer, default=0)  # 0-100, автоматизация
+    streak_days = Column(Integer, default=0)
+    total_completions = Column(Integer, default=0)
+
+    # Metadata
+    last_completed = Column(DateTime(timezone=True), nullable=True)
+    is_habit = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    user = relationship("UserDB", back_populates="practice_progress")
+    practice = relationship("PracticeDB", lazy="selectin")
+
+    # Unique constraint
+    __table_args__ = (Index('idx_user_practice_progress', 'user_id', 'practice_id', unique=True),)
 
 
 class ProblemHistoryDB(Base):

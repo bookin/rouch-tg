@@ -211,19 +211,24 @@ class QdrantKnowledgeBase:
             
             practices = []
             for hit in results:
+
                 practice = {
+                    "id": hit.payload["metadata"].get("id", ""),
                     "name": hit.payload["metadata"].get("name", ""),
                     "category": hit.payload["metadata"].get("category", ""),
                     "content": hit.payload["content"],
                     "duration": hit.payload["metadata"].get("duration", 30),
                     "score": hit.score
                 }
-                
+
                 # Filter by restrictions
                 if restrictions:
                     # Simple filtering - can be enhanced
                     if "back_pain" in restrictions and "прогиб" in practice["content"].lower():
                         continue
+
+                if "#" in practice["content"].lower() or "#" in practice["name"].lower():
+                    continue
                 
                 practices.append(practice)
                 

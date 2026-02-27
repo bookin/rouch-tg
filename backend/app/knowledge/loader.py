@@ -264,6 +264,7 @@ class KnowledgeLoader:
     async def _load_practices(self) -> List[KnowledgeItem]:
         """Load practices from CSV if available, otherwise fall back to markdown parsing."""
         practices: List[KnowledgeItem] = []
+        practice_counter = 1  # Добавляем счетчик для ID
 
         # 1. Try CSV-based practices first
         csv_path = self.knowledge_dir / "practices.csv"
@@ -289,12 +290,14 @@ class KnowledgeLoader:
                             content=content,
                             source=source,
                             metadata={
+                                "id": str(practice_counter),  # Добавляем ID
                                 "name": name,
                                 "category": category,
                                 "duration": duration,
                             },
                         )
                     )
+                    practice_counter += 1
 
             return practices
 
@@ -315,7 +318,7 @@ class KnowledgeLoader:
 
                 # Parse each exercise (### headers)
                 exercises = re.split(r"\n### ", exercises_text)
-                for ex in exercises[1:]:
+                for i, ex in enumerate(exercises[1:], practice_counter):
                     lines = ex.split("\n")
                     name = lines[0].strip()
                     description = "\n".join(lines[1:]).strip()
@@ -326,6 +329,7 @@ class KnowledgeLoader:
                             content=f"# {name}\n\n{description}",
                             source="yoga-concepts.md",
                             metadata={
+                                "id": str(i),  # Добавляем ID
                                 "name": name,
                                 "category": "yoga",
                                 "duration": self._extract_duration(name),
