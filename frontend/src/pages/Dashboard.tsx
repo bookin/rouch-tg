@@ -1,8 +1,8 @@
 import {useEffect, useState} from 'react'
-import {getDailyQuote, getDailyActions, toggleDailyAction, getPracticesProgress, completePractice} from '../api/client'
+import {getDailyQuote, getDailyActions, toggleDailyAction, getPracticesProgress, completePractice, getPracticeRecommendations, startPracticeTracking, PracticeProgress} from '../api/client'
 import {useTelegram} from '../hooks/useTelegram'
 import {Link} from 'react-router-dom'
-import {Quote, Coffee, Check, Target, Sparkles, Loader2, Flame, TrendingUp, Play} from 'lucide-react'
+import {Quote, Coffee, Check, Target, Sparkles, Loader2, Flame, TrendingUp, Play, Plus, ArrowRight} from 'lucide-react'
 import {cn} from '@/lib/utils'
 import {Card, CardContent} from '@/components/ui/card'
 import {Button} from '@/components/ui/button'
@@ -13,16 +13,6 @@ interface DailyAction {
 	description: string
 	why: string
 	completed: boolean
-}
-
-interface PracticeProgress {
-	practice_id: string
-	practice_name: string
-	habit_score: number
-	streak_days: number
-	total_completions: number
-	last_completed?: string
-	is_habit: boolean
 }
 
 interface QuoteData {
@@ -36,9 +26,14 @@ export default function Dashboard() {
 	const [quote, setQuote] = useState<QuoteData | null>(null)
 	const [actions, setActions] = useState<DailyAction[]>([])
 	const [practices, setPractices] = useState<PracticeProgress[]>([])
+	const [recommendations, setRecommendations] = useState<any[]>([])
 	const [loading, setLoading] = useState(false)
 	const [practiceLoading, setPracticeLoading] = useState<string | null>(null)
 	const [initialLoading, setInitialLoading] = useState(true)
+
+	// Filter: only visible active/habit practices
+	const visiblePractices = practices.filter(p => !p.is_hidden && (p.is_active || p.is_habit))
+	const isEmpty = visiblePractices.length === 0
 
 	const handleCompletePractice = async (practiceId: string) => {
 		try {
@@ -54,6 +49,20 @@ export default function Dashboard() {
 		}
 	}
 
+	const handleStartPractice = async (id: string) => {
+		setPracticeLoading(id)
+		try {
+			await startPracticeTracking(id)
+			const practicesData = await getPracticesProgress()
+			setPractices(practicesData.progress || [])
+			setRecommendations(prev => prev.filter(r => r.id !== id))
+		} catch (error) {
+			console.error('Error starting practice:', error)
+		} finally {
+			setPracticeLoading(null)
+		}
+	}
+
 	const fetchData = async () => {
 		try {
 			const [quoteData, actionsData, practicesData] = await Promise.all([
@@ -63,7 +72,17 @@ export default function Dashboard() {
 			])
 			setQuote(quoteData)
 			setActions(actionsData.actions)
-			setPractices(practicesData.progress || [])
+			const progressList = practicesData.progress || []
+			setPractices(progressList)
+
+			// If no visible practices — fetch recommendations
+			const visible = progressList.filter((p: PracticeProgress) => !p.is_hidden && (p.is_active || p.is_habit))
+			if (visible.length === 0) {
+				try {
+					const recData = await getPracticeRecommendations()
+					setRecommendations(recData.recommendations || [])
+				} catch { /* ignore */ }
+			}
 		} catch (error) {
 			console.error('Error fetching dashboard data:', error)
 		} finally {
@@ -258,7 +277,7 @@ export default function Dashboard() {
 			</div>
 
 			{/* Practices Header */}
-			{practices.length > 0 && (
+			{visiblePractices.length > 0 && (
 				<div className="flex items-center justify-between mt-6">
 					<div className="flex items-center gap-2 text-white">
 						<Flame className="h-5 w-5"/>
@@ -274,10 +293,47 @@ export default function Dashboard() {
 				</div>
 			)}
 
+			{/* Dashboard Recommendations (when no practices) */}
+			{isEmpty && recommendations.length > 0 && (
+				<>
+					<div className="flex items-center justify-between mt-6">
+						<div className="flex items-center gap-2 text-white">
+							<Sparkles className="h-5 w-5 text-yellow-300"/>
+							<h2 className="text-xl font-semibold">Практики для тебя</h2>
+						</div>
+					</div>
+					<div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+						{recommendations.slice(0, 4).map((r: any) => (
+							<Card key={`rec-${r.id}`}
+								className="border border-yellow-500/20 bg-yellow-500/5 backdrop-blur-main rounded-2xl p-5">
+								<div className="flex items-start gap-4 h-full">
+									<div className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-yellow-500/20 border-2 border-yellow-400/30 text-white font-bold">
+										🧘
+									</div>
+									<div className="flex-1 min-w-0">
+										<h3 className="font-semibold text-white mb-1">{r.name}</h3>
+										<p className="text-xs text-white/50 mb-2 line-clamp-2">{r.benefits || r.content}</p>
+										<Button size="sm" className="bg-yellow-500 hover:bg-yellow-600 text-white"
+											onClick={() => handleStartPractice(r.id)}
+											disabled={practiceLoading === r.id}>
+											{practiceLoading === r.id
+												? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin"/>
+												: <Plus className="h-3.5 w-3.5 mr-1"/>
+											}
+											Начать
+										</Button>
+									</div>
+								</div>
+							</Card>
+						))}
+					</div>
+				</>
+			)}
+
 			{/* Practices List */}
-			{practices.length > 0 && (
+			{visiblePractices.length > 0 && (
 				<div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
-					{practices.slice(0, 4).map((practice) => (
+					{visiblePractices.slice(0, 4).map((practice) => (
 						<Card
 							key={practice.practice_id}
 							className={cn(
@@ -287,7 +343,7 @@ export default function Dashboard() {
 									: "bg-white/10 hover:bg-white/20 border-white/30 shadow-sm hover:shadow-md hover:border-white/60",
 								practiceLoading === practice.practice_id && "opacity-70 pointer-events-none"
 							)}
-							onClick={() => !practice.is_habit && handleCompletePractice(practice.practice_id)}
+							onClick={() => practice.can_complete_today && handleCompletePractice(practice.practice_id)}
 						>
 							<div className="flex items-start gap-4 relative z-10 h-full">
 								{/* Practice Icon */}
@@ -342,6 +398,19 @@ export default function Dashboard() {
 							</div>
 						</Card>
 					))}
+				</div>
+			)}
+
+			{/* CTA when has practices */}
+			{!isEmpty && (
+				<div className="mt-2">
+					<Button variant="outline" className="w-full rounded-full border-white/20 text-white/60 hover:bg-white/10 text-xs" asChild>
+						<Link to="/practices">
+							<Sparkles className="h-3.5 w-3.5 mr-2 text-yellow-300"/>
+							Хочу новые практики
+							<ArrowRight className="h-3.5 w-3.5 ml-auto"/>
+						</Link>
+					</Button>
 				</div>
 			)}
 		</div>

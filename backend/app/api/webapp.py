@@ -1,5 +1,5 @@
 """FastAPI endpoints for Mini App"""
-from fastapi import APIRouter, Depends, HTTPException, Header, status
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, status
 from typing import List, Optional
 from datetime import datetime, UTC
 from pydantic import BaseModel
@@ -646,7 +646,7 @@ async def activate_project(
 ):
     """Activate a new Karmic Project (Karma Plan)"""
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id, update_user_focus
+    from app.crud import get_user_by_telegram_id
     from app.models.db_models import ProblemHistoryDB
     from sqlalchemy import select
 
@@ -686,8 +686,6 @@ async def activate_project(
             isolation_settings=payload.isolation_settings
         )
         
-        # Update user focus
-        await update_user_focus(db, user_db.id, hist.problem_text)
         await db.commit()
         
         # Serialize partners from association
@@ -935,52 +933,47 @@ async def create_partner_endpoint(
 
 
 @router.get("/practices")
-async def get_practices(user: UserProfile = Depends(get_current_user)):
-    """Get available practices"""
-    from app.knowledge.qdrant import QdrantKnowledgeBase
-    from app.config import get_settings
+async def get_practices(
+    user: UserProfile = Depends(get_current_user),
+    limit: int = Query(default=0, description="Limit results, 0 = all"),
+):
+    """Get all practices from PracticeDB (canonical source)"""
+    from app.database import AsyncSessionLocal
+    from app.models.db_models import PracticeDB
+    from sqlalchemy import select
     
     try:
-        settings = get_settings()
-        qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
-        practices = await qdrant.search_practice(need="общее развитие", restrictions=None, limit=10)
-        return {"practices": practices}
+        async with AsyncSessionLocal() as db:
+            stmt = select(PracticeDB).order_by(PracticeDB.category, PracticeDB.name)
+            if limit > 0:
+                stmt = stmt.limit(limit)
+            result = await db.execute(stmt)
+            practices_db = result.scalars().all()
+            practices = [
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "category": p.category,
+                    "description": p.description,
+                    "duration": p.duration_minutes,
+                    "difficulty": p.difficulty,
+                    "physical_intensity": p.physical_intensity,
+                    "requires_morning": p.requires_morning,
+                    "requires_silence": p.requires_silence,
+                    "max_completions_per_day": p.max_completions_per_day,
+                    "steps": p.steps or [],
+                    "contraindications": p.contraindications or [],
+                    "benefits": p.benefits,
+                    "tags": p.tags or [],
+                }
+                for p in practices_db
+            ]
+            return {"practices": practices}
     except Exception as e:
         logger.error(f"Error getting practices: {e}", exc_info=True)
         return {"practices": []}
 
 
-@router.get("/habits")
-async def get_habits(user: UserProfile = Depends(get_current_user)):
-    """Get user's habits"""
-    from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id
-    from sqlalchemy import select
-    from app.models.db_models import HabitDB
-    
-    try:
-        async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, user.telegram_id)
-            if not user_db:
-                return {"habits": []}
-            
-            result = await db.execute(select(HabitDB).where(HabitDB.user_id == user_db.id))
-            habits_db = result.scalars().all()
-            habits = [
-                {
-                    "id": h.id,
-                    "practice_id": h.practice_id,
-                    "frequency": h.frequency,
-                    "preferred_time": h.preferred_time,
-                    "duration": h.duration,
-                    "is_active": h.is_active,
-                }
-                for h in habits_db
-            ]
-            return {"habits": habits}
-    except Exception as e:
-        logger.error(f"Error getting habits: {e}", exc_info=True)
-        return {"habits": []}
 
 
 # =============================================================================
@@ -1002,9 +995,10 @@ class PracticeCompleteRequest(BaseModel):
 
 @router.post("/practices/{practice_id}/start")
 async def start_practice_tracking(practice_id: str, user: UserProfile = Depends(get_current_user)):
-    """Начать отслеживание практики"""
+    """Начать отслеживание практики (PracticeDB must exist)"""
     from app.database import AsyncSessionLocal
     from app.crud import get_or_create_practice_progress
+    from app.crud_extended import get_active_karma_plan
     from app.models.db_models import PracticeDB
     from sqlalchemy import select
     
@@ -1014,46 +1008,22 @@ async def start_practice_tracking(practice_id: str, user: UserProfile = Depends(
             if not user_db:
                 return {"error": "User not found"}
             
-            # Сначала проверяем/создаем запись в PracticeDB
+            # PracticeDB is canonical — must exist
             practice_result = await db.execute(
                 select(PracticeDB).where(PracticeDB.id == practice_id).limit(1)
             )
             practice = practice_result.scalar_one_or_none()
-            
             if not practice:
-                # Ищем практику в Qdrant по ID
-                from app.knowledge.qdrant import QdrantKnowledgeBase
-                from app.config import get_settings
-                
-                settings = get_settings()
-                qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
-                
-                # Ищем все практики и находим по ID
-                practices = await qdrant.search_practice(need="общее развитие", restrictions=None, limit=50)
-                
-                found_practice = None
-                for p in practices:
-                    p_id = p.get('id')  # ID из metadata
-                    if p_id == practice_id:
-                        found_practice = p
-                        break
-                
-                if found_practice:
-                    # Создаем запись в PracticeDB
-                    practice = PracticeDB(
-                        id=practice_id,
-                        name=found_practice.get('name', ''),
-                        category=found_practice.get('category', ''),
-                        description=found_practice.get('content', ''),
-                        duration_minutes=found_practice.get('duration', 0)
-                    )
-                    db.add(practice)
-                    await db.commit()
-                    await db.refresh(practice)
-                else:
-                    return {"error": "Practice not found"}
+                return {"error": "Practice not found in catalog"}
             
-            progress = await get_or_create_practice_progress(db, user_db.id, practice_id)
+            # Get active project for karma_plan_id
+            active_plan = await get_active_karma_plan(db, user_db.id)
+            plan_id = active_plan.id if active_plan else None
+            
+            progress = await get_or_create_practice_progress(
+                db, user_db.id, practice_id, karma_plan_id=plan_id
+            )
+            await db.commit()
             
             return {
                 "practice_id": practice_id,
@@ -1088,14 +1058,15 @@ async def complete_practice(
             result = await complete_practice_and_create_seed(
                 db, user_db.id, practice_id, request.emotion_score
             )
+            await db.commit()
             
             return {
                 "practice_id": practice_id,
-                "completed": True,
+                "completed": result["actually_updated"],
                 "habit_score": result["progress"].habit_score,
                 "streak_days": result["progress"].streak_days,
                 "is_habit": result["progress"].is_habit,
-                "seed_created": result["seed"].id,
+                "seed_created": result["seed"].id if result["seed"] else None,
                 "is_new_habit": result["is_new_habit"]
             }
     except Exception as e:
@@ -1105,10 +1076,9 @@ async def complete_practice(
 
 @router.get("/practices/progress")
 async def get_practices_progress(user: UserProfile = Depends(get_current_user)):
-    """Получить прогресс всех практик"""
+    """Получить прогресс всех практик (включая привычки)"""
     from app.database import AsyncSessionLocal
     from app.crud import get_user_practice_progress
-    from app.models.db_models import PracticeDB
     
     try:
         async with AsyncSessionLocal() as db:
@@ -1118,27 +1088,35 @@ async def get_practices_progress(user: UserProfile = Depends(get_current_user)):
             
             progress_list = await get_user_practice_progress(db, user_db.id)
             
-            # Check if practices can be completed today
             from datetime import datetime, timezone
             today = datetime.now(timezone.utc).date()
             
-            # Enrich with practice info and completion status
             result = []
             for progress in progress_list:
+                practice = progress.practice
+                max_per_day = (practice.max_completions_per_day if practice else 1) or 1
+                
                 can_complete_today = (
-                    not progress.is_habit and 
-                    (not progress.last_completed or progress.last_completed.date() != today)
+                    progress.is_active and
+                    not progress.is_hidden and
+                    (not progress.last_completed or progress.last_completed.date() != today or max_per_day > 1)
                 )
                 
                 result.append({
                     "practice_id": progress.practice_id,
-                    "practice_name": progress.practice.name if progress.practice else "Unknown",
+                    "practice_name": practice.name if practice else "Unknown",
+                    "practice_category": practice.category if practice else "",
+                    "practice_duration": practice.duration_minutes if practice else 0,
                     "habit_score": progress.habit_score,
                     "streak_days": progress.streak_days,
                     "total_completions": progress.total_completions,
                     "last_completed": progress.last_completed.isoformat() if progress.last_completed else None,
                     "is_habit": progress.is_habit,
-                    "can_complete_today": can_complete_today
+                    "is_active": progress.is_active,
+                    "is_hidden": progress.is_hidden,
+                    "can_complete_today": can_complete_today,
+                    "habit_min_streak_days": practice.habit_min_streak_days if practice else 14,
+                    "habit_min_score": practice.habit_min_score if practice else 70,
                 })
             
             return {"progress": result}
@@ -1147,11 +1125,124 @@ async def get_practices_progress(user: UserProfile = Depends(get_current_user)):
         return {"progress": []}
 
 
+@router.post("/practices/{practice_id}/pause")
+async def pause_practice_endpoint(practice_id: str, user: UserProfile = Depends(get_current_user)):
+    """Приостановить практику"""
+    from app.database import AsyncSessionLocal
+    from app.crud import pause_practice
+    
+    try:
+        async with AsyncSessionLocal() as db:
+            user_db = await get_user_by_telegram_id(db, user.telegram_id)
+            if not user_db:
+                return {"error": "User not found"}
+            ok = await pause_practice(db, user_db.id, practice_id)
+            await db.commit()
+            return {"success": ok}
+    except Exception as e:
+        logger.error(f"Error pausing practice: {e}", exc_info=True)
+        return {"error": "Failed to pause practice"}
+
+
+@router.post("/practices/{practice_id}/resume")
+async def resume_practice_endpoint(practice_id: str, user: UserProfile = Depends(get_current_user)):
+    """Возобновить практику"""
+    from app.database import AsyncSessionLocal
+    from app.crud import resume_practice
+    
+    try:
+        async with AsyncSessionLocal() as db:
+            user_db = await get_user_by_telegram_id(db, user.telegram_id)
+            if not user_db:
+                return {"error": "User not found"}
+            ok = await resume_practice(db, user_db.id, practice_id)
+            await db.commit()
+            return {"success": ok}
+    except Exception as e:
+        logger.error(f"Error resuming practice: {e}", exc_info=True)
+        return {"error": "Failed to resume practice"}
+
+
+@router.post("/practices/{practice_id}/hide")
+async def hide_practice_endpoint(practice_id: str, user: UserProfile = Depends(get_current_user)):
+    """Скрыть практику из списков"""
+    from app.database import AsyncSessionLocal
+    from app.crud import hide_practice
+    
+    try:
+        async with AsyncSessionLocal() as db:
+            user_db = await get_user_by_telegram_id(db, user.telegram_id)
+            if not user_db:
+                return {"error": "User not found"}
+            ok = await hide_practice(db, user_db.id, practice_id)
+            await db.commit()
+            return {"success": ok}
+    except Exception as e:
+        logger.error(f"Error hiding practice: {e}", exc_info=True)
+        return {"error": "Failed to hide practice"}
+
+
+@router.post("/practices/{practice_id}/reset")
+async def reset_practice_endpoint(practice_id: str, user: UserProfile = Depends(get_current_user)):
+    """Сбросить прогресс практики"""
+    from app.database import AsyncSessionLocal
+    from app.crud import reset_practice
+    
+    try:
+        async with AsyncSessionLocal() as db:
+            user_db = await get_user_by_telegram_id(db, user.telegram_id)
+            if not user_db:
+                return {"error": "User not found"}
+            ok = await reset_practice(db, user_db.id, practice_id)
+            await db.commit()
+            return {"success": ok}
+    except Exception as e:
+        logger.error(f"Error resetting practice: {e}", exc_info=True)
+        return {"error": "Failed to reset practice"}
+
+
+@router.delete("/practices/{practice_id}")
+async def delete_practice_endpoint(practice_id: str, user: UserProfile = Depends(get_current_user)):
+    """Удалить практику и все связанные семена"""
+    from app.database import AsyncSessionLocal
+    from app.crud import delete_practice_all
+    
+    try:
+        async with AsyncSessionLocal() as db:
+            user_db = await get_user_by_telegram_id(db, user.telegram_id)
+            if not user_db:
+                return {"error": "User not found"}
+            deleted_seeds = await delete_practice_all(db, user_db.id, practice_id)
+            await db.commit()
+            return {"success": True, "deleted_seeds": deleted_seeds}
+    except Exception as e:
+        logger.error(f"Error deleting practice: {e}", exc_info=True)
+        return {"error": "Failed to delete practice"}
+
+
+def _focus_to_query(focus: str | None) -> str:
+    """Map onboarding focus id to human-readable query for Qdrant search"""
+    mapping = {
+        "finances": "улучшение финансового положения, достаток, щедрость",
+        "relationships": "гармоничные отношения, любовь, партнёрство",
+        "health": "здоровье тела и ума, энергия, восстановление",
+        "career": "карьерный рост, реализация, успех в работе",
+        "focus": "концентрация, ясность ума, продуктивность",
+        "spiritual": "духовное развитие, осознанность, медитация",
+        "stress": "снижение стресса, спокойствие, внутренний баланс",
+        "energy": "жизненная энергия, бодрость, тонус",
+    }
+    if not focus:
+        return "общее развитие, осознанность, кармические практики"
+    return mapping.get(focus, focus if len(focus) > 10 else "общее развитие, осознанность, кармические практики")
+
+
 @router.get("/practices/recommend")
 async def get_practice_recommendations(user: UserProfile = Depends(get_current_user)):
-    """AI рекомендация практик для новых пользователей"""
+    """AI рекомендации практик (M6: единый источник для dashboard и бота)"""
     from app.database import AsyncSessionLocal
     from app.crud import get_user_practice_progress
+    from app.crud_extended import get_active_karma_plan
     from app.knowledge.qdrant import QdrantKnowledgeBase
     from app.config import get_settings
     
@@ -1161,34 +1252,35 @@ async def get_practice_recommendations(user: UserProfile = Depends(get_current_u
             if not user_db:
                 return {"recommendations": []}
             
-            # Check if user already has practices
             existing_progress = await get_user_practice_progress(db, user_db.id)
+            existing_ids = {str(p.practice_id) for p in existing_progress}
             
-            # Get AI recommendations
+            # M6: Context from active project strategy or general development
+            active_plan = await get_active_karma_plan(db, user_db.id)
+            if active_plan and active_plan.strategy_snapshot:
+                strategy = active_plan.strategy_snapshot
+                need = f"{strategy.get('problem_text', '')} {strategy.get('stop_action', '')} {strategy.get('start_action', '')} {strategy.get('grow_action', '')}".strip()
+                if not need:
+                    need = "общее развитие"
+            else:
+                need = _focus_to_query(user_db.current_focus)
+            
             settings = get_settings()
             qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
             
-            # Recommend based on user's current focus or general development
-            need = user_db.current_focus or "общее развитие"
             recommendations = await qdrant.search_practice(
                 need=need,
                 restrictions=user_db.physical_restrictions.split(',') if user_db.physical_restrictions else None,
-                limit=5
+                limit=8
             )
             
-            # Filter out already tracked practices
-            existing_ids = {p.practice_id for p in existing_progress}
-            filtered_recommendations = [
+            # Filter out already tracked practices (string comparison)
+            filtered = [
                 r for r in recommendations 
-                if r.get('id', 0) not in existing_ids
+                if str(r.get('id', '')) not in existing_ids
             ]
 
-            # filter long
-            filtered_recommendations = [
-                r for r in filtered_recommendations if r.get('duration', 0) < 30
-            ]
-
-            return {"recommendations": filtered_recommendations[:3]}  # Return top 3
+            return {"recommendations": filtered[:6]}
             
     except Exception as e:
         logger.error(f"Error getting practice recommendations: {e}", exc_info=True)

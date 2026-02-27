@@ -769,7 +769,7 @@ async def _finish_project_setup(message: Message, state: FSMContext):
     """Finish setup and activate project"""
     from app.database import AsyncSessionLocal
     from app.crud_extended import create_karma_plan
-    from app.crud import update_user_focus, get_user_by_telegram_id, save_problem_history
+    from app.crud import get_user_by_telegram_id, save_problem_history
     from app.knowledge.qdrant import QdrantKnowledgeBase
     
     data = await state.get_data()
@@ -813,9 +813,6 @@ async def _finish_project_setup(message: Message, state: FSMContext):
                     project_partners=project_partners,
                     isolation_settings=isolation_settings
                 )
-                
-                # 3. Update Focus
-                await update_user_focus(db, user_db.id, problem_text)
                 
                 await db.commit()
                 
@@ -1436,44 +1433,341 @@ async def cmd_practice(message: Message):
             
             progress_list = await get_user_practice_progress(db, user.id)
             
-            if not progress_list:
-                await message.answer(
-                    "🧘 *Твои практики:*\n\n"
-                    "У тебя пока нет активных практик.\n"
-                    "Зайди в приложение → Практики, чтобы начать!",
-                    parse_mode="Markdown"
-                )
+            # Filter visible
+            visible = [p for p in progress_list if not p.is_hidden] if progress_list else []
+            habit_practices = [p for p in visible if p.is_habit]
+            active_practices = [p for p in visible if not p.is_habit and p.is_active]
+            paused_practices = [p for p in visible if not p.is_active]
+            
+            is_empty = len(habit_practices) == 0 and len(active_practices) == 0
+            
+            # === Empty state: show recommendations ===
+            if is_empty:
+                from app.knowledge.qdrant import QdrantKnowledgeBase
+                from app.crud_extended import get_active_karma_plan
+                
+                plan = await get_active_karma_plan(db, user.id)
+                if plan and plan.strategy_snapshot:
+                    s = plan.strategy_snapshot
+                    need = f"{s.get('problem_text', '')} {s.get('stop_action', '')} {s.get('start_action', '')} {s.get('grow_action', '')}".strip()
+                else:
+                    need = _focus_to_query(user.current_focus)
+                
+                qdrant = QdrantKnowledgeBase()
+                recs = await qdrant.search_practice(need=need, limit=3, restrictions=user.physical_restrictions)
+                
+                if recs:
+                    text = "🧘 *Твои практики*\n\n"
+                    text += "Пока нет активных практик. Вот что подходит тебе:\n\n"
+                    
+                    buttons = []
+                    for r in recs:
+                        name = r.get("name", "Практика")
+                        pid = r.get("id", "")
+                        dur = r.get("duration", "")
+                        text += f"✨ *{name}* — {dur} мин\n"
+                        if pid:
+                            buttons.append([InlineKeyboardButton(
+                                text=f"▶️ Начать: {name}",
+                                callback_data=f"practice_start:{pid}"
+                            )])
+                    
+                    buttons.append([InlineKeyboardButton(
+                        text="📱 Все практики",
+                        web_app=WebAppInfo(url=f"{settings.WEBAPP_URL}/practices")
+                    )])
+                    
+                    await message.answer(text, parse_mode="Markdown",
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+                else:
+                    await message.answer(
+                        "🧘 *Твои практики*\n\n"
+                        "Пока нет активных практик.\n"
+                        "Зайди в приложение, чтобы выбрать первую практику!",
+                        parse_mode="Markdown",
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="📱 Открыть практики", web_app=WebAppInfo(url=f"{settings.WEBAPP_URL}/practices"))]
+                        ])
+                    )
                 return
             
-            # Separate active and completed habits
-            active_practices = [p for p in progress_list if not p.is_habit]
-            habit_practices = [p for p in progress_list if p.is_habit]
-            
+            # === Non-empty: show progress ===
             text = "🧘 *Твои практики:*\n\n"
-            
-            if active_practices:
-                text += "🔄 *В процессе:*\n"
-                for p in active_practices[:5]:  # Limit to 5
-                    name = p.practice.name if p.practice else "Unknown"
-                    status = "🔥" if p.streak_days > 0 else "⏸️"
-                    progress = f"📊 {p.habit_score}%" if p.habit_score > 0 else ""
-                    text += f"{status} {name} {progress}\n"
-                text += "\n"
             
             if habit_practices:
                 text += "✅ *Сформированные привычки:*\n"
-                for p in habit_practices[:5]:  # Limit to 5
+                for p in habit_practices[:5]:
                     name = p.practice.name if p.practice else "Unknown"
                     text += f"🌿 {name}\n"
+                text += "\n"
             
-            if len(active_practices) > 5 or len(habit_practices) > 5:
-                text += f"\n_И ещё {len(active_practices) + len(habit_practices) - 5}_"
+            if active_practices:
+                text += "🔄 *В процессе:*\n"
+                for p in active_practices[:5]:
+                    name = p.practice.name if p.practice else "Unknown"
+                    pid = p.practice_id
+                    status = "🔥" if p.streak_days > 0 else "⏳"
+                    progress_str = f" · {p.habit_score}%" if p.habit_score > 0 else ""
+                    text += f"{status} {name}{progress_str}\n"
+                text += "\n"
             
-            await message.answer(text, parse_mode="Markdown")
+            if paused_practices:
+                text += "⏸ *На паузе:*\n"
+                for p in paused_practices[:3]:
+                    name = p.practice.name if p.practice else "Unknown"
+                    text += f"  {name}\n"
+            
+            total = len(habit_practices) + len(active_practices) + len(paused_practices)
+            shown = min(len(habit_practices), 5) + min(len(active_practices), 5) + min(len(paused_practices), 3)
+            if total > shown:
+                text += f"\n_И ещё {total - shown}_"
+            
+            # Build inline keyboard: complete active practices + manage + recommend
+            buttons = []
+            
+            # Quick-complete buttons for active (non-habit) practices
+            for p in active_practices[:3]:
+                name = p.practice.name if p.practice else p.practice_id
+                buttons.append([InlineKeyboardButton(
+                    text=f"✅ Выполнить: {name}",
+                    callback_data=f"practice_complete:{p.practice_id}"
+                )])
+            
+            # Manage button (opens webapp)
+            buttons.append([
+                InlineKeyboardButton(text="✨ Подобрать практики", callback_data="practice_recommend"),
+                InlineKeyboardButton(text="📱 Все практики", web_app=WebAppInfo(url=f"{settings.WEBAPP_URL}/practices"))
+            ])
+            
+            await message.answer(text, parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
             
     except Exception as e:
         logger.error(f"Error in cmd_practice: {e}", exc_info=True)
         await message.answer("Произошла ошибка при загрузке практик. Попробуй позже.")
+
+
+def _focus_to_query(focus: str | None) -> str:
+    """Map onboarding focus id to human-readable query for Qdrant search"""
+    mapping = {
+        "finances": "улучшение финансового положения, достаток, щедрость",
+        "relationships": "гармоничные отношения, любовь, партнёрство",
+        "health": "здоровье тела и ума, энергия, восстановление",
+        "career": "карьерный рост, реализация, успех в работе",
+        "focus": "концентрация, ясность ума, продуктивность",
+        "spiritual": "духовное развитие, осознанность, медитация",
+        "stress": "снижение стресса, спокойствие, внутренний баланс",
+        "energy": "жизненная энергия, бодрость, тонус",
+    }
+    if not focus:
+        return "общее развитие, осознанность, кармические практики"
+    return mapping.get(focus, focus if len(focus) > 10 else "общее развитие, осознанность, кармические практики")
+
+
+# --- Practice callback handlers ---
+
+@router.callback_query(F.data.startswith("practice_start:"))
+async def cb_practice_start(callback: CallbackQuery):
+    """Start tracking a practice from bot recommendation"""
+    from app.database import AsyncSessionLocal
+    from app.crud import get_user_by_telegram_id, get_or_create_practice_progress
+    from app.crud_extended import get_active_karma_plan
+    
+    practice_id = callback.data.split(":", 1)[1]
+    
+    try:
+        async with AsyncSessionLocal() as db:
+            user = await get_user_by_telegram_id(db, callback.from_user.id)
+            if not user:
+                await callback.answer("Сначала /start", show_alert=True)
+                return
+            
+            plan = await get_active_karma_plan(db, user.id)
+            karma_plan_id = plan.id if plan else None
+            
+            await get_or_create_practice_progress(db, user.id, practice_id, karma_plan_id=karma_plan_id)
+            await db.commit()
+        
+        await callback.answer("✅ Практика добавлена!")
+        await callback.message.edit_text(
+            callback.message.text + "\n\n_Практика добавлена! Выполняй её каждый день._",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"Error in cb_practice_start: {e}", exc_info=True)
+        await callback.answer("Ошибка, попробуй позже", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("practice_complete:"))
+async def cb_practice_complete(callback: CallbackQuery):
+    """Complete a practice from bot"""
+    from app.database import AsyncSessionLocal
+    from app.crud import get_user_by_telegram_id, complete_practice_and_create_seed
+    
+    practice_id = callback.data.split(":", 1)[1]
+    
+    try:
+        async with AsyncSessionLocal() as db:
+            user = await get_user_by_telegram_id(db, callback.from_user.id)
+            if not user:
+                await callback.answer("Сначала /start", show_alert=True)
+                return
+            
+            result = await complete_practice_and_create_seed(db, user.id, practice_id)
+            await db.commit()
+            
+            if result and result.get("seed_created"):
+                await callback.answer("🌱 Выполнено! Семя посажено!")
+            elif result:
+                await callback.answer("✅ Уже выполнено сегодня")
+            else:
+                await callback.answer("Практика не найдена", show_alert=True)
+                return
+        
+        # Refresh the message
+        await cmd_practice(callback.message)
+        
+    except Exception as e:
+        logger.error(f"Error in cb_practice_complete: {e}", exc_info=True)
+        await callback.answer("Ошибка, попробуй позже", show_alert=True)
+
+
+@router.callback_query(F.data == "practice_recommend")
+async def cb_practice_recommend(callback: CallbackQuery):
+    """Show practice recommendations from bot"""
+    from app.database import AsyncSessionLocal
+    from app.crud import get_user_by_telegram_id, get_user_practice_progress
+    from app.knowledge.qdrant import QdrantKnowledgeBase
+    from app.crud_extended import get_active_karma_plan
+    
+    try:
+        async with AsyncSessionLocal() as db:
+            user = await get_user_by_telegram_id(db, callback.from_user.id)
+            if not user:
+                await callback.answer("Сначала /start", show_alert=True)
+                return
+            
+            plan = await get_active_karma_plan(db, user.id)
+            if plan and plan.strategy_snapshot:
+                s = plan.strategy_snapshot
+                need = f"{s.get('problem_text', '')} {s.get('stop_action', '')} {s.get('start_action', '')} {s.get('grow_action', '')}".strip()
+            else:
+                need = _focus_to_query(user.current_focus)
+            
+            # Get existing practice IDs to filter
+            progress_list = await get_user_practice_progress(db, user.id)
+            existing_ids = {p.practice_id for p in progress_list} if progress_list else set()
+            
+            qdrant = QdrantKnowledgeBase()
+            recs = await qdrant.search_practice(need=need, limit=6, restrictions=user.physical_restrictions)
+            recs = [r for r in recs if str(r.get("id", "")) not in existing_ids][:3]
+        
+        if not recs:
+            await callback.answer("Все практики уже добавлены!", show_alert=True)
+            return
+        
+        text = "✨ *Подобрали для тебя:*\n\n"
+        buttons = []
+        for r in recs:
+            name = r.get("name", "Практика")
+            pid = r.get("id", "")
+            dur = r.get("duration", "")
+            text += f"🧘 *{name}* — {dur} мин\n"
+            if pid:
+                buttons.append([InlineKeyboardButton(
+                    text=f"▶️ Начать: {name}",
+                    callback_data=f"practice_start:{pid}"
+                )])
+        
+        await callback.message.answer(text, parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error in cb_practice_recommend: {e}", exc_info=True)
+        await callback.answer("Ошибка, попробуй позже", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("practice_manage:"))
+async def cb_practice_manage(callback: CallbackQuery):
+    """Show management options for a practice"""
+    practice_id = callback.data.split(":", 1)[1]
+    
+    buttons = [
+        [InlineKeyboardButton(text="⏸ Приостановить", callback_data=f"practice_action:pause:{practice_id}")],
+        [InlineKeyboardButton(text="👁 Скрыть", callback_data=f"practice_action:hide:{practice_id}")],
+        [InlineKeyboardButton(text="🔄 Сбросить прогресс", callback_data=f"practice_action:reset:{practice_id}")],
+        [InlineKeyboardButton(text="🗑 Удалить всё", callback_data=f"practice_action:delete:{practice_id}")],
+        [InlineKeyboardButton(text="↩️ Назад", callback_data="practice_back")],
+    ]
+    
+    await callback.message.edit_text(
+        f"⚙️ *Управление практикой*\nВыбери действие:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("practice_action:"))
+async def cb_practice_action(callback: CallbackQuery):
+    """Execute a practice management action"""
+    from app.database import AsyncSessionLocal
+    from app.crud import (
+        get_user_by_telegram_id,
+        pause_practice, resume_practice,
+        hide_practice, reset_practice, delete_practice_all
+    )
+    
+    parts = callback.data.split(":")
+    action = parts[1]
+    practice_id = parts[2]
+    
+    action_labels = {
+        "pause": ("⏸ Практика приостановлена", pause_practice),
+        "resume": ("▶️ Практика возобновлена", resume_practice),
+        "hide": ("👁 Практика скрыта", hide_practice),
+        "reset": ("🔄 Прогресс сброшен", reset_practice),
+        "delete": ("🗑 Практика и семена удалены", delete_practice_all),
+    }
+    
+    if action not in action_labels:
+        await callback.answer("Неизвестное действие", show_alert=True)
+        return
+    
+    label, crud_fn = action_labels[action]
+    
+    try:
+        async with AsyncSessionLocal() as db:
+            user = await get_user_by_telegram_id(db, callback.from_user.id)
+            if not user:
+                await callback.answer("Сначала /start", show_alert=True)
+                return
+            
+            await crud_fn(db, user.id, practice_id)
+            await db.commit()
+        
+        await callback.answer(label)
+        # Refresh the practice list
+        await callback.message.delete()
+        # Send updated practice list
+        fake_message = callback.message
+        fake_message.from_user = callback.from_user
+        await cmd_practice(fake_message)
+        
+    except Exception as e:
+        logger.error(f"Error in cb_practice_action: {e}", exc_info=True)
+        await callback.answer("Ошибка, попробуй позже", show_alert=True)
+
+
+@router.callback_query(F.data == "practice_back")
+async def cb_practice_back(callback: CallbackQuery):
+    """Go back to practice list"""
+    await callback.message.delete()
+    fake_message = callback.message
+    fake_message.from_user = callback.from_user
+    await cmd_practice(fake_message)
+    await callback.answer()
 
 
 @router.message(Command("app"))

@@ -212,18 +212,30 @@ class QdrantKnowledgeBase:
             practices = []
             for hit in results:
 
+                meta = hit.payload.get("metadata", {})
                 practice = {
-                    "id": hit.payload["metadata"].get("id", ""),
-                    "name": hit.payload["metadata"].get("name", ""),
-                    "category": hit.payload["metadata"].get("category", ""),
-                    "content": hit.payload["content"],
-                    "duration": hit.payload["metadata"].get("duration", 30),
-                    "score": hit.score
+                    "id": meta.get("id", ""),
+                    "name": meta.get("name", ""),
+                    "category": meta.get("category", ""),
+                    "content": hit.payload.get("content", ""),
+                    "duration": meta.get("duration", 30),
+                    "difficulty": meta.get("difficulty", 1),
+                    "physical_intensity": meta.get("physical_intensity", "low"),
+                    "requires_morning": meta.get("requires_morning", False),
+                    "requires_silence": meta.get("requires_silence", False),
+                    "max_completions_per_day": meta.get("max_completions_per_day", 1),
+                    "steps": meta.get("steps", []),
+                    "contraindications": meta.get("contraindications", []),
+                    "benefits": meta.get("benefits", ""),
+                    "tags": meta.get("tags", []),
+                    "score": hit.score,
                 }
 
-                # Filter by restrictions
+                # Filter by restrictions / contraindications
                 if restrictions:
-                    # Simple filtering - can be enhanced
+                    contra = practice.get("contraindications", [])
+                    if any(r in contra for r in restrictions):
+                        continue
                     if "back_pain" in restrictions and "прогиб" in practice["content"].lower():
                         continue
 

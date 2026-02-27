@@ -110,11 +110,6 @@ export const getPractices = async () => {
   return response.data
 }
 
-export const getHabits = async () => {
-  const response = await api.get('/api/habits')
-  return response.data
-}
-
 export interface SolveProblemPayload {
   problem: string
   session_id?: string
@@ -235,12 +230,35 @@ export const completeDailyProjectPlan = async (payload: DailyCompletePayload) =>
 export interface PracticeProgress {
   practice_id: string
   practice_name: string
+  practice_category: string
+  practice_duration: number
   habit_score: number
   streak_days: number
   total_completions: number
   last_completed?: string
   is_habit: boolean
-  can_complete_today: boolean  // Новое поле!
+  is_active: boolean
+  is_hidden: boolean
+  can_complete_today: boolean
+  habit_min_streak_days: number
+  habit_min_score: number
+}
+
+export interface Practice {
+  id: string
+  name: string
+  category: string
+  description: string
+  duration: number
+  difficulty: number
+  physical_intensity: string
+  requires_morning: boolean
+  requires_silence: boolean
+  max_completions_per_day: number
+  steps: string[]
+  contraindications: string[]
+  benefits: string
+  tags: string[]
 }
 
 export interface PracticeCompleteRequest {
@@ -266,5 +284,31 @@ export const getPracticesProgress = async (): Promise<{ progress: PracticeProgre
 
 export const getPracticeRecommendations = async () => {
   const response = await api.get('/api/practices/recommend')
+  return response.data
+}
+
+// Practice Management API (M3)
+export const pausePractice = async (practiceId: string) => {
+  const response = await api.post(`/api/practices/${practiceId}/pause`)
+  return response.data
+}
+
+export const resumePractice = async (practiceId: string) => {
+  const response = await api.post(`/api/practices/${practiceId}/resume`)
+  return response.data
+}
+
+export const hidePractice = async (practiceId: string) => {
+  const response = await api.post(`/api/practices/${practiceId}/hide`)
+  return response.data
+}
+
+export const resetPractice = async (practiceId: string) => {
+  const response = await api.post(`/api/practices/${practiceId}/reset`)
+  return response.data
+}
+
+export const deletePractice = async (practiceId: string) => {
+  const response = await api.delete(`/api/practices/${practiceId}`)
   return response.data
 }

@@ -56,7 +56,6 @@ class UserDB(Base):
     
     # Relationships
     seeds = relationship("SeedDB", back_populates="user", lazy="selectin")
-    habits = relationship("HabitDB", back_populates="user", lazy="selectin")
     partners = relationship("PartnerDB", back_populates="user", lazy="selectin")
     problem_history = relationship("ProblemHistoryDB", back_populates="user", lazy="selectin")
     # daily_tasks = relationship("DailyTaskDB", back_populates="user", lazy="selectin")
@@ -89,6 +88,7 @@ class SeedDB(Base):
     karma_plan_id = Column(String, ForeignKey("karma_plans.id", ondelete="SET NULL"), nullable=True)
     daily_plan_id = Column(String, ForeignKey("daily_plans.id", ondelete="SET NULL"), nullable=True)
     daily_task_id = Column(Integer, ForeignKey("daily_tasks.id", ondelete="SET NULL"), nullable=True)
+    practice_id = Column(String, ForeignKey("practices.id", ondelete="SET NULL"), nullable=True)
 
     # Relationships
     user = relationship("UserDB", back_populates="seeds")
@@ -149,43 +149,16 @@ class PracticeDB(Base):
     requires_silence = Column(Boolean, default=False)
     physical_intensity = Column(String, default="low")    # 'low', 'medium', 'high'
     
+    difficulty = Column(Integer, default=1)
+    max_completions_per_day = Column(Integer, default=1)
+    habit_min_streak_days = Column(Integer, default=14)
+    habit_min_score = Column(Integer, default=70)
+    steps = Column(JSON, default=list)           # list of step strings
+    contraindications = Column(JSON, default=list) # list of contraindication tags
+    benefits = Column(Text, nullable=True)
+    tags = Column(JSON, default=list)             # list of tag strings
+    
     source = Column(String, nullable=True)
-
-
-class HabitDB(Base):
-    """User habit database model"""
-    __tablename__ = "habits"
-    
-    id = Column(String, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    practice_id = Column(String, ForeignKey("practices.id"), nullable=False)
-    
-    frequency = Column(String, default="daily")
-    preferred_time = Column(String, default="morning")
-    duration = Column(Integer, default=30)
-    
-    streak = Column(Integer, default=0)
-    last_completed = Column(DateTime(timezone=True), nullable=True)
-    completion_rate = Column(Float, default=0.0)
-    
-    user_restrictions = Column(JSON, default=list)
-    is_active = Column(Boolean, default=True)
-    
-    # Relationships
-    user = relationship("UserDB", back_populates="habits")
-
-
-class HabitCompletionDB(Base):
-    """Habit completion record"""
-    __tablename__ = "habit_completions"
-    
-    id = Column(String, primary_key=True)
-    habit_id = Column(String, ForeignKey("habits.id"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    completed_at = Column(DateTime(timezone=True), server_default=func.now())
-    
-    duration_actual = Column(Integer, nullable=True)
-    notes = Column(Text, nullable=True)
 
 
 class PartnerActionDB(Base):
@@ -219,6 +192,9 @@ class PracticeProgressDB(Base):
     # Metadata
     last_completed = Column(DateTime(timezone=True), nullable=True)
     is_habit = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    is_hidden = Column(Boolean, default=False)
+    karma_plan_id = Column(String, ForeignKey("karma_plans.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships

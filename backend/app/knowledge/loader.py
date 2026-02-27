@@ -264,7 +264,6 @@ class KnowledgeLoader:
     async def _load_practices(self) -> List[KnowledgeItem]:
         """Load practices from CSV if available, otherwise fall back to markdown parsing."""
         practices: List[KnowledgeItem] = []
-        practice_counter = 1  # Добавляем счетчик для ID
 
         # 1. Try CSV-based practices first
         csv_path = self.knowledge_dir / "practices.csv"
@@ -275,29 +274,86 @@ class KnowledgeLoader:
                     name = (row.get("name") or "").strip()
                     if not name:
                         continue
+                    practice_id = (row.get("id") or "").strip()
+                    if not practice_id:
+                        continue
                     category = (row.get("category") or "").strip()
                     duration_raw = (row.get("duration_min") or "").strip()
                     try:
                         duration = int(duration_raw) if duration_raw else 0
                     except ValueError:
                         duration = 0
-                    content = (row.get("content") or "").strip()
-                    source = (row.get("source") or "practices.csv").strip()
+
+                    # Parse structured fields
+                    difficulty_raw = (row.get("difficulty") or "1").strip()
+                    try:
+                        difficulty = int(difficulty_raw)
+                    except ValueError:
+                        difficulty = 1
+                    physical_intensity = (row.get("physical_intensity") or "low").strip()
+                    requires_morning = (row.get("requires_morning") or "false").strip().lower() == "true"
+                    requires_silence = (row.get("requires_silence") or "false").strip().lower() == "true"
+                    max_completions_raw = (row.get("max_completions_per_day") or "1").strip()
+                    try:
+                        max_completions = int(max_completions_raw)
+                    except ValueError:
+                        max_completions = 1
+                    habit_streak_raw = (row.get("habit_min_streak_days") or "14").strip()
+                    try:
+                        habit_min_streak = int(habit_streak_raw)
+                    except ValueError:
+                        habit_min_streak = 14
+                    habit_score_raw = (row.get("habit_min_score") or "70").strip()
+                    try:
+                        habit_min_score = int(habit_score_raw)
+                    except ValueError:
+                        habit_min_score = 70
+
+                    steps_raw = (row.get("steps") or "").strip()
+                    steps = [s.strip() for s in steps_raw.split("|") if s.strip()] if steps_raw else []
+
+                    contra_raw = (row.get("contraindications") or "").strip()
+                    contraindications = [c.strip() for c in contra_raw.split(",") if c.strip() and c.strip() != "none"]
+
+                    benefits = (row.get("benefits") or "").strip()
+                    tags_raw = (row.get("tags") or "").strip()
+                    tags = [t.strip() for t in tags_raw.split(",") if t.strip()]
+
+                    # Build content for Qdrant embedding (name + benefits + steps summary)
+                    content_parts = [name]
+                    if benefits:
+                        content_parts.append(benefits)
+                    if steps:
+                        content_parts.append(" | ".join(steps[:5]))
+                    if tags:
+                        content_parts.append(", ".join(tags))
+                    content = ". ".join(content_parts)
 
                     practices.append(
                         KnowledgeItem(
+                            id=practice_id,
                             type="practice",
                             content=content,
-                            source=source,
+                            source="practices.csv",
                             metadata={
-                                "id": str(practice_counter),  # Добавляем ID
+                                "id": practice_id,
                                 "name": name,
                                 "category": category,
                                 "duration": duration,
+                                "difficulty": difficulty,
+                                "physical_intensity": physical_intensity,
+                                "requires_morning": requires_morning,
+                                "requires_silence": requires_silence,
+                                "max_completions_per_day": max_completions,
+                                "habit_min_streak_days": habit_min_streak,
+                                "habit_min_score": habit_min_score,
+                                "steps": steps,
+                                "contraindications": contraindications,
+                                "benefits": benefits,
+                                "tags": tags,
                             },
                         )
                     )
-                    practice_counter += 1
 
             return practices
 

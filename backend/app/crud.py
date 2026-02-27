@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.db_models import (
     UserDB, SeedDB, PartnerDB, PartnerGroupDB,
-    HabitDB, HabitCompletionDB, PartnerActionDB,
+    PartnerActionDB,
     ProblemHistoryDB, MessageLogDB,
     DailyTaskDB, DailyPlanDB, PracticeProgressDB,
 )
@@ -81,7 +81,7 @@ async def get_active_users(db: AsyncSession, morning_enabled: bool = None, eveni
     return result.scalars().all()
 
 
-async def create_seed(db: AsyncSession, seed: Seed) -> SeedDB:
+async def create_seed(db: AsyncSession, seed: Seed, practice_id: str | None = None) -> SeedDB:
     """Create new seed"""
     seed_db = SeedDB(
         id=seed.id,
@@ -95,7 +95,11 @@ async def create_seed(db: AsyncSession, seed: Seed) -> SeedDB:
         emotion_level=seed.emotion_level,
         understanding=seed.understanding,
         estimated_maturation_days=seed.estimated_maturation_days,
-        strength_multiplier=seed.strength_multiplier
+        strength_multiplier=seed.strength_multiplier,
+        karma_plan_id=seed.karma_plan_id,
+        daily_plan_id=seed.daily_plan_id,
+        daily_task_id=seed.daily_task_id,
+        practice_id=practice_id,
     )
     db.add(seed_db)
     await db.flush()
@@ -509,15 +513,14 @@ async def reset_user_progress(db: AsyncSession, user_id: int):
     # 1. Delete related records
     # Note: Order matters due to Foreign Keys if cascades aren't set everywhere
     
-    # Dependent on Habits
-    await db.execute(delete(HabitCompletionDB).where(HabitCompletionDB.user_id == user_id))
+    # Practice progress (before seeds, since seeds reference practice_id)
+    await db.execute(delete(PracticeProgressDB).where(PracticeProgressDB.user_id == user_id))
     
     # Dependent on Partners/Seeds
     await db.execute(delete(PartnerActionDB).where(PartnerActionDB.user_id == user_id))
     
     # Main entities
     await db.execute(delete(ProblemHistoryDB).where(ProblemHistoryDB.user_id == user_id))
-    await db.execute(delete(HabitDB).where(HabitDB.user_id == user_id))
     
     # Seeds can be linked to partners, but we delete seeds first to be safe or set null
     # Seeds have partner_id foreign key.
@@ -563,10 +566,13 @@ async def reset_user_progress(db: AsyncSession, user_id: int):
 # Practice Progress CRUD
 # =============================================================================
 
-async def get_or_create_practice_progress(db: AsyncSession, user_id: int, practice_id: str) -> PracticeProgressDB:
+async def get_or_create_practice_progress(
+    db: AsyncSession, user_id: int, practice_id: str, karma_plan_id: str | None = None
+) -> PracticeProgressDB:
     """Get existing practice progress or create new one"""
     result = await db.execute(
         select(PracticeProgressDB)
+        .options(selectinload(PracticeProgressDB.practice))
         .where(PracticeProgressDB.user_id == user_id, PracticeProgressDB.practice_id == practice_id)
         .limit(1)
     )
@@ -576,27 +582,41 @@ async def get_or_create_practice_progress(db: AsyncSession, user_id: int, practi
         progress = PracticeProgressDB(
             id=str(uuid4()),
             user_id=user_id,
-            practice_id=practice_id
+            practice_id=practice_id,
+            karma_plan_id=karma_plan_id,
         )
         db.add(progress)
-        await db.commit()
         await db.flush()
         await db.refresh(progress)
     
     return progress
 
 
-async def update_practice_progress(db: AsyncSession, user_id: int, practice_id: str) -> PracticeProgressDB:
-    """Update practice progress after completion"""
+async def update_practice_progress(db: AsyncSession, user_id: int, practice_id: str) -> tuple[PracticeProgressDB, bool]:
+    """Update practice progress after completion.
+    
+    Returns (progress, actually_updated) — second element is False when
+    max completions per day has been reached.
+    """
+    from app.models.db_models import PracticeDB
     progress = await get_or_create_practice_progress(db, user_id, practice_id)
     
-    # Check if already completed today
     now = datetime.now(UTC)
-    if progress.last_completed:
-        # Check if last completion was today (same calendar day)
-        if progress.last_completed.date() == now.date():
-            # Already completed today, don't update
-            return progress
+    
+    # Determine max completions per day from PracticeDB or default
+    max_per_day = 1
+    if progress.practice:
+        max_per_day = progress.practice.max_completions_per_day or 1
+    
+    # Count today's completions
+    if progress.last_completed and progress.last_completed.date() == now.date():
+        # For single-completion practices, block immediately
+        if max_per_day <= 1:
+            return progress, False
+        # For multi-completion practices, check count via seeds
+        today_count = await _count_practice_seeds_today(db, user_id, practice_id, now)
+        if today_count >= max_per_day:
+            return progress, False
     
     # Update completion metrics
     progress.total_completions += 1
@@ -608,7 +628,7 @@ async def update_practice_progress(db: AsyncSession, user_id: int, practice_id: 
             progress.streak_days += 1
         elif days_since_last > 1:  # Gap of 2+ days
             progress.streak_days = 1
-        # If days_since_last == 0, this shouldn't happen due to check above
+        # If days_since_last == 0 and multi-completion, keep streak
     else:
         # First completion
         progress.streak_days = 1
@@ -619,13 +639,34 @@ async def update_practice_progress(db: AsyncSession, user_id: int, practice_id: 
     # Calculate habit score
     progress.habit_score = calculate_habit_score(progress)
     
-    # Check if habit is formed
-    if progress.habit_score >= 70 and progress.streak_days >= 14:
+    # Check if habit is formed using PracticeDB thresholds or defaults (M4)
+    min_streak = 14
+    min_score = 70
+    if progress.practice:
+        min_streak = progress.practice.habit_min_streak_days or 14
+        min_score = progress.practice.habit_min_score or 70
+    
+    if progress.habit_score >= min_score and progress.streak_days >= min_streak:
         progress.is_habit = True
     
-    await db.commit()
-    await db.refresh(progress)
-    return progress
+    await db.flush()
+    return progress, True
+
+
+async def _count_practice_seeds_today(
+    db: AsyncSession, user_id: int, practice_id: str, now: datetime
+) -> int:
+    """Count seeds created today for a specific practice."""
+    from sqlalchemy import func as sa_func
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    result = await db.execute(
+        select(sa_func.count()).where(
+            SeedDB.user_id == user_id,
+            SeedDB.practice_id == practice_id,
+            SeedDB.timestamp >= day_start,
+        )
+    )
+    return result.scalar() or 0
 
 
 def calculate_habit_score(progress: PracticeProgressDB) -> int:
@@ -656,34 +697,152 @@ async def complete_practice_and_create_seed(
     practice_id: str,
     emotion_score: int = 5
 ) -> dict:
-    """Complete practice and create linked seed"""
-    # Update practice progress
-    progress = await update_practice_progress(db, user_id, practice_id)
+    """Complete practice and create linked seed.
     
-    # Create seed linked to practice
-    seed = Seed(
-        description=f"Практика: {progress.practice.name if progress.practice else 'Unknown'}",
-        action_type="effort",  # Практики = усилие
-        user_id=user_id,
-        timestamp=datetime.now(UTC),
-        partner_id=None,
-        partner_group="practice",
-        # Правильные поля из Seed модели
-        intention_score=emotion_score,
-        emotion_level=emotion_score,
-        understanding=False,
-        estimated_maturation_days=21,
-        strength_multiplier=1.0,
-    )
+    Seed is created ONLY when progress actually updated (respecting max_completions_per_day).
+    """
+    progress, actually_updated = await update_practice_progress(db, user_id, practice_id)
     
-    seed_db = await create_seed(db, seed)
+    seed_db = None
+    if actually_updated:
+        # Create seed linked to practice (M7: practice_id on seed)
+        seed = Seed(
+            description=f"Практика: {progress.practice.name if progress.practice else 'Unknown'}",
+            action_type="effort",
+            user_id=user_id,
+            timestamp=datetime.now(UTC),
+            partner_id=None,
+            partner_group="practice",
+            intention_score=emotion_score,
+            emotion_level=emotion_score,
+            understanding=False,
+            estimated_maturation_days=21,
+            strength_multiplier=1.0,
+        )
+        
+        seed_db = await create_seed(db, seed, practice_id=practice_id)
+        await increment_user_seeds_count(db, user_id)
     
-    await db.commit()
-    await db.refresh(progress)
-    await db.refresh(seed_db)
+    await db.flush()
     
     return {
         "progress": progress,
         "seed": seed_db,
+        "actually_updated": actually_updated,
         "is_new_habit": progress.is_habit and progress.habit_score >= 70
     }
+
+
+# =============================================================================
+# Practice Management CRUD (M3)
+# =============================================================================
+
+async def pause_practice(db: AsyncSession, user_id: int, practice_id: str) -> bool:
+    """Pause practice tracking (is_active=False)"""
+    result = await db.execute(
+        select(PracticeProgressDB).where(
+            PracticeProgressDB.user_id == user_id,
+            PracticeProgressDB.practice_id == practice_id,
+        )
+    )
+    progress = result.scalar_one_or_none()
+    if not progress:
+        return False
+    progress.is_active = False
+    await db.flush()
+    return True
+
+
+async def resume_practice(db: AsyncSession, user_id: int, practice_id: str) -> bool:
+    """Resume practice tracking (is_active=True)"""
+    result = await db.execute(
+        select(PracticeProgressDB).where(
+            PracticeProgressDB.user_id == user_id,
+            PracticeProgressDB.practice_id == practice_id,
+        )
+    )
+    progress = result.scalar_one_or_none()
+    if not progress:
+        return False
+    progress.is_active = True
+    progress.is_hidden = False
+    await db.flush()
+    return True
+
+
+async def hide_practice(db: AsyncSession, user_id: int, practice_id: str) -> bool:
+    """Hide practice from lists (history preserved)"""
+    result = await db.execute(
+        select(PracticeProgressDB).where(
+            PracticeProgressDB.user_id == user_id,
+            PracticeProgressDB.practice_id == practice_id,
+        )
+    )
+    progress = result.scalar_one_or_none()
+    if not progress:
+        return False
+    progress.is_hidden = True
+    await db.flush()
+    return True
+
+
+async def reset_practice(db: AsyncSession, user_id: int, practice_id: str) -> bool:
+    """Reset practice progress (zero out metrics, keep record)"""
+    result = await db.execute(
+        select(PracticeProgressDB).where(
+            PracticeProgressDB.user_id == user_id,
+            PracticeProgressDB.practice_id == practice_id,
+        )
+    )
+    progress = result.scalar_one_or_none()
+    if not progress:
+        return False
+    progress.streak_days = 0
+    progress.habit_score = 0
+    progress.total_completions = 0
+    progress.last_completed = None
+    progress.is_habit = False
+    progress.is_active = True
+    progress.is_hidden = False
+    await db.flush()
+    return True
+
+
+async def delete_practice_all(db: AsyncSession, user_id: int, practice_id: str) -> int:
+    """Delete practice progress AND all related seeds. Returns deleted seeds count."""
+    # Count seeds to delete for stats correction
+    from sqlalchemy import func as sa_func
+    count_result = await db.execute(
+        select(sa_func.count()).where(
+            SeedDB.user_id == user_id,
+            SeedDB.practice_id == practice_id,
+        )
+    )
+    deleted_seeds = count_result.scalar() or 0
+
+    # Delete seeds
+    await db.execute(
+        delete(SeedDB).where(
+            SeedDB.user_id == user_id,
+            SeedDB.practice_id == practice_id,
+        )
+    )
+
+    # Delete progress
+    await db.execute(
+        delete(PracticeProgressDB).where(
+            PracticeProgressDB.user_id == user_id,
+            PracticeProgressDB.practice_id == practice_id,
+        )
+    )
+
+    # Correct user total_seeds
+    if deleted_seeds > 0:
+        user_result = await db.execute(select(UserDB).where(UserDB.id == user_id))
+        user = user_result.scalar_one_or_none()
+        if user:
+            user.total_seeds = max(0, user.total_seeds - deleted_seeds)
+            user.updated_at = datetime.now(UTC)
+
+    await db.flush()
+    return deleted_seeds

@@ -44,6 +44,7 @@ class Seed(BaseModel):
     karma_plan_id: Optional[str] = None
     daily_plan_id: Optional[str] = None
     daily_task_id: Optional[int] = None
+    practice_id: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -68,40 +69,3 @@ class Practice(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class Habit(BaseModel):
-    """User's habit (instance of practice)"""
-    
-    id: str = Field(default_factory=lambda: str(uuid4()))
-    user_id: int
-    practice_id: str
-    
-    # Schedule
-    frequency: str = "daily"  # 'daily', 'weekly', 'custom'
-    preferred_time: str = "morning"  # 'morning', 'afternoon', 'evening'
-    duration: int = 30  # minutes
-    
-    # Tracking
-    streak: int = 0
-    last_completed: Optional[datetime] = None
-    completion_rate: float = 0.0  # % of completions
-    
-    # User customizations
-    user_restrictions: List[str] = Field(default_factory=list)
-    is_active: bool = True
-    
-    model_config = ConfigDict(from_attributes=True)
-
-
-class HabitCompletion(BaseModel):
-    """Record of habit completion"""
-    
-    id: str = Field(default_factory=lambda: str(uuid4()))
-    habit_id: str
-    user_id: int
-    completed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    
-    # Optional details
-    duration_actual: Optional[int] = None  # actual minutes
-    notes: Optional[str] = None
-    
-    model_config = ConfigDict(from_attributes=True)

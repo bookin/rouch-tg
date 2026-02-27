@@ -73,7 +73,7 @@ async def get_calendar_data(
     """Get all calendar events for the specified date period"""
     from app.database import AsyncSessionLocal
     from app.crud import get_user_by_telegram_id
-    from app.models.db_models import SeedDB, HabitCompletionDB, HabitDB, PracticeDB, PartnerActionDB, PartnerDB
+    from app.models.db_models import SeedDB, PracticeDB, PartnerActionDB, PartnerDB
     
     try:
         async with AsyncSessionLocal() as db:
@@ -103,40 +103,27 @@ async def get_calendar_data(
                 for s in seeds_result.scalars().all()
             ]
             
-            # Get practice completions
+            # Get practice completions (seeds with practice_id)
             practices_stmt = (
-                select(HabitCompletionDB, HabitDB, PracticeDB)
-                .outerjoin(HabitDB, HabitDB.id == HabitCompletionDB.habit_id)
-                .outerjoin(PracticeDB, PracticeDB.id == HabitDB.practice_id)
+                select(SeedDB, PracticeDB)
+                .outerjoin(PracticeDB, PracticeDB.id == SeedDB.practice_id)
                 .where(
-                    HabitCompletionDB.user_id == user_db.id,
-                    HabitCompletionDB.completed_at >= start_dt,
-                    HabitCompletionDB.completed_at <= end_dt,
+                    SeedDB.user_id == user_db.id,
+                    SeedDB.practice_id.isnot(None),
+                    SeedDB.timestamp >= start_dt,
+                    SeedDB.timestamp <= end_dt,
                 )
             )
             practices_rows = (await db.execute(practices_stmt)).all()
             practices: list[PracticeCalendarItem] = []
-            for completion, habit, practice in practices_rows:
-                name = None
-                if practice is not None:
-                    name = practice.name
-                elif habit is not None:
-                    name = habit.practice_id
-                else:
-                    name = completion.habit_id
-
-                duration = completion.duration_actual
-                if duration is None and habit is not None:
-                    duration = habit.duration
-                if duration is None and practice is not None:
-                    duration = practice.duration_minutes
-                if duration is None:
-                    duration = 10
+            for seed, practice in practices_rows:
+                name = practice.name if practice else seed.practice_id or "Unknown"
+                duration = practice.duration_minutes if practice else 10
 
                 practices.append(
                     PracticeCalendarItem(
-                        id=completion.id,
-                        timestamp=completion.completed_at,
+                        id=seed.id,
+                        timestamp=seed.timestamp,
                         name=str(name),
                         duration=int(duration),
                     )
@@ -185,7 +172,7 @@ async def get_calendar_stats(
     """Get statistics for the period"""
     from app.database import AsyncSessionLocal
     from app.crud import get_user_by_telegram_id
-    from app.models.db_models import SeedDB, HabitCompletionDB, PartnerActionDB, PartnerDB
+    from app.models.db_models import SeedDB, PartnerActionDB, PartnerDB
     
     try:
         async with AsyncSessionLocal() as db:
@@ -211,12 +198,13 @@ async def get_calendar_stats(
                 )
             )
             
-            # Count practices
+            # Count practices (seeds with practice_id)
             practices_count = await db.execute(
-                select(func.count(HabitCompletionDB.id)).where(
-                    HabitCompletionDB.user_id == user_db.id,
-                    HabitCompletionDB.completed_at >= start_dt,
-                    HabitCompletionDB.completed_at <= end_dt
+                select(func.count(SeedDB.id)).where(
+                    SeedDB.user_id == user_db.id,
+                    SeedDB.practice_id.isnot(None),
+                    SeedDB.timestamp >= start_dt,
+                    SeedDB.timestamp <= end_dt
                 )
             )
             
