@@ -2,7 +2,6 @@ import { FormEvent, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   solveProblem,
-  updateUserFocus,
   getProblemsHistory,
   getPartners,
   addProblemToCalendar,
@@ -179,7 +178,6 @@ export default function Problem() {
       setResult((prev: any) => ({ ...prev, history_id: h.id }))
 
       setProblem(h.problem_text)
-      await updateUserFocus(h.problem_text)
 
       setSuccess('Проблема выбрана из истории.')
       setShowHistory(false)
@@ -221,20 +219,6 @@ export default function Problem() {
       prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]
     )
   }
-
-  const handleSetFocus = async () => {
-    if (!result) return;
-    try {
-      setLoading(true);
-      await updateUserFocus(result.problem || problem);
-      setSuccess('Цель успешно установлена! Теперь твой мудрый менеджер будет помогать тебе в её достижении.');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } catch (err: any) {
-      setError('Не удалось обновить цель');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleStartPractice = () => {
     if (!result) return;
@@ -527,11 +511,7 @@ export default function Problem() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3 pt-2">
-                    <Button variant="outline" onClick={handleSetFocus} disabled={loading} className="w-full">
-                      <Target className="mr-2 h-4 w-4" />
-                      Просто цель
-                    </Button>
+                  <div className="pt-2">
                     <Button onClick={handleStartPractice} className="w-full">
                       <Brain className="mr-2 h-4 w-4" />
                       В журнал

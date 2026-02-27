@@ -49,7 +49,7 @@ class DailyFlowWorkflow:
         """Morning workflow: motivation + daily actions"""
         
         # 1. Get quote for the day
-        quote = await self.qdrant.get_daily_quote(user.current_focus)
+        quote = await self.qdrant.get_daily_quote(None)
         
         # 2. Analyze recent progress
         analysis = await self._analyze_progress(user)
@@ -101,7 +101,6 @@ class DailyFlowWorkflow:
             # Try to use AI first
             ai_message = await generate_morning_message(
                 user_name=user.first_name,
-                focus=user.current_focus,
                 streak_days=user.streak_days,
                 total_seeds=user.total_seeds
             )

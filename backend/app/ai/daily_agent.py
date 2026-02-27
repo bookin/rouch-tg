@@ -12,7 +12,6 @@ from app.models.db_models import PartnerDB
 class MessageContext(BaseModel):
     """Context for message generation"""
     user_name: str
-    user_focus: Optional[str] = None
     streak_days: int = 0
     total_seeds: int = 0
     time_of_day: str = "morning"  # morning, evening
@@ -216,7 +215,6 @@ def get_daily_agent() -> Agent[MessageContext, DailyMessage]:
 
 async def generate_morning_message(
     user_name: str,
-    focus: Optional[str] = None,
     streak_days: int = 0,
     total_seeds: int = 0,
     plan_strategy: Optional[dict] = None,
@@ -229,7 +227,6 @@ async def generate_morning_message(
     
     Args:
         user_name: User's first name
-        focus: Current focus area
         streak_days: Days in a row with practice
         total_seeds: Total seeds planted
         plan_strategy: Active Karma Plan strategy
@@ -244,7 +241,6 @@ async def generate_morning_message(
     
     context = MessageContext(
         user_name=user_name,
-        user_focus=focus,
         streak_days=streak_days,
         total_seeds=total_seeds,
         time_of_day="morning",

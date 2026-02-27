@@ -28,7 +28,6 @@ class UserProfile(BaseModel):
     timezone: str = "UTC"
     morning_enabled: bool = True
     evening_enabled: bool = True
-    current_focus: Optional[str] = None  # Current problem area
     
     # Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

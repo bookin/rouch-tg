@@ -72,7 +72,6 @@ class OnboardingState(StatesGroup):
     duration = State()
     habits = State()
     restrictions = State()
-    focus = State()
     partners = State()
 
 
@@ -98,7 +97,6 @@ STEP_STATE_MAP = {
     OnboardingSteps.DURATION: OnboardingState.duration,
     OnboardingSteps.HABITS: OnboardingState.habits,
     OnboardingSteps.RESTRICTIONS: OnboardingState.restrictions,
-    OnboardingSteps.FOCUS: OnboardingState.focus,
     OnboardingSteps.PARTNERS: OnboardingState.partners,
 }
 
@@ -365,31 +363,6 @@ async def process_restrictions(message: Message, state: FSMContext):
     # Save using shared logic
     await save_onboarding_progress(message.from_user.id, current_step, value)
     await state.update_data(physical_restrictions=value)
-    
-    next_step_name = get_next_step(current_step)
-    next_step_data = get_step_data(next_step_name)
-    
-    await state.set_state(STEP_STATE_MAP[next_step_name])
-    
-    kb = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=opt["label"])] for opt in next_step_data["options"]],
-        resize_keyboard=True
-    )
-    
-    await message.answer(next_step_data["message"], reply_markup=kb)
-
-
-@router.message(OnboardingState.focus)
-async def process_focus(message: Message, state: FSMContext):
-    """Process focus answer"""
-    current_step = OnboardingSteps.FOCUS
-    step_data = get_step_data(current_step)
-    
-    selected_id = next((opt["id"] for opt in step_data["options"] if opt["label"] == message.text), "other")
-    
-    # Save using shared logic
-    await save_onboarding_progress(message.from_user.id, current_step, selected_id)
-    await state.update_data(current_focus=selected_id)
     
     next_step_name = get_next_step(current_step)
     next_step_data = get_step_data(next_step_name)
@@ -1145,7 +1118,6 @@ async def cmd_today(message: Message):
                 occupation=user_db.occupation or "employee",
                 available_times=user_db.available_times or [],
                 daily_minutes=user_db.daily_minutes or 30,
-                current_focus=user_db.current_focus,
                 streak_days=user_db.streak_days,
             )
             
@@ -1156,7 +1128,6 @@ async def cmd_today(message: Message):
             actions = await agent.get_daily_actions(
                 user_id=user_profile.id,
                 first_name=user_profile.first_name,
-                focus=user_profile.current_focus,
                 streak_days=user_profile.streak_days,
                 total_seeds=user_profile.total_seeds
             )
@@ -1248,7 +1219,6 @@ async def process_action_done(message: Message, state: FSMContext):
                 actions = await agent.get_daily_actions(
                     user_id=user_db.id,
                     first_name=user_db.first_name,
-                    focus=user_db.current_focus,
                     streak_days=user_db.streak_days,
                     total_seeds=user_db.total_seeds
                 )
@@ -1447,11 +1417,8 @@ async def cmd_practice(message: Message):
                 from app.crud_extended import get_active_karma_plan
                 
                 plan = await get_active_karma_plan(db, user.id)
-                if plan and plan.strategy_snapshot:
-                    s = plan.strategy_snapshot
-                    need = f"{s.get('problem_text', '')} {s.get('stop_action', '')} {s.get('start_action', '')} {s.get('grow_action', '')}".strip()
-                else:
-                    need = _focus_to_query(user.current_focus)
+                strategy = plan.strategy_snapshot if plan else None
+                need = _build_recommend_query(strategy)
                 
                 qdrant = QdrantKnowledgeBase()
                 recs = await qdrant.search_practice(need=need, limit=3, restrictions=user.physical_restrictions)
@@ -1547,21 +1514,13 @@ async def cmd_practice(message: Message):
         await message.answer("Произошла ошибка при загрузке практик. Попробуй позже.")
 
 
-def _focus_to_query(focus: str | None) -> str:
-    """Map onboarding focus id to human-readable query for Qdrant search"""
-    mapping = {
-        "finances": "улучшение финансового положения, достаток, щедрость",
-        "relationships": "гармоничные отношения, любовь, партнёрство",
-        "health": "здоровье тела и ума, энергия, восстановление",
-        "career": "карьерный рост, реализация, успех в работе",
-        "focus": "концентрация, ясность ума, продуктивность",
-        "spiritual": "духовное развитие, осознанность, медитация",
-        "stress": "снижение стресса, спокойствие, внутренний баланс",
-        "energy": "жизненная энергия, бодрость, тонус",
-    }
-    if not focus:
-        return "общее развитие, осознанность, кармические практики"
-    return mapping.get(focus, focus if len(focus) > 10 else "общее развитие, осознанность, кармические практики")
+def _build_recommend_query(strategy: dict | None) -> str:
+    """Build Qdrant search query from active plan strategy or default"""
+    if strategy:
+        need = f"{strategy.get('problem_text', '')} {strategy.get('stop_action', '')} {strategy.get('start_action', '')} {strategy.get('grow_action', '')}".strip()
+        if need:
+            return need
+    return "общее развитие, осознанность, кармические практики"
 
 
 # --- Practice callback handlers ---
@@ -1648,11 +1607,8 @@ async def cb_practice_recommend(callback: CallbackQuery):
                 return
             
             plan = await get_active_karma_plan(db, user.id)
-            if plan and plan.strategy_snapshot:
-                s = plan.strategy_snapshot
-                need = f"{s.get('problem_text', '')} {s.get('stop_action', '')} {s.get('start_action', '')} {s.get('grow_action', '')}".strip()
-            else:
-                need = _focus_to_query(user.current_focus)
+            strategy = plan.strategy_snapshot if plan else None
+            need = _build_recommend_query(strategy)
             
             # Get existing practice IDs to filter
             progress_list = await get_user_practice_progress(db, user.id)

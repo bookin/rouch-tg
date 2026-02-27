@@ -8,7 +8,7 @@ from app.models.seed import Seed
 from uuid import uuid4
 import logging
 from app.crud_extended import create_karma_plan, get_active_karma_plan, get_daily_plan, create_daily_plan
-from app.crud import get_user_by_telegram_id, update_user_focus
+from app.crud import get_user_by_telegram_id
 from app.models.db_models import ProblemHistoryDB
 from sqlalchemy import select
 
@@ -164,7 +164,6 @@ async def get_current_user(
             timezone=user_db.timezone or "UTC",
             morning_enabled=bool(user_db.morning_enabled),
             evening_enabled=bool(user_db.evening_enabled),
-            current_focus=user_db.current_focus,
             created_at=user_db.created_at,
             updated_at=user_db.updated_at,
             last_onboarding_update=user_db.last_onboarding_update,
@@ -204,7 +203,6 @@ async def get_current_user(
         timezone=user_db.timezone or "UTC",
         morning_enabled=bool(user_db.morning_enabled),
         evening_enabled=bool(user_db.evening_enabled),
-        current_focus=user_db.current_focus,
         created_at=user_db.created_at,
         updated_at=user_db.updated_at,
         last_onboarding_update=user_db.last_onboarding_update,
@@ -215,31 +213,6 @@ async def get_current_user(
 async def get_me(user: UserProfile = Depends(get_current_user)):
     """Get current user profile"""
     return user
-
-
-class UpdateFocusRequest(BaseModel):
-    focus: str
-
-
-@router.patch("/me/focus")
-async def update_focus(
-    payload: UpdateFocusRequest,
-    user: UserProfile = Depends(get_current_user)
-):
-    """Update user current focus"""
-    from app.database import AsyncSessionLocal
-    from app.crud import update_user_focus, get_user_by_telegram_id
-    
-    async with AsyncSessionLocal() as db:
-        user_db = await get_user_by_telegram_id(db, user.telegram_id)
-        if not user_db:
-            raise HTTPException(status_code=404, detail="User not found")
-            
-        success = await update_user_focus(db, user_db.id, payload.focus)
-        
-        await db.commit()
-
-        return {"success": success}
 
 
 @router.get(
@@ -262,7 +235,6 @@ async def get_daily_actions(user: UserProfile = Depends(get_current_user)):
         actions = await agent.get_daily_actions(
             user_id=user.id,
             first_name=user.first_name,
-            focus=user.current_focus,
             streak_days=user.streak_days,
             total_seeds=user.total_seeds
         )
@@ -317,8 +289,8 @@ async def get_daily_quote(user: UserProfile = Depends(get_current_user)):
         settings = get_settings()
         qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
         
-        # Get quote based on user focus area
-        quote = await qdrant.get_daily_quote(user.current_focus)
+        # Get quote (no focus dependency)
+        quote = await qdrant.get_daily_quote(None)
         return quote
     except Exception as e:
         logger.error(f"Error getting daily quote: {e}", exc_info=True)
@@ -1220,21 +1192,13 @@ async def delete_practice_endpoint(practice_id: str, user: UserProfile = Depends
         return {"error": "Failed to delete practice"}
 
 
-def _focus_to_query(focus: str | None) -> str:
-    """Map onboarding focus id to human-readable query for Qdrant search"""
-    mapping = {
-        "finances": "улучшение финансового положения, достаток, щедрость",
-        "relationships": "гармоничные отношения, любовь, партнёрство",
-        "health": "здоровье тела и ума, энергия, восстановление",
-        "career": "карьерный рост, реализация, успех в работе",
-        "focus": "концентрация, ясность ума, продуктивность",
-        "spiritual": "духовное развитие, осознанность, медитация",
-        "stress": "снижение стресса, спокойствие, внутренний баланс",
-        "energy": "жизненная энергия, бодрость, тонус",
-    }
-    if not focus:
-        return "общее развитие, осознанность, кармические практики"
-    return mapping.get(focus, focus if len(focus) > 10 else "общее развитие, осознанность, кармические практики")
+def _build_recommend_query(strategy: dict | None) -> str:
+    """Build Qdrant search query from active plan strategy or default"""
+    if strategy:
+        need = f"{strategy.get('problem_text', '')} {strategy.get('stop_action', '')} {strategy.get('start_action', '')} {strategy.get('grow_action', '')}".strip()
+        if need:
+            return need
+    return "общее развитие, осознанность, кармические практики"
 
 
 @router.get("/practices/recommend")
@@ -1257,13 +1221,8 @@ async def get_practice_recommendations(user: UserProfile = Depends(get_current_u
             
             # M6: Context from active project strategy or general development
             active_plan = await get_active_karma_plan(db, user_db.id)
-            if active_plan and active_plan.strategy_snapshot:
-                strategy = active_plan.strategy_snapshot
-                need = f"{strategy.get('problem_text', '')} {strategy.get('stop_action', '')} {strategy.get('start_action', '')} {strategy.get('grow_action', '')}".strip()
-                if not need:
-                    need = "общее развитие"
-            else:
-                need = _focus_to_query(user_db.current_focus)
+            strategy = active_plan.strategy_snapshot if active_plan else None
+            need = _build_recommend_query(strategy)
             
             settings = get_settings()
             qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
@@ -1335,8 +1294,6 @@ async def start_onboarding(user: UserProfile = Depends(get_current_user)):
                 current_step = OnboardingSteps.DURATION
             elif not user_db.current_habits or len(user_db.current_habits) == 0:
                 current_step = OnboardingSteps.HABITS
-            elif not user_db.current_focus:
-                current_step = OnboardingSteps.FOCUS
             else:
                 current_step = OnboardingSteps.PARTNERS
         

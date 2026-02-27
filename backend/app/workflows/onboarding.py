@@ -11,7 +11,7 @@ class OnboardingSteps:
     DURATION = "duration"
     HABITS = "habits"
     RESTRICTIONS = "restrictions"
-    FOCUS = "focus"
+    FOCUS = "focus"  # DEPRECATED: kept for backward compatibility
     PARTNERS = "partners"
     COMPLETE = "complete"
 
@@ -91,21 +91,6 @@ ONBOARDING_STEPS = {
         "input_type": "text_optional",
         "options": [
             {"id": "skip", "label": "➡️ Пропустить"},
-        ],
-        "next_step": OnboardingSteps.FOCUS,
-    },
-    OnboardingSteps.FOCUS: {
-        "number": 4,
-        "total": 5,
-        "message": "Что хочешь улучшить в первую очередь?",
-        "field": "current_focus",
-        "input_type": "single_choice",
-        "options": [
-            {"id": "finances", "label": "💰 Финансы"},
-            {"id": "relationships", "label": "💑 Отношения"},
-            {"id": "health", "label": "❤️ Здоровье"},
-            {"id": "focus", "label": "🎯 Концентрация"},
-            {"id": "other", "label": "🌟 Другое"},
         ],
         "next_step": OnboardingSteps.PARTNERS,
     },

@@ -42,7 +42,6 @@ class DailyManagerAgent:
         self,
         user_id: int,
         first_name: str,
-        focus: str | None,
         streak_days: int,
         total_seeds: int,
         regenerate: bool = False,
@@ -120,7 +119,6 @@ class DailyManagerAgent:
                         # Need to generate AI message once for this day to get tasks
                         ai_message = await generate_morning_message(
                             user_name=first_name,
-                            focus=focus,
                             streak_days=streak_days,
                             total_seeds=total_seeds,
                             plan_strategy=plan_strategy,
@@ -249,7 +247,6 @@ class DailyManagerAgent:
         self,
         user_id: int,
         first_name: str,
-        focus: str | None,
         streak_days: int,
         total_seeds: int,
         regenerate: bool = False,
@@ -337,7 +334,6 @@ class DailyManagerAgent:
 
                         ai_task = generate_morning_message(
                             user_name=first_name,
-                            focus=focus,
                             streak_days=streak_days,
                             total_seeds=total_seeds,
                             plan_strategy=plan_strategy,
@@ -345,13 +341,12 @@ class DailyManagerAgent:
                             isolation_settings=active_plan.isolation_settings if active_plan else None,
                             partner_contact_types=partner_contact_types_map,
                         )
-                        quote_task = self.qdrant.get_daily_quote(focus)
+                        quote_task = self.qdrant.get_daily_quote(None)
                         ai_message, quote = await asyncio.gather(ai_task, quote_task)
                     else:
                         # Need to generate AI message once for this day (и задачи, и текст) + quote в параллели
                         ai_task = generate_morning_message(
                             user_name=first_name,
-                            focus=focus,
                             streak_days=streak_days,
                             total_seeds=total_seeds,
                             plan_strategy=plan_strategy,
@@ -359,7 +354,7 @@ class DailyManagerAgent:
                             isolation_settings=active_plan.isolation_settings if active_plan else None,
                             partner_contact_types=partner_contact_types_map,
                         )
-                        quote_task = self.qdrant.get_daily_quote(focus)
+                        quote_task = self.qdrant.get_daily_quote(None)
                         ai_message, quote = await asyncio.gather(ai_task, quote_task)
 
                         # Use structured project_actions from AI if available; otherwise fallback to plain strings

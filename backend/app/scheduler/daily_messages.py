@@ -99,7 +99,6 @@ class MessageScheduler:
                             msg = await self.manager.morning_message(
                                 user_id=user.id,
                                 first_name=user.first_name,
-                                focus=user.current_focus,
                                 streak_days=user.streak_days,
                                 total_seeds=user.total_seeds,
                                 channel="telegram",

@@ -121,11 +121,6 @@ export const solveProblem = async (payload: SolveProblemPayload) => {
   return response.data
 }
 
-export const updateUserFocus = async (focus: string) => {
-  const response = await api.patch('/api/me/focus', { focus })
-  return response.data
-}
-
 export const getProblemsHistory = async () => {
   const response = await api.get('/api/problems/history')
   return response.data

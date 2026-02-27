@@ -274,18 +274,6 @@ async def increment_user_seeds_count(db: AsyncSession, user_id: int):
         await db.flush()
 
 
-async def update_user_focus(db: AsyncSession, user_id: int, focus: str) -> bool:
-    """Update user's current focus area"""
-    result = await db.execute(
-        select(UserDB).where(UserDB.id == user_id)
-    )
-    user = result.scalar_one_or_none()
-    if user:
-        user.current_focus = focus
-        user.updated_at = datetime.now(UTC)
-        await db.flush()
-        return True
-    return False
 
 
 async def save_problem_history(
@@ -548,9 +536,6 @@ async def reset_user_progress(db: AsyncSession, user_id: int):
         user.streak_days = 0
         user.total_seeds = 0
         user.completed_practices = 0
-        
-        # Settings
-        user.current_focus = None
         
         # Timestamps
         user.last_onboarding_update = None
