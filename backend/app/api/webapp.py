@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, status
 from typing import List, Optional
 from datetime import datetime, UTC
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.models.user import UserProfile
 from app.models.seed import Seed
 from uuid import uuid4
@@ -68,6 +68,19 @@ class SeedCreateRequest(BaseModel):
 class SeedCreateResponse(BaseModel):
     success: bool
     seed_id: str
+
+
+class CoffeeProgressRequest(BaseModel):
+    current_step: Optional[int] = None
+    notes_draft: Optional[str] = None
+    rejoiced_seed_ids: Optional[list[str]] = None
+
+
+class CoffeeCompleteRequest(BaseModel):
+    rejoiced_seed_ids: list[str] = Field(default_factory=list)
+    notes: Optional[str] = None
+    complete_project_day: bool = False
+    completed_task_ids: list[str] = Field(default_factory=list)
 
 
 class ProblemSolveRequest(BaseModel):
@@ -259,10 +272,50 @@ async def update_action_completion(
     """Toggle daily action completion for project tasks (DailyTaskDB only)."""
     from app.database import AsyncSessionLocal
     from app.crud import toggle_daily_task_completion
+    from app.crud_extended import get_active_karma_plan, get_daily_plan
+    from app.models.db_models import DailyTaskDB
+    from sqlalchemy import select
+    from datetime import datetime, UTC
 
     async with AsyncSessionLocal() as db:
         if not action_id.isdigit():
             raise HTTPException(status_code=400, detail="Invalid action id for project task")
+
+        active_plan = await get_active_karma_plan(db, user.id)
+        if not active_plan:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": "Сейчас у тебя нет активного проекта. Давай сначала мягко соберём его — и после этого можно будет отмечать шаги дня.",
+                    "cta_path": "/problem",
+                },
+            )
+
+        daily_plan = await get_daily_plan(db, active_plan.id, datetime.now(UTC))
+        if not daily_plan:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "message": "Я не вижу план на сегодня. Открой кофе‑медитацию — и я подхвачу всё аккуратно.",
+                    "cta_path": "/coffee",
+                },
+            )
+
+        task_id = int(action_id)
+        task_plan_res = await db.execute(
+            select(DailyTaskDB.daily_plan_id)
+            .where(DailyTaskDB.id == task_id)
+            .limit(1)
+        )
+        task_daily_plan_id = task_plan_res.scalar_one_or_none()
+        if not task_daily_plan_id or task_daily_plan_id != daily_plan.id:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "message": "Этот шаг не относится к сегодняшнему дню проекта. Давай отметим всё прямо в кофе‑медитации — там будет проще.",
+                    "cta_path": "/coffee",
+                },
+            )
 
         # Project mode: toggle completion on DailyTaskDB and manage SeedDB links
         await toggle_daily_task_completion(
@@ -350,12 +403,23 @@ async def create_seed_endpoint(
     """Create new seed"""
     from app.database import AsyncSessionLocal
     from app.crud import create_seed, get_user_by_telegram_id, increment_user_seeds_count
+    from app.crud_extended import get_active_karma_plan
     
     try:
         async with AsyncSessionLocal() as db:
             user_db = await get_user_by_telegram_id(db, user.telegram_id)
             if not user_db:
                 raise HTTPException(status_code=404, detail="User not found")
+
+            active_plan = await get_active_karma_plan(db, user_db.id)
+            if not active_plan:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "message": "Сейчас у тебя нет активного проекта. Давай сначала мягко соберём его в разделе «Проблема», и после этого семена будут работать стабильно.",
+                        "cta_path": "/problem",
+                    },
+                )
             
             seed = Seed(
                 user_id=user_db.id,
@@ -367,14 +431,289 @@ async def create_seed_endpoint(
                 understanding=payload.understanding,
                 estimated_maturation_days=payload.estimated_maturation_days,
                 strength_multiplier=payload.strength_multiplier,
+                karma_plan_id=active_plan.id,
             )
             seed_db = await create_seed(db, seed)
             await increment_user_seeds_count(db, user_db.id)
             await db.commit()
             return SeedCreateResponse(success=True, seed_id=seed_db.id).model_dump()
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error creating seed via API: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/coffee/today")
+async def get_coffee_today(user: UserProfile = Depends(get_current_user)):
+    from app.coffee_meditation import get_local_day_bounds, get_rejoiced_seed_ids, get_today_daily_plan, get_today_seeds, get_user_zoneinfo
+    from app.crud import get_user_by_telegram_id
+    from app.crud_extended import get_active_karma_plan
+    from app.database import AsyncSessionLocal
+    from app.models.db_models import CoffeeMeditationSessionDB
+    from sqlalchemy import select
+
+    async with AsyncSessionLocal() as db:
+        user_db = await get_user_by_telegram_id(db, user.telegram_id)
+        if not user_db:
+            return {"has_active_project": False, "message": "Давай начнём со /start, чтобы я тебя узнал."}
+
+        active_plan = await get_active_karma_plan(db, user_db.id)
+        if not active_plan:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": "Кофе‑медитация работает, когда есть активный проект. Давай сначала соберём его — это займёт несколько спокойных шагов.",
+                    "cta_path": "/problem",
+                },
+            )
+
+        user_tz = get_user_zoneinfo(user_db.timezone)
+        bounds = get_local_day_bounds(datetime.now(UTC), user_tz)
+
+        daily_plan = await get_today_daily_plan(
+            db,
+            karma_plan_id=active_plan.id,
+            utc_start=bounds.utc_start,
+            utc_end=bounds.utc_end,
+        )
+
+        session_result = await db.execute(
+            select(CoffeeMeditationSessionDB).where(
+                CoffeeMeditationSessionDB.user_id == user_db.id,
+                CoffeeMeditationSessionDB.local_date == bounds.local_date,
+            )
+        )
+        session = session_result.scalar_one_or_none()
+        rejoiced_seed_ids: list[str] = []
+        if session:
+            rejoiced_seed_ids = await get_rejoiced_seed_ids(db, session_id=session.id)
+
+        seeds_db = await get_today_seeds(
+            db,
+            user_id=user_db.id,
+            utc_start=bounds.utc_start,
+            utc_end=bounds.utc_end,
+        )
+
+        seeds = [
+            {
+                "id": seed.id,
+                "timestamp": seed.timestamp.isoformat(),
+                "action_type": seed.action_type,
+                "description": seed.description,
+                "partner_group": seed.partner_group,
+                "intention_score": seed.intention_score,
+                "emotion_level": seed.emotion_level,
+                "strength_multiplier": seed.strength_multiplier,
+                "estimated_maturation_days": seed.estimated_maturation_days,
+                "rejoice_count": seed.rejoice_count,
+                "last_rejoiced_at": seed.last_rejoiced_at.isoformat() if seed.last_rejoiced_at else None,
+            }
+            for seed in seeds_db
+        ]
+
+        daily_data = None
+        if daily_plan:
+            tasks_data = []
+            if daily_plan.tasks:
+                sorted_tasks = sorted(
+                    daily_plan.tasks,
+                    key=lambda t: t.order if t.order is not None else 0,
+                )
+                tasks_data = [
+                    {
+                        "id": str(t.id),
+                        "description": t.description,
+                        "why": t.why,
+                        "group": t.group,
+                        "completed": t.completed,
+                    }
+                    for t in sorted_tasks
+                ]
+
+            daily_data = {
+                "id": daily_plan.id,
+                "day_number": daily_plan.day_number,
+                "focus_quality": daily_plan.focus_quality,
+                "tasks": tasks_data,
+                "is_completed": daily_plan.is_completed,
+            }
+
+        session_data = None
+        if session:
+            session_data = {
+                "id": session.id,
+                "current_step": session.current_step,
+                "notes_draft": session.notes_draft,
+                "notes": session.notes,
+                "started_at": session.started_at.isoformat() if session.started_at else None,
+                "completed_at": session.completed_at.isoformat() if session.completed_at else None,
+                "rejoiced_seed_ids": rejoiced_seed_ids,
+            }
+
+        return {
+            "has_active_project": True,
+            "local_date": bounds.local_date.isoformat(),
+            "utc_start": bounds.utc_start.isoformat(),
+            "utc_end": bounds.utc_end.isoformat(),
+            "session": session_data,
+            "seeds": seeds,
+            "daily_plan": daily_data,
+        }
+
+
+@router.post("/coffee/progress")
+async def save_coffee_progress(
+    payload: CoffeeProgressRequest,
+    user: UserProfile = Depends(get_current_user),
+):
+    from app.coffee_meditation import get_local_day_bounds, get_rejoiced_seed_ids, get_today_daily_plan, get_user_zoneinfo, get_or_create_session, save_progress
+    from app.crud import get_user_by_telegram_id
+    from app.crud_extended import get_active_karma_plan
+    from app.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        user_db = await get_user_by_telegram_id(db, user.telegram_id)
+        if not user_db:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        active_plan = await get_active_karma_plan(db, user_db.id)
+        if not active_plan:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": "Сейчас у тебя нет активного проекта. Давай сначала спокойно соберём его — и кофемедитация сразу оживёт.",
+                    "cta_path": "/problem",
+                },
+            )
+
+        user_tz = get_user_zoneinfo(user_db.timezone)
+        bounds = get_local_day_bounds(datetime.now(UTC), user_tz)
+
+        daily_plan = await get_today_daily_plan(
+            db,
+            karma_plan_id=active_plan.id,
+            utc_start=bounds.utc_start,
+            utc_end=bounds.utc_end,
+        )
+
+        session = await get_or_create_session(
+            db,
+            user_id=user_db.id,
+            local_date=bounds.local_date,
+            karma_plan_id=active_plan.id,
+            daily_plan_id=daily_plan.id if daily_plan else None,
+        )
+
+        await save_progress(
+            db,
+            session=session,
+            user_id=user_db.id,
+            current_step=payload.current_step,
+            notes_draft=payload.notes_draft,
+            rejoiced_seed_ids=payload.rejoiced_seed_ids,
+        )
+
+        await db.commit()
+
+        rejoiced_seed_ids = await get_rejoiced_seed_ids(db, session_id=session.id)
+        return {
+            "success": True,
+            "session": {
+                "id": session.id,
+                "current_step": session.current_step,
+                "notes_draft": session.notes_draft,
+                "completed_at": session.completed_at.isoformat() if session.completed_at else None,
+                "rejoiced_seed_ids": rejoiced_seed_ids,
+            },
+        }
+
+
+@router.post("/coffee/complete")
+async def complete_coffee(
+    payload: CoffeeCompleteRequest,
+    user: UserProfile = Depends(get_current_user),
+):
+    from app.coffee_meditation import complete_session, get_local_day_bounds, get_today_daily_plan, get_user_zoneinfo, get_or_create_session
+    from app.crud import get_user_by_telegram_id, toggle_daily_task_completion
+    from app.crud_extended import get_active_karma_plan
+    from app.database import AsyncSessionLocal
+    from app.models.db_models import DailyPlanDB
+    from sqlalchemy import update
+
+    async with AsyncSessionLocal() as db:
+        user_db = await get_user_by_telegram_id(db, user.telegram_id)
+        if not user_db:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        active_plan = await get_active_karma_plan(db, user_db.id)
+        if not active_plan:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": "Кофе‑медитация работает, когда есть активный проект. Давай сначала соберём его в разделе «Проблема».",
+                    "cta_path": "/problem",
+                },
+            )
+
+        user_tz = get_user_zoneinfo(user_db.timezone)
+        bounds = get_local_day_bounds(datetime.now(UTC), user_tz)
+
+        daily_plan = await get_today_daily_plan(
+            db,
+            karma_plan_id=active_plan.id,
+            utc_start=bounds.utc_start,
+            utc_end=bounds.utc_end,
+        )
+
+        session = await get_or_create_session(
+            db,
+            user_id=user_db.id,
+            local_date=bounds.local_date,
+            karma_plan_id=active_plan.id,
+            daily_plan_id=daily_plan.id if daily_plan else None,
+        )
+
+        result = await complete_session(
+            db,
+            session_id=session.id,
+            user_id=user_db.id,
+            notes=payload.notes,
+            rejoice_seed_ids=payload.rejoiced_seed_ids,
+        )
+
+        if payload.complete_project_day and daily_plan:
+            await db.execute(
+                update(DailyPlanDB)
+                .where(DailyPlanDB.id == daily_plan.id)
+                .values(
+                    is_completed=True,
+                    completion_notes=payload.notes,
+                    updated_at=datetime.now(UTC),
+                )
+            )
+
+            allowed_task_ids = {
+                int(t.id) for t in (daily_plan.tasks or []) if getattr(t, "id", None) is not None
+            }
+
+            for task_id_str in payload.completed_task_ids:
+                if not task_id_str.isdigit():
+                    continue
+                task_id = int(task_id_str)
+                if task_id not in allowed_task_ids:
+                    continue
+
+                await toggle_daily_task_completion(
+                    db,
+                    user_id=user_db.id,
+                    task_id=task_id,
+                    completed=True,
+                )
+
+        await db.commit()
+        return {"success": True, "result": result}
 
 
 @router.get("/problems/history")
@@ -415,50 +754,34 @@ class AddToCalendarRequest(BaseModel):
 
 @router.post("/problem/add-to-calendar")
 async def add_problem_to_calendar(
-    payload: AddToCalendarRequest,
+    _payload: AddToCalendarRequest,
     user: UserProfile = Depends(get_current_user)
 ):
     """Add 30-day plan steps to calendar"""
     from app.database import AsyncSessionLocal
     from app.crud import get_user_by_telegram_id
-    from app.models.db_models import PartnerActionDB
-    from datetime import timedelta
-    from zoneinfo import ZoneInfo
-    import uuid
+    from app.crud_extended import get_active_karma_plan
     
     async with AsyncSessionLocal() as db:
         user_db = await get_user_by_telegram_id(db, user.telegram_id)
         if not user_db:
             raise HTTPException(status_code=404, detail="User not found")
 
-        # Normalize start date to UTC-aware datetime
-        if payload.start_date is not None:
-            start = payload.start_date
-            user_tz = ZoneInfo(user.timezone or "UTC")
-            if start.tzinfo is None:
-                start = start.replace(tzinfo=user_tz)
-            start = start.astimezone(UTC)
-        else:
-            start = datetime.now(UTC)
-        
-        actions = []
-        for i in range(30):
-            step_idx = i % len(payload.steps)
-            step_text = payload.steps[step_idx]
-            
-            action = PartnerActionDB(
-                id=str(uuid.uuid4()),
-                user_id=user_db.id,
-                timestamp=start + timedelta(days=i),
-                action=step_text,
-                completed=False
+        active_plan = await get_active_karma_plan(db, user_db.id)
+        if not active_plan:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": "Чтобы сохранить план на 30 дней, нужен активный проект. Давай запустим его — и план станет твоими задачами дня.",
+                    "cta_path": "/problem",
+                },
             )
-            actions.append(action)
-            
-        db.add_all(actions)
-        await db.commit()
-        
-        return {"success": True, "count": len(actions)}
+
+        return {
+            "success": True,
+            "count": 0,
+            "message": "У тебя уже есть активный проект — план на 30 дней уже хранится там. Открой проект, и он будет вести тебя шаг за шагом.",
+        }
 
 @router.post("/problem/solve", response_model=ProblemSolveResponse)
 async def solve_problem_endpoint(
@@ -1017,6 +1340,7 @@ async def complete_practice(
     """Отметить выполнение практики"""
     from app.database import AsyncSessionLocal
     from app.crud import complete_practice_and_create_seed
+    from app.crud_extended import get_active_karma_plan
     
     if request is None:
         request = PracticeCompleteRequest()
@@ -1025,10 +1349,16 @@ async def complete_practice(
         async with AsyncSessionLocal() as db:
             user_db = await get_user_by_telegram_id(db, user.telegram_id)
             if not user_db:
-                return {"error": "User not found"}
+                raise HTTPException(status_code=404, detail="User not found")
+
+            active_plan = await get_active_karma_plan(db, user_db.id)
             
             result = await complete_practice_and_create_seed(
-                db, user_db.id, practice_id, request.emotion_score
+                db,
+                user_id=user_db.id,
+                practice_id=practice_id,
+                karma_plan_id=(active_plan.id if active_plan else None),
+                emotion_score=request.emotion_score,
             )
             await db.commit()
             

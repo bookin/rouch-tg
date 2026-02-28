@@ -5,12 +5,14 @@ from sqlalchemy import (
     String,
     Boolean,
     Float,
+    Date,
     DateTime,
     Text,
     JSON,
     ForeignKey,
     LargeBinary,
     PrimaryKeyConstraint,
+    UniqueConstraint,
     func,
     BigInteger,
     Sequence,
@@ -83,6 +85,9 @@ class SeedDB(Base):
     
     estimated_maturation_days = Column(Integer, default=21)
     strength_multiplier = Column(Float, default=1.0)
+
+    rejoice_count = Column(Integer, default=0)
+    last_rejoiced_at = Column(DateTime(timezone=True), nullable=True)
     
     # Context links (Requested by user)
     karma_plan_id = Column(String, ForeignKey("karma_plans.id", ondelete="SET NULL"), nullable=True)
@@ -93,6 +98,56 @@ class SeedDB(Base):
     # Relationships
     user = relationship("UserDB", back_populates="seeds")
     daily_task = relationship("DailyTaskDB", back_populates="seeds")
+
+
+class CoffeeMeditationSessionDB(Base):
+    __tablename__ = "coffee_meditation_sessions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "local_date", name="uq_coffee_session_user_local_date"),
+    )
+
+    id = Column(String, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    local_date = Column(Date, nullable=False, index=True)
+
+    karma_plan_id = Column(String, ForeignKey("karma_plans.id", ondelete="SET NULL"), nullable=True, index=True)
+    daily_plan_id = Column(String, ForeignKey("daily_plans.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    started_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    notes = Column(Text, nullable=True)
+    notes_draft = Column(Text, nullable=True)
+    current_step = Column(Integer, default=0)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user = relationship("UserDB", lazy="selectin")
+    rejoiced_seeds = relationship(
+        "CoffeeMeditationRejoicedSeedDB",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+
+class CoffeeMeditationRejoicedSeedDB(Base):
+    __tablename__ = "coffee_meditation_rejoiced_seeds"
+
+    session_id = Column(
+        String,
+        ForeignKey("coffee_meditation_sessions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    seed_id = Column(
+        String,
+        ForeignKey("seeds.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    session = relationship("CoffeeMeditationSessionDB", back_populates="rejoiced_seeds")
 
 
 class PartnerGroupDB(Base):

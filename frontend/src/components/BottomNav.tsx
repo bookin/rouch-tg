@@ -1,9 +1,25 @@
+import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Home, Calendar as CalendarIcon, Users, Sprout, Brain, Puzzle } from 'lucide-react'
+import { Coffee, Home, Users, Sprout, Brain, Puzzle } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getActiveProject } from '@/api/client'
 
 export function BottomNav() {
   const location = useLocation()
+  const [hasActiveProject, setHasActiveProject] = useState(false)
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const data = await getActiveProject()
+        setHasActiveProject(Boolean(data?.has_active_project))
+      } catch {
+        setHasActiveProject(false)
+      }
+    }
+
+    load()
+  }, [])
 
   const navItems = [
     { path: '/', icon: Home, label: 'Главная' },
@@ -14,10 +30,18 @@ export function BottomNav() {
     { path: '/problem', icon: Puzzle, label: 'Проблема' },
   ]
 
+  const items = hasActiveProject
+    ? [
+        navItems[0],
+        { path: '/coffee', icon: Coffee, label: 'Кофе' },
+        ...navItems.slice(1),
+      ]
+    : navItems
+
   return (
     <nav className="z-50 fixed bottom-0 left-0 right-0 z-50 bg-white/10 backdrop-blur-xl border-t border-white/20 pb-[env(safe-area-inset-bottom)] md:hidden shadow-[0_-5px_20px_-5px_rgba(0,0,0,0.05)]">
       <div className="flex justify-around items-center h-16 px-2">
-        {navItems.map((item) => {
+        {items.map((item) => {
           const isActive = location.pathname === item.path
           const Icon = item.icon
           return (

@@ -4,7 +4,6 @@ import {
   solveProblem,
   getProblemsHistory,
   getPartners,
-  addProblemToCalendar,
   getActiveProject,
   ProjectStatusResponse
 } from '../api/client'
@@ -225,19 +224,6 @@ export default function Problem() {
     const desc = encodeURIComponent(`STOP: ${result.stop_action}\nSTART: ${result.start_action}`);
     const parts = selectedPartners.length > 0 ? `&partner_ids=${selectedPartners.join(',')}` : '';
     navigate(`/journal?description=${desc}${parts}`);
-  };
-
-  const handleAddToCalendar = async () => {
-    if (!result?.practice_steps) return;
-    try {
-      setLoading(true);
-      await addProblemToCalendar(result.practice_steps);
-      setSuccess('План на 30 дней успешно добавлен в твой календарь! 📅');
-    } catch (err) {
-      setError('Не удалось добавить план в календарь');
-    } finally {
-      setLoading(false);
-    }
   };
 
   const renderContent = (text: string) => {
@@ -561,11 +547,11 @@ export default function Problem() {
 								variant="ghost"
 								size="sm"
 								className="h-8"
-								onClick={handleAddToCalendar}
+								onClick={handleStartProject}
 								disabled={loading}
 							>
 								<Calendar className="mr-2 h-4 w-4"/>
-								В календарь
+								Сделать проектом
 							</Button>
 						</CardHeader>
 						<CardContent className="grid gap-4 pt-2">

@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react'
-import {getDailyQuote, getDailyActions, toggleDailyAction, getPracticesProgress, completePractice, getPracticeRecommendations, startPracticeTracking, PracticeProgress} from '../api/client'
+import {getDailyQuote, getDailyActions, toggleDailyAction, getPracticesProgress, completePractice, getPracticeRecommendations, startPracticeTracking, PracticeProgress, getActiveProject} from '../api/client'
 import {useTelegram} from '../hooks/useTelegram'
 import {Link} from 'react-router-dom'
 import {Quote, Coffee, Check, Target, Sparkles, Loader2, Flame, TrendingUp, Play, Plus, ArrowRight} from 'lucide-react'
@@ -30,6 +30,7 @@ export default function Dashboard() {
 	const [loading, setLoading] = useState(false)
 	const [practiceLoading, setPracticeLoading] = useState<string | null>(null)
 	const [initialLoading, setInitialLoading] = useState(true)
+	const [hasActiveProject, setHasActiveProject] = useState(false)
 
 	// Filter: only visible active/habit practices
 	const visiblePractices = practices.filter(p => !p.is_hidden && (p.is_active || p.is_habit))
@@ -65,15 +66,17 @@ export default function Dashboard() {
 
 	const fetchData = async () => {
 		try {
-			const [quoteData, actionsData, practicesData] = await Promise.all([
+			const [quoteData, actionsData, practicesData, projectData] = await Promise.all([
 				getDailyQuote(),
 				getDailyActions(),
-				getPracticesProgress()
+				getPracticesProgress(),
+				getActiveProject()
 			])
 			setQuote(quoteData)
 			setActions(actionsData.actions)
 			const progressList = practicesData.progress || []
 			setPractices(progressList)
+			setHasActiveProject(Boolean(projectData?.has_active_project))
 
 			// If no visible practices — fetch recommendations
 			const visible = progressList.filter((p: PracticeProgress) => !p.is_hidden && (p.is_active || p.is_habit))
@@ -156,27 +159,51 @@ export default function Dashboard() {
 
 				{/* Quick Actions / Stats Placeholder or Coffee Meditation CTA */}
 				<div className="flex flex-col justify-center gap-4">
-					<Card
-						className="bg-gradient-to-br from-orange-100/80 to-rose-100/80 border-white/40 shadow-sm h-full backdrop-blur-md">
-						<CardContent className="p-6 flex flex-col items-center justify-center text-center h-full gap-4">
-							<div className="p-3 bg-white/70 rounded-full shadow-sm">
-								<Coffee className="h-8 w-8 text-orange-500"/>
-							</div>
-							<div>
-								<h3 className="font-semibold text-primary">Кофе-медитация</h3>
-								<p className="text-xs mt-1 text-primary/80">Заряди свои семена силой радости</p>
-							</div>
-							<Button
-								variant="default"
-								className="w-full rounded-full bg-gradient-to-r from-orange-400 to-rose-500 hover:from-orange-500 hover:to-rose-600 border-0 text-white"
-								asChild
-							>
-								<Link to="/meditation">
-									Начать
-								</Link>
-							</Button>
-						</CardContent>
-					</Card>
+					{hasActiveProject ? (
+						<Card
+							className="bg-gradient-to-br from-orange-100/80 to-rose-100/80 border-white/40 shadow-sm h-full backdrop-blur-md">
+							<CardContent className="p-6 flex flex-col items-center justify-center text-center h-full gap-4">
+								<div className="p-3 bg-white/70 rounded-full shadow-sm">
+									<Coffee className="h-8 w-8 text-orange-500"/>
+								</div>
+								<div>
+									<h3 className="font-semibold text-primary">Кофе-медитация</h3>
+									<p className="text-xs mt-1 text-primary/80">Усиль семена через радость и посвяти результат</p>
+								</div>
+								<Button
+									variant="default"
+									className="w-full rounded-full bg-gradient-to-r from-orange-400 to-rose-500 hover:from-orange-500 hover:to-rose-600 border-0 text-white"
+									asChild
+								>
+									<Link to="/coffee">
+										Начать
+									</Link>
+								</Button>
+							</CardContent>
+						</Card>
+					) : (
+						<Card
+							className="bg-gradient-to-br from-white/20 to-white/10 border-white/20 shadow-sm h-full backdrop-blur-md">
+							<CardContent className="p-6 flex flex-col items-center justify-center text-center h-full gap-4">
+								<div className="p-3 bg-white/10 rounded-full shadow-sm border border-white/20">
+									<Coffee className="h-8 w-8 text-white"/>
+								</div>
+								<div>
+									<h3 className="font-semibold text-white">Твой проект — это опора</h3>
+									<p className="text-xs mt-1 text-white/80">Соберём его спокойно — и день станет понятнее</p>
+								</div>
+								<Button
+									variant="outline"
+									className="w-full rounded-full"
+									asChild
+								>
+									<Link to="/problem">
+										Собрать проект
+									</Link>
+								</Button>
+							</CardContent>
+						</Card>
+					)}
 				</div>
 			</div>
 

@@ -66,13 +66,16 @@ export default function Calendar() {
 					</CardContent>
 				</Card>
 
-				<Card>
-					<CardContent className="p-4 flex flex-col items-center justify-center text-center">
-						<Users className="h-6 w-6 text-amber-600 mb-2"/>
-						<div className="text-2xl font-bold ">{stats.partnerActionsCount}</div>
-						<div className="text-xs  uppercase tracking-wider font-semibold">Действий</div>
-					</CardContent>
-				</Card>
+
+				{stats.partnerActionsCount > 0 && (
+					<Card>
+						<CardContent className="p-4 flex flex-col items-center justify-center text-center">
+							<Users className="h-6 w-6 text-amber-600 mb-2"/>
+							<div className="text-2xl font-bold ">{stats.partnerActionsCount}</div>
+							<div className="text-xs  uppercase tracking-wider font-semibold">Действий</div>
+						</CardContent>
+					</Card>
+				)}
 
 				<Card>
 					<CardContent className="p-4 flex flex-col items-center justify-center text-center">
@@ -113,10 +116,12 @@ export default function Calendar() {
 					<div className="w-3 h-3 bg-blue-500 rounded-full shadow-sm"></div>
 					<span className="text-xs font-medium text-foreground/80">Практики</span>
 				</div>
-				<div className="flex items-center gap-2">
-					<div className="w-3 h-3 bg-amber-500 rounded-full shadow-sm"></div>
-					<span className="text-xs font-medium text-foreground/80">Действия</span>
-				</div>
+				{stats.partnerActionsCount > 0 && (
+					<div className="flex items-center gap-2">
+						<div className="w-3 h-3 bg-amber-500 rounded-full shadow-sm"></div>
+						<span className="text-xs font-medium text-foreground/80">Действия</span>
+					</div>
+				)}
 			</div>
 		</div>
 	)

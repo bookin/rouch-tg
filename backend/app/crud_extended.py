@@ -75,7 +75,7 @@ async def get_daily_plan(db: AsyncSession, karma_plan_id: str, date: datetime) -
     
     # Compare by date only (ignoring time)
     day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
-    day_end = date.replace(hour=23, minute=59, second=59, microsecond=999)
+    day_end = date.replace(hour=23, minute=59, second=59, microsecond=999999)
     
     result = await db.execute(
         select(DailyPlanDB)

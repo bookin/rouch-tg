@@ -111,7 +111,7 @@ async def cmd_start(message: Message, state: FSMContext):
     logger.info(f"User {user.id} ({user.first_name}) started bot")
     
     await state.clear()
-    
+
     try:
         # Get or create user in database
         async with AsyncSessionLocal() as db:
@@ -119,20 +119,20 @@ async def cmd_start(message: Message, state: FSMContext):
                 db,
                 telegram_id=user.id,
                 first_name=user.first_name,
-                username=user.username
+                username=user.username,
             )
             await db.commit()
-            
+
             # Check if onboarding is needed
             needs_onboarding = not user_db.last_onboarding_update
-            
+
             if needs_onboarding:
                 keyboard = ReplyKeyboardMarkup(
                     keyboard=[[KeyboardButton(text="🚀 Начать знакомство")]],
                     resize_keyboard=True,
-                    one_time_keyboard=True
+                    one_time_keyboard=True,
                 )
-                
+
                 welcome_text = (
                     f"Привет, {user.first_name}! 👋\n\n"
                     "Я твой кармический менеджер. Чтобы составить персональный план, "
@@ -144,9 +144,49 @@ async def cmd_start(message: Message, state: FSMContext):
 
     except Exception as e:
         logger.error(f"Error creating user: {e}", exc_info=True)
-    
+
     # Standard welcome for existing users
     await show_main_menu(message)
+
+
+@router.message(Command("coffee"))
+async def cmd_coffee(message: Message):
+    from app.database import AsyncSessionLocal
+    from app.crud import get_user_by_telegram_id
+    from app.crud_extended import get_active_karma_plan
+
+    try:
+        settings = get_settings()
+
+        async with AsyncSessionLocal() as db:
+            user_db = await get_user_by_telegram_id(db, message.from_user.id)
+            if not user_db:
+                await message.answer("Сначала начни с команды /start")
+                return
+
+            plan = await get_active_karma_plan(db, user_db.id)
+            if not plan:
+                await _send_need_project(message)
+                return
+
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="☕️ Открыть кофе‑медитацию",
+                        web_app=WebAppInfo(url=f"{settings.WEBAPP_URL}/coffee"),
+                    )
+                ]
+            ]
+        )
+
+        await message.answer(
+            "Готов(а)? Давай сделаем кофе‑медитацию. Я буду бережно сохранять прогресс по мере шагов.",
+            reply_markup=kb,
+        )
+    except Exception as e:
+        logger.error(f"Error in cmd_coffee: {e}", exc_info=True)
+        await message.answer("Не получилось открыть кофе‑медитацию. Попробуй чуть позже.")
 
 
 async def show_main_menu(message: Message):
@@ -167,6 +207,25 @@ async def show_main_menu(message: Message):
     )
     
     await message.answer(text, reply_markup=keyboard)
+
+
+async def _send_need_project(message: Message):
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🗣 Разобрать задачу здесь", callback_data="start_problem_flow")],
+            [
+                InlineKeyboardButton(
+                    text="📱 Открыть «Проблема»",
+                    web_app=WebAppInfo(url=f"{settings.WEBAPP_URL}/problem"),
+                )
+            ],
+        ]
+    )
+
+    await message.answer(
+        "Сейчас у тебя нет активного проекта. Давай сначала спокойно соберём его — и дальше всё будет работать стабильно.",
+        reply_markup=kb,
+    )
 
 
 # =============================================================================
@@ -1167,12 +1226,25 @@ async def cmd_today(message: Message):
 @router.message(Command("done"))
 async def cmd_done(message: Message, state: FSMContext):
     """Quick mark action as done"""
-    
+
     try:
+        from app.crud_extended import get_active_karma_plan
+        from app.crud import get_user_by_telegram_id
+        from app.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as db:
+            user_db = await get_user_by_telegram_id(db, message.from_user.id)
+            if not user_db:
+                await message.answer("Сначала начни с команды /start")
+                return
+
+            plan = await get_active_karma_plan(db, user_db.id)
+            if not plan:
+                await _send_need_project(message)
+                return
+
         await state.set_state(ActionState.waiting_for_action_id)
-        await message.answer(
-            "Что сделал? Отправь номер действия (1-4) или описание:"
-        )
+        await message.answer("Что сделал(а)? Отправь номер действия (1-4).")
         logger.info(f"User {message.from_user.id} started marking action as done")
     except Exception as e:
         logger.error(f"Error in cmd_done: {e}", exc_info=True)
@@ -1182,17 +1254,12 @@ async def process_action_done(message: Message, state: FSMContext):
     """Process completed action"""
     from app.database import AsyncSessionLocal
     from app.crud import (
-		get_user_by_telegram_id, 
-		increment_user_seeds_count,
+		get_user_by_telegram_id,
 		toggle_daily_task_completion,
-		create_seed
 	)
-    from app.models.db_models import PartnerActionDB
-    from app.models.seed import Seed
     from app.agents.daily_manager import DailyManagerAgent
     from app.knowledge.qdrant import QdrantKnowledgeBase
-    from datetime import datetime, UTC
-    import uuid
+    from app.crud_extended import get_active_karma_plan
     
     text = message.text.strip()
     
@@ -1204,6 +1271,11 @@ async def process_action_done(message: Message, state: FSMContext):
             
             if not user_db:
                 await message.answer("Ошибка: пользователь не найден. Нажми /start")
+                return
+
+            plan = await get_active_karma_plan(db, user_db.id)
+            if not plan:
+                await _send_need_project(message)
                 return
 
             # Check if user sent a number corresponding to a daily task
@@ -1248,51 +1320,33 @@ async def process_action_done(message: Message, state: FSMContext):
                     await state.clear()
                     return
 
-            # Fallback: Custom text or number out of range (treat as custom text)
-            partner_name = None
-            action_text = text
+                await message.answer(
+                    "Похоже, сегодня нет списка действий, который можно отметить здесь. Открой приложение — там всё будет аккуратно и наглядно.",
+                    reply_markup=InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [
+                                InlineKeyboardButton(
+                                    text="📱 Открыть приложение",
+                                    web_app=WebAppInfo(url=settings.WEBAPP_URL),
+                                )
+                            ]
+                        ]
+                    ),
+                )
+                return
 
-            # Save partner action to database
-            action = PartnerActionDB(
-                id=str(uuid.uuid4()),
-                user_id=user_db.id,
-                partner_id=None,
-                partner_name=partner_name,
-                action=action_text,
-                timestamp=datetime.now(UTC),
-                completed=True,
-            )
-            db.add(action)
-            
-            # Create a Seed for this custom action too? 
-            # The prompt implies "marking in UI... create seed". 
-            # If user manually types "Done X", it's good to treat as seed too.
-            seed = Seed(
-                id=str(uuid.uuid4()),
-                user_id=user_db.id,
-                timestamp=datetime.now(UTC),
-                action_type="custom_action",
-                description=action_text,
-                partner_group="world",
-                intention_score=5,
-                emotion_level=5,
-                understanding=True,
-                estimated_maturation_days=21,
-                strength_multiplier=1.0
-            )
-            await create_seed(db, seed)
-            
-            # Increment seeds count
-            await increment_user_seeds_count(db, user_db.id)
-            
-            await db.commit()
-            
-            logger.info(f"User {message.from_user.id} completed action: {action_text}")
-            
             await message.answer(
-                f"✅ Отлично! Записал: {action_text}\n\n"
-                f"Всего семян посеяно: {user_db.total_seeds + 1} 🌱\n"
-                "Продолжай в том же духе!"
+                "Чтобы отметить действие, пришли номер 1-4. А если хочешь просто записать доброе дело — используй команду /seed.",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="📱 Открыть приложение",
+                                web_app=WebAppInfo(url=settings.WEBAPP_URL),
+                            )
+                        ]
+                    ]
+                ),
             )
                 
     except Exception as e:
@@ -1310,6 +1364,21 @@ async def cmd_seed(message: Message, state: FSMContext):
     """Quick seed logging"""
     
     try:
+        from app.crud_extended import get_active_karma_plan
+        from app.crud import get_user_by_telegram_id
+        from app.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as db:
+            user_db = await get_user_by_telegram_id(db, message.from_user.id)
+            if not user_db:
+                await message.answer("Сначала начни с команды /start")
+                return
+
+            plan = await get_active_karma_plan(db, user_db.id)
+            if not plan:
+                await _send_need_project(message)
+                return
+
         await state.set_state(SeedState.waiting_for_description)
         await message.answer(
             "Опиши что посеял (одна строка):\n\n"
@@ -1326,6 +1395,7 @@ async def process_seed(message: Message, state: FSMContext):
     """Process seed description"""
     from app.database import AsyncSessionLocal
     from app.crud import get_user_by_telegram_id, create_seed, increment_user_seeds_count
+    from app.crud_extended import get_active_karma_plan
     from app.models.seed import Seed
     from datetime import datetime, UTC, timedelta
     from zoneinfo import ZoneInfo
@@ -1338,6 +1408,11 @@ async def process_seed(message: Message, state: FSMContext):
             user_db = await get_user_by_telegram_id(db, message.from_user.id)
             
             if user_db:
+                plan = await get_active_karma_plan(db, user_db.id)
+                if not plan:
+                    await _send_need_project(message)
+                    return
+
                 # Create seed
                 now_utc = datetime.now(UTC)
                 seed = Seed(
@@ -1351,7 +1426,8 @@ async def process_seed(message: Message, state: FSMContext):
                     emotion_level=7,
                     understanding=True,
                     estimated_maturation_days=21,
-                    strength_multiplier=1.5
+                    strength_multiplier=1.5,
+                    karma_plan_id=plan.id,
                 )
                 
                 await create_seed(db, seed)
@@ -1562,6 +1638,7 @@ async def cb_practice_complete(callback: CallbackQuery):
     """Complete a practice from bot"""
     from app.database import AsyncSessionLocal
     from app.crud import get_user_by_telegram_id, complete_practice_and_create_seed
+    from app.crud_extended import get_active_karma_plan
     
     practice_id = callback.data.split(":", 1)[1]
     
@@ -1571,20 +1648,34 @@ async def cb_practice_complete(callback: CallbackQuery):
             if not user:
                 await callback.answer("Сначала /start", show_alert=True)
                 return
+
+            plan = await get_active_karma_plan(db, user.id)
+            karma_plan_id = plan.id if plan else None
             
-            result = await complete_practice_and_create_seed(db, user.id, practice_id)
+            result = await complete_practice_and_create_seed(
+                db,
+                user_id=user.id,
+                practice_id=practice_id,
+                karma_plan_id=karma_plan_id,
+            )
             await db.commit()
-            
-            if result and result.get("seed_created"):
-                await callback.answer("🌱 Выполнено! Семя посажено!")
-            elif result:
-                await callback.answer("✅ Уже выполнено сегодня")
-            else:
+
+            if not result:
                 await callback.answer("Практика не найдена", show_alert=True)
                 return
+
+            if result.get("actually_updated"):
+                if result.get("seed") is not None:
+                    await callback.answer("🌱 Готово! Семя посажено!")
+                else:
+                    await callback.answer("✅ Готово!")
+            else:
+                await callback.answer("✅ Уже отмечено сегодня")
         
         # Refresh the message
-        await cmd_practice(callback.message)
+        fake_message = callback.message
+        fake_message.from_user = callback.from_user
+        await cmd_practice(fake_message)
         
     except Exception as e:
         logger.error(f"Error in cb_practice_complete: {e}", exc_info=True)
@@ -1830,6 +1921,7 @@ async def start_bot():
                     BotCommand(command="app", description="📱 Открыть приложение"),
                     BotCommand(command="solver", description="💭 Решить проблему"),
                     BotCommand(command="today", description="📋 Действия на сегодня"),
+                    BotCommand(command="coffee", description="☕️ Кофе-медитация"),
                     BotCommand(command="seed", description="🌱 Записать семя"),
                     BotCommand(command="done", description="✅ Отметить выполнение"),
                     BotCommand(command="reset", description="🔄 Сброс прогресса"),

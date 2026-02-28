@@ -509,35 +509,135 @@ class DailyManagerAgent:
                     return payload
 
                 # --- NO ACTIVE PROJECT (classic mode отключён) ---
-                # Простой месседж без задач, мягко направляющий пользователя к разбору проблемы в приложении
-                message = (
-                    f"☀️ Доброе утро, {first_name}!\n\n"
-                    "Сейчас у тебя нет активного Кармического Проекта.\n"
-                    "Открой приложение, зайди в раздел «Проблема» и спокойно разберись с главной задачей — "
-                    "после этого я смогу готовить для тебя конкретный план на день.\n\n"
-                    "Пока просто будь внимателен к людям вокруг и посей сегодня несколько добрых семян."
+                from app.config import get_settings
+                from app.models.db_models import MessageLogDB, UserDB
+                from sqlalchemy import func, select
+                from zoneinfo import ZoneInfo
+                import random
+
+                settings = get_settings()
+
+                user_result = await db.execute(select(UserDB).where(UserDB.id == user_id).limit(1))
+                user_db = user_result.scalar_one_or_none()
+                tz_name = (user_db.timezone if user_db and user_db.timezone else "UTC")
+                try:
+                    user_tz = ZoneInfo(tz_name)
+                except Exception:
+                    user_tz = ZoneInfo("UTC")
+
+                today_local = now.astimezone(user_tz).date()
+
+                base_filter = (
+                    (MessageLogDB.user_id == user_id)
+                    & (MessageLogDB.message_type == "no_plan_nudge")
+                    & (MessageLogDB.channel == channel)
                 )
 
-                payload = {
+                last_result = await db.execute(
+                    select(MessageLogDB).where(base_filter).order_by(MessageLogDB.sent_at.desc()).limit(1)
+                )
+                last_log = last_result.scalar_one_or_none()
+
+                count_result = await db.execute(
+                    select(func.count()).select_from(MessageLogDB).where(base_filter)
+                )
+                nudge_count = int(count_result.scalar() or 0)
+
+                if nudge_count <= 0:
+                    cooldown_days = 0
+                elif nudge_count == 1:
+                    cooldown_days = 1
+                elif nudge_count == 2:
+                    cooldown_days = 3
+                else:
+                    cooldown_days = 7
+
+                if last_log and cooldown_days > 0:
+                    last_sent_at = last_log.sent_at
+                    if last_sent_at.tzinfo is None:
+                        last_sent_at = last_sent_at.replace(tzinfo=UTC)
+                    last_local = last_sent_at.astimezone(user_tz).date()
+                    if (today_local - last_local).days < cooldown_days:
+                        return {"skip": True}
+
+                templates = [
+                    {
+                        "key": "soft_path",
+                        "text": "Я рядом. Если хочешь, давай выберем одну главную задачу и аккуратно соберём проект — тогда каждый день станет понятнее.",
+                    },
+                    {
+                        "key": "gentle_start",
+                        "text": "Хочешь, я помогу тебе начать с малого? Один проект — и ты увидишь, как семена начинают работать ровно и спокойно.",
+                    },
+                    {
+                        "key": "clarity",
+                        "text": "Проект — это как мягкая дорожка: без лишних усилий, просто шаг за шагом. Давай соберём его в «Проблеме».",
+                    },
+                    {
+                        "key": "support",
+                        "text": "Сегодня можно ничего не доказывать. Просто давай выберем направление — и я помогу держаться курса.",
+                    },
+                    {
+                        "key": "warm_invite",
+                        "text": "Если чувствуешь, что день расплывается — это нормально. Проект помогает собрать внимание в одну тёплую точку.",
+                    },
+                ]
+
+                last_key = None
+                if last_log and isinstance(last_log.payload, dict):
+                    last_key = last_log.payload.get("template_key")
+
+                candidates = [t for t in templates if t["key"] != last_key] or templates
+                chosen = random.choice(candidates)
+
+                message = (
+                    f"☀️ Доброе утро, {first_name}!\n\n"
+                    f"{chosen['text']}\n\n"
+                    "Открой «Проблема» — и я помогу собрать твой проект."
+                )
+
+                payload_to_store = {
                     "message": message,
                     "quote": None,
                     "actions": [],
                     "time": "morning",
+                    "template_key": chosen["key"],
                 }
 
                 await create_message_log(
                     db,
                     user_id=user_id,
-                    message_type="morning",
+                    message_type="no_plan_nudge",
                     channel=channel,
-                    payload=payload,
+                    payload=payload_to_store,
                     karma_plan_id=None,
                     daily_plan_id=None,
                     sent_at=now,
                 )
                 await db.commit()
 
-                return payload
+                try:
+                    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+
+                    reply_markup = InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [
+                                InlineKeyboardButton(
+                                    text="🧠 Разобрать задачу здесь",
+                                    callback_data="start_problem_flow",
+                                )
+                            ],
+                            [
+                                InlineKeyboardButton(
+                                    text="📱 Открыть «Проблема»",
+                                    web_app=WebAppInfo(url=f"{settings.WEBAPP_URL}/problem"),
+                                )
+                            ],
+                        ]
+                    )
+                    return {**payload_to_store, "reply_markup": reply_markup}
+                except Exception:
+                    return payload_to_store
             
         except Exception as e:
             logger.error(f"Error generating morning message for user {user_id}: {e}", exc_info=True)
@@ -565,12 +665,16 @@ class DailyManagerAgent:
         
         from app.database import AsyncSessionLocal
         from app.crud import get_latest_message_log, create_message_log
+        from app.crud_extended import get_active_karma_plan
 
         try:
             now = datetime.now(UTC)
 
-            # Try cache first
             async with AsyncSessionLocal() as db:
+                active_plan = await get_active_karma_plan(db, user.id)
+                if not active_plan:
+                    return {"skip": True}
+
                 if not regenerate:
                     cached = await get_latest_message_log(
                         db,
@@ -578,7 +682,7 @@ class DailyManagerAgent:
                         message_type="evening",
                         channel=channel,
                         date=now,
-                        karma_plan_id=None,
+                        karma_plan_id=active_plan.id,
                     )
                     if cached and cached.payload:
                         return cached.payload
@@ -614,13 +718,16 @@ class DailyManagerAgent:
 
             # Log message for caching/analytics
             async with AsyncSessionLocal() as db:
+                active_plan = await get_active_karma_plan(db, user.id)
+                if not active_plan:
+                    return {"skip": True}
                 await create_message_log(
                     db,
                     user_id=user.id,
                     message_type="evening",
                     channel=channel,
                     payload=payload,
-                    karma_plan_id=None,
+                    karma_plan_id=active_plan.id,
                     daily_plan_id=None,
                     sent_at=now,
                 )

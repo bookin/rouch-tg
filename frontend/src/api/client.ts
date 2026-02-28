@@ -86,6 +86,84 @@ export const createSeed = async (payload: SeedCreatePayload) => {
   return response.data
 }
 
+export interface CoffeeTodaySeed {
+  id: string
+  timestamp: string
+  action_type: string
+  description: string
+  partner_group: string
+  intention_score: number
+  emotion_level: number
+  strength_multiplier: number
+  estimated_maturation_days: number
+  rejoice_count?: number
+  last_rejoiced_at?: string | null
+}
+
+export interface CoffeeTodayTask {
+  id: string
+  description: string
+  why?: string | null
+  group?: string | null
+  completed: boolean
+}
+
+export interface CoffeeTodayDailyPlan {
+  id: string
+  day_number: number
+  focus_quality?: string | null
+  tasks: CoffeeTodayTask[]
+  is_completed: boolean
+}
+
+export interface CoffeeTodaySession {
+  id: string
+  current_step: number
+  notes_draft?: string | null
+  notes?: string | null
+  started_at?: string | null
+  completed_at?: string | null
+  rejoiced_seed_ids: string[]
+}
+
+export interface CoffeeTodayResponse {
+  has_active_project: boolean
+  local_date: string
+  utc_start: string
+  utc_end: string
+  session: CoffeeTodaySession | null
+  seeds: CoffeeTodaySeed[]
+  daily_plan: CoffeeTodayDailyPlan | null
+}
+
+export const getCoffeeToday = async () => {
+  const response = await api.get<CoffeeTodayResponse>('/api/coffee/today')
+  return response.data
+}
+
+export interface CoffeeProgressPayload {
+  current_step?: number
+  notes_draft?: string
+  rejoiced_seed_ids?: string[]
+}
+
+export const saveCoffeeProgress = async (payload: CoffeeProgressPayload) => {
+  const response = await api.post('/api/coffee/progress', payload)
+  return response.data
+}
+
+export interface CoffeeCompletePayload {
+  rejoiced_seed_ids: string[]
+  notes?: string
+  complete_project_day?: boolean
+  completed_task_ids?: string[]
+}
+
+export const completeCoffee = async (payload: CoffeeCompletePayload) => {
+  const response = await api.post('/api/coffee/complete', payload)
+  return response.data
+}
+
 export const getPartners = async () => {
   const response = await api.get('/api/partners')
   return response.data

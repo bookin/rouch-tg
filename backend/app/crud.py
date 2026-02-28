@@ -1,6 +1,6 @@
 """CRUD operations for database"""
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 from typing import Optional, List
 from datetime import datetime, UTC
 from uuid import uuid4
@@ -345,7 +345,7 @@ async def get_latest_message_log(
 ) -> MessageLogDB | None:
     """Get latest message log for user/type/channel/day (optionally for specific karma plan)."""
     day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
-    day_end = date.replace(hour=23, minute=59, second=59, microsecond=999)
+    day_end = date.replace(hour=23, minute=59, second=59, microsecond=999999)
 
     query = (
         select(MessageLogDB)
@@ -427,12 +427,24 @@ async def toggle_daily_task_completion(db: AsyncSession, user_id: int, task_id: 
     if not karma_plan or karma_plan.user_id != user_id:
         return False
 
-    # 2. Update Task
-    if task.completed == completed:
-        return True # No change needed
+    now_utc = datetime.now(UTC)
 
-    task.completed = completed
-    task.completed_at = datetime.now(UTC) if completed else None
+    task_update = await db.execute(
+        update(DailyTaskDB)
+        .where(
+            DailyTaskDB.id == task.id,
+            DailyTaskDB.completed.is_(not completed),
+        )
+        .values(
+            completed=completed,
+            completed_at=now_utc if completed else None,
+        )
+    )
+
+    # Идемпотентность: если состояние уже такое, как нужно — выходим
+    # (это также защищает от параллельных запросов, которые иначе могли бы создать дубли семян)
+    if int(task_update.rowcount or 0) == 0:
+        return True
     
     # 3. Handle Seed
     if completed:
@@ -451,44 +463,63 @@ async def toggle_daily_task_completion(db: AsyncSession, user_id: int, task_id: 
 
         partner_group = task.group or "project"
 
-        # Create Seed
-        seed = SeedDB(
-            id=str(uuid4()),
-            user_id=user_id,
-            timestamp=datetime.now(UTC),
-            action_type=seed_action_type,
-            description=task.description,
-            partner_id=getattr(task, "partner_id", None),
-            partner_group=partner_group,
-            intention_score=5,
-            emotion_level=5,
-            understanding=True,
-            # Context links
-            karma_plan_id=karma_plan.id,
-            daily_plan_id=plan.id,
-            daily_task_id=task.id,
-            estimated_maturation_days=21,
-            strength_multiplier=1.0,
+        existing_seed_res = await db.execute(
+            select(SeedDB.id)
+            .where(
+                SeedDB.user_id == user_id,
+                SeedDB.daily_task_id == task.id,
+            )
+            .limit(1)
         )
-        db.add(seed)
-        
-        # Increment user seeds
-        await increment_user_seeds_count(db, user_id)
+        existing_seed_id = existing_seed_res.scalar_one_or_none()
+
+        if not existing_seed_id:
+            seed = SeedDB(
+                id=str(uuid4()),
+                user_id=user_id,
+                timestamp=now_utc,
+                action_type=seed_action_type,
+                description=task.description,
+                partner_id=getattr(task, "partner_id", None),
+                partner_group=partner_group,
+                intention_score=5,
+                emotion_level=5,
+                understanding=True,
+                # Context links
+                karma_plan_id=karma_plan.id,
+                daily_plan_id=plan.id,
+                daily_task_id=task.id,
+                estimated_maturation_days=21,
+                strength_multiplier=1.0,
+            )
+            db.add(seed)
+
+            await increment_user_seeds_count(db, user_id)
         
     else:
         # Delete associated Seed
         # Find seed by daily_task_id
-        await db.execute(
-            delete(SeedDB).where(SeedDB.daily_task_id == task.id)
+        seeds_to_delete_res = await db.execute(
+            select(SeedDB.id).where(
+                SeedDB.user_id == user_id,
+                SeedDB.daily_task_id == task.id,
+            )
         )
-        
-        # Decrement user seeds
-        # We need to decrement carefully
-        user_result = await db.execute(select(UserDB).where(UserDB.id == user_id))
-        user = user_result.scalar_one_or_none()
-        if user and user.total_seeds > 0:
-            user.total_seeds -= 1
-            user.updated_at = datetime.now(UTC)
+        seeds_to_delete = list(seeds_to_delete_res.scalars().all())
+
+        if seeds_to_delete:
+            await db.execute(
+                delete(SeedDB).where(
+                    SeedDB.user_id == user_id,
+                    SeedDB.daily_task_id == task.id,
+                )
+            )
+
+            user_result = await db.execute(select(UserDB).where(UserDB.id == user_id))
+            user = user_result.scalar_one_or_none()
+            if user:
+                user.total_seeds = max(0, int(user.total_seeds or 0) - len(seeds_to_delete))
+                user.updated_at = now_utc
 
     await db.flush()
     return True
@@ -680,6 +711,7 @@ async def complete_practice_and_create_seed(
     db: AsyncSession, 
     user_id: int, 
     practice_id: str,
+    karma_plan_id: str | None = None,
     emotion_score: int = 5
 ) -> dict:
     """Complete practice and create linked seed.
@@ -689,7 +721,7 @@ async def complete_practice_and_create_seed(
     progress, actually_updated = await update_practice_progress(db, user_id, practice_id)
     
     seed_db = None
-    if actually_updated:
+    if actually_updated and karma_plan_id:
         # Create seed linked to practice (M7: practice_id on seed)
         seed = Seed(
             description=f"Практика: {progress.practice.name if progress.practice else 'Unknown'}",
@@ -703,6 +735,7 @@ async def complete_practice_and_create_seed(
             understanding=False,
             estimated_maturation_days=21,
             strength_multiplier=1.0,
+            karma_plan_id=karma_plan_id,
         )
         
         seed_db = await create_seed(db, seed, practice_id=practice_id)

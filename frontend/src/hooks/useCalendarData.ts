@@ -39,10 +39,14 @@ export const useCalendarData = (startDate?: Date, endDate?: Date) => {
           getCalendarData(start, end),
           getCalendarStats(start, end)
         ])
+
+        const seeds = Array.isArray(data?.seeds) ? data.seeds : []
+        const practices = Array.isArray(data?.practices) ? data.practices : []
+        const partnerActions = Array.isArray(data?.partnerActions) ? data.partnerActions : []
         
         // Transform data to calendar events
         const calendarEvents: CalendarEvent[] = [
-          ...data.seeds.map((s: any) => ({
+          ...seeds.map((s: any) => ({
             id: s.id,
             title: `${s.action_type ? s.action_type + ': ': ''}${s.description}`,
             start: new Date(s.timestamp),
@@ -50,7 +54,7 @@ export const useCalendarData = (startDate?: Date, endDate?: Date) => {
             type: 'seed' as const,
             data: s
           })),
-          ...data.practices.map((p: any) => ({
+          ...practices.map((p: any) => ({
             id: p.id,
             title: `${p.name}`,
             start: new Date(p.timestamp),
@@ -58,7 +62,7 @@ export const useCalendarData = (startDate?: Date, endDate?: Date) => {
             type: 'practice' as const,
             data: p
           })),
-          ...data.partnerActions.map((a: any) => ({
+          ...partnerActions.map((a: any) => ({
             id: a.id,
             title: `${a.partner_name ?a.partner_name + ': ' : '' }${a.action}`,
             start: new Date(a.timestamp),

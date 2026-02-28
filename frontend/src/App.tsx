@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { getUser } from './api/client'
 import { useTelegram } from './hooks/useTelegram'
@@ -8,7 +8,7 @@ import Partners from './pages/Partners'
 import SeedJournal from './pages/SeedJournal'
 import Practices from './pages/Practices'
 import Problem from './pages/Problem'
-import Meditation from './pages/Meditation'
+import CoffeePage from './pages/Coffee'
 import Onboarding from './pages/Onboarding'
 import Layout from './components/Layout'
 import Lotus from "@/components/Lotus.tsx";
@@ -60,7 +60,9 @@ function AppContent() {
         <Route path="/journal" element={<SeedJournal />} />
         <Route path="/practices" element={<Practices />} />
         <Route path="/problem" element={<Problem />} />
-        <Route path="/meditation" element={<Meditation />} />
+        <Route path="/cofee" element={<Navigate to="/coffee" replace />} />
+        <Route path="/coffee" element={<CoffeePage />} />
+        <Route path="/meditation" element={<Navigate to="/coffee" replace />} />
         <Route path="/onboarding" element={<Onboarding />} />
       </Routes>
     </Layout>

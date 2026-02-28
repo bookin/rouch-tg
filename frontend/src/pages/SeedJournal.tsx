@@ -1,6 +1,6 @@
 import {FormEvent, useEffect, useState} from 'react'
-import {useSearchParams} from 'react-router-dom'
-import {createSeed, getSeeds, getPartners, SeedCreatePayload} from '../api/client'
+import {Link, useSearchParams} from 'react-router-dom'
+import {createSeed, getActiveProject, getSeeds, getPartners, SeedCreatePayload} from '../api/client'
 import {Sprout, Heart, Users, Brain, History, Loader2, Sparkles, Leaf, HelpCircle} from 'lucide-react'
 import {cn} from '@/lib/utils'
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card'
@@ -50,6 +50,8 @@ export default function SeedJournal() {
 	const [loading, setLoading] = useState(true)
 	const [seeds, setSeeds] = useState<SeedItem[]>([])
 	const [error, setError] = useState<string | null>(null)
+	const [ctaPath, setCtaPath] = useState<string | null>(null)
+	const [hasActiveProject, setHasActiveProject] = useState<boolean>(false)
 
 	const [description, setDescription] = useState(searchParams.get('description') || '')
 	const [actionType, setActionType] = useState('kindness')
@@ -62,9 +64,14 @@ export default function SeedJournal() {
 	const load = async () => {
 		try {
 			setError(null)
+			setCtaPath(null)
 			setLoading(true)
-			const data = await getSeeds(200)
-			setSeeds(data.seeds || [])
+			const [seedsData, projectData] = await Promise.all([
+				getSeeds(200),
+				getActiveProject(),
+			])
+			setSeeds(seedsData.seeds || [])
+			setHasActiveProject(Boolean(projectData?.has_active_project))
 
 			// Handle partner_ids if present to pre-select group
 			const pids = searchParams.get('partner_ids')
@@ -80,7 +87,7 @@ export default function SeedJournal() {
 				}
 			}
 		} catch (e: any) {
-			setError(e?.message || 'Failed to load seeds')
+			setError(e?.message || 'Не получилось открыть журнал. Давай попробуем ещё раз.')
 		} finally {
 			setLoading(false)
 		}
@@ -108,6 +115,7 @@ export default function SeedJournal() {
 		try {
 			setSubmitting(true)
 			setError(null)
+			setCtaPath(null)
 			await createSeed(payload)
 			setDescription('')
 			setIntentionScore([7])
@@ -115,7 +123,13 @@ export default function SeedJournal() {
 			setUnderstanding(true)
 			await load()
 		} catch (err: any) {
-			setError(err?.message || 'Failed to create seed')
+			const detail = err?.response?.data?.detail
+			if (detail && typeof detail === 'object') {
+				setError(String(detail.message || 'Не получилось посадить семя. Давай попробуем ещё раз.'))
+				setCtaPath(detail.cta_path ? String(detail.cta_path) : null)
+			} else {
+				setError(err?.message || 'Не получилось посадить семя. Давай попробуем ещё раз.')
+			}
 		} finally {
 			setSubmitting(false)
 		}
@@ -143,177 +157,203 @@ export default function SeedJournal() {
 				<div
 					className="p-3 rounded-lg bg-destructive/10 text-destructive text-sm font-medium border border-destructive/20">
 					{error}
+					{ctaPath && (
+						<div className="mt-3">
+							<Button asChild variant="outline" className="rounded-full">
+								<Link to={ctaPath}>Перейти</Link>
+							</Button>
+						</div>
+					)}
 				</div>
 			)}
 
 			<div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
 				{/* Create Seed Form - Left Column */}
 				<div className="lg:col-span-5 xl:col-span-4">
-					<Card className="border-primary/20 shadow-md sticky top-6">
-						<CardHeader className="pb-3 pt-3 bg-secondary/30">
-							<CardTitle className="flex items-center gap-2 text-lg text-white">
-								<Leaf className="h-5 w-5"/>
-								Посадить семя
-							</CardTitle>
-						</CardHeader>
-						<CardContent className="pt-5 space-y-5">
-							<form onSubmit={onCreate} className="space-y-5">
-								<div className="space-y-2">
-									<Label>Что ты сделал(а)?</Label>
-									<Textarea
-										value={description}
-										onChange={(e) => setDescription(e.target.value)}
-										placeholder="Я помог коллеге разобраться с..."
-										className="min-h-[100px] "
-									/>
-								</div>
-
-								<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-1">
+					{hasActiveProject ? (
+						<Card className="border-primary/20 shadow-md sticky top-6">
+							<CardHeader className="pb-3 pt-3 bg-secondary/30">
+								<CardTitle className="flex items-center gap-2 text-lg text-white">
+									<Leaf className="h-5 w-5"/>
+									Посадить семя
+								</CardTitle>
+							</CardHeader>
+							<CardContent className="pt-5 space-y-5">
+								<form onSubmit={onCreate} className="space-y-5">
 									<div className="space-y-2">
-										<Label>Тип действия</Label>
-										<Select  value={actionType} onValueChange={setActionType}>
-											<SelectTrigger className="">
-												<SelectValue/>
-											</SelectTrigger>
-											<SelectContent className="bg-white backdrop-blur-md text-primary">
-												{ACTION_TYPES.map(t => (
-													<SelectItem
-														key={t.value}
-														value={t.value}
-														description={<div className="text-[0.6rem]">{t.description}</div>}
-													>
-														{t.label}
-													</SelectItem>
-												))}
-											</SelectContent>
-										</Select>
-									</div>
-
-									<div className="space-y-2">
-										<Label>Кому?</Label>
-										<Select value={partnerGroup} onValueChange={setPartnerGroup}>
-											<SelectTrigger className="">
-												<SelectValue/>
-											</SelectTrigger>
-											<SelectContent className="bg-white backdrop-blur-md">
-												{PARTNER_GROUPS.map(g => (
-													<SelectItem
-														key={g.value}
-														value={g.value}
-														description={<div className="text-[0.6rem]">{g.description}</div>}
-													>
-														{g.label}
-													</SelectItem>
-												))}
-											</SelectContent>
-										</Select>
-									</div>
-								</div>
-
-								<div className="space-y-6 pt-2">
-									<div className="space-y-3">
-										<div className="flex justify-between">
-											<Label>Сила намерения</Label>
-											<span className="text-xs font-medium ">{intentionScore[0]}/10</span>
-										</div>
-										<Slider
-											value={intentionScore}
-											onValueChange={setIntentionScore}
-											min={1}
-											max={10}
-											step={1}
-											rangeClassName="bg-blue-500"
+										<Label>Что ты сделал(а)?</Label>
+										<Textarea
+											value={description}
+											onChange={(e) => setDescription(e.target.value)}
+											placeholder="Я помог коллеге разобраться с..."
+											className="min-h-[100px] "
 										/>
-										<p className="text-xs text-muted-foreground">
-											Насколько искренне ты хочешь помочь? 1-3 = просто так, 7-8 = реально хочу,
-											9-10 = всем сердцем
-										</p>
 									</div>
 
-									<div className="space-y-3">
-										<div className="flex justify-between">
-											<Label>Сила эмоции</Label>
-											<span className="text-xs font-medium ">{emotionLevel[0]}/10</span>
+									<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-1">
+										<div className="space-y-2">
+											<Label>Тип действия</Label>
+											<Select  value={actionType} onValueChange={setActionType}>
+												<SelectTrigger className="">
+													<SelectValue/>
+												</SelectTrigger>
+												<SelectContent className="bg-white backdrop-blur-md text-primary">
+													{ACTION_TYPES.map(t => (
+														<SelectItem
+															key={t.value}
+															value={t.value}
+															description={<div className="text-[0.6rem]">{t.description}</div>}
+														>
+															{t.label}
+														</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
 										</div>
-										<Slider
-											value={emotionLevel}
-											onValueChange={setEmotionLevel}
-											min={1}
-											max={10}
-											step={1}
-											rangeClassName="bg-rose-500"
+
+										<div className="space-y-2">
+											<Label>Кому?</Label>
+											<Select value={partnerGroup} onValueChange={setPartnerGroup}>
+												<SelectTrigger className="">
+													<SelectValue/>
+												</SelectTrigger>
+												<SelectContent className="bg-white backdrop-blur-md">
+													{PARTNER_GROUPS.map(g => (
+														<SelectItem
+															key={g.value}
+															value={g.value}
+															description={<div className="text-[0.6rem]">{g.description}</div>}
+														>
+															{g.label}
+														</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
+										</div>
+									</div>
+
+									<div className="space-y-6 pt-2">
+										<div className="space-y-3">
+											<div className="flex justify-between">
+												<Label>Сила намерения</Label>
+												<span className="text-xs font-medium ">{intentionScore[0]}/10</span>
+											</div>
+											<Slider
+												value={intentionScore}
+												onValueChange={setIntentionScore}
+												min={1}
+												max={10}
+												step={1}
+												rangeClassName="bg-blue-500"
+											/>
+											<p className="text-xs text-muted-foreground">
+												Насколько искренне ты хочешь помочь? 1-3 = просто так, 7-8 = реально хочу,
+												9-10 = всем сердцем
+											</p>
+										</div>
+
+										<div className="space-y-3">
+											<div className="flex justify-between">
+												<Label>Сила эмоции</Label>
+												<span className="text-xs font-medium ">{emotionLevel[0]}/10</span>
+											</div>
+											<Slider
+												value={emotionLevel}
+												onValueChange={setEmotionLevel}
+												min={1}
+												max={10}
+												step={1}
+												rangeClassName="bg-rose-500"
+											/>
+											<p className="text-xs text-muted-foreground">
+												Насколько сильно ты почувствовал момент? 1-3 = спокойно, 7-8 = тронут, 9-10
+												= до слёз
+											</p>
+										</div>
+									</div>
+
+									<div className="flex items-center space-x-2 pt-2">
+										<Checkbox
+											id="understanding"
+											checked={understanding}
+											onCheckedChange={(c) => setUnderstanding(c as boolean)}
+											className="h-5 w-5"
 										/>
-										<p className="text-xs text-muted-foreground">
-											Насколько сильно ты почувствовал момент? 1-3 = спокойно, 7-8 = тронут, 9-10
-											= до слёз
-										</p>
+										<div className="flex items-center gap-1">
+											<Label
+												htmlFor="understanding"
+												className="text-sm font-normal cursor-pointer"
+											>
+												Я понимаю, как это работает
+											</Label>
+											<Popover>
+												<PopoverTrigger asChild>
+													<HelpCircle
+														className="h-4 w-4 text-muted-foreground cursor-help hover:text-foreground transition-colors"/>
+												</PopoverTrigger>
+												<PopoverPortal>
+													<PopoverContent className="w-80" align="center">
+														<Card className="backdrop-blur-sm">
+															<CardContent className="p-3">
+																<div className="space-y-2 text-xs">
+																	<p>
+																		Это когда ты действуешь осознанно, понимая суть
+																		процесса.
+																		Такое отношение усиливает результат в несколько раз,
+																		превращая действие в посадку семени.
+																	</p>
+																	<p className="mt-2">
+																		Без понимания - просто поступок.
+																		С понимание - сеешь будущее, которое обязательно
+																		прорастёт.
+																	</p>
+																</div>
+															</CardContent>
+														</Card>
+													</PopoverContent>
+												</PopoverPortal>
+											</Popover>
+										</div>
 									</div>
-								</div>
 
-								<div className="flex items-center space-x-2 pt-2">
-									<Checkbox
-										id="understanding"
-										checked={understanding}
-										onCheckedChange={(c) => setUnderstanding(c as boolean)}
-										className="h-5 w-5"
-									/>
-									<div className="flex items-center gap-1">
-										<Label
-											htmlFor="understanding"
-											className="text-sm font-normal cursor-pointer"
-										>
-											Я понимаю, как это работает
-										</Label>
-										<Popover>
-											<PopoverTrigger asChild>
-												<HelpCircle
-													className="h-4 w-4 text-muted-foreground cursor-help hover:text-foreground transition-colors"/>
-											</PopoverTrigger>
-											<PopoverPortal>
-												<PopoverContent className="w-80" align="center">
-													<Card className="backdrop-blur-sm">
-														<CardContent className="p-3">
-															<div className="space-y-2 text-xs">
-																<p>
-																	Это когда ты действуешь осознанно, понимая суть
-																	процесса.
-																	Такое отношение усиливает результат в несколько раз,
-																	превращая действие в посадку семени.
-																</p>
-																<p className="mt-2">
-																	Без понимания - просто поступок.
-																	С понимание - сеешь будущее, которое обязательно
-																	прорастёт.
-																</p>
-															</div>
-														</CardContent>
-													</Card>
-												</PopoverContent>
-											</PopoverPortal>
-										</Popover>
-									</div>
+									<Button
+										type="submit"
+										className="w-full bg-primary hover:bg-primary/90"
+										disabled={!description.trim() || submitting}
+									>
+										{submitting ? (
+											<>
+												<Loader2 className="mr-2 h-4 w-4 animate-spin"/>
+												Сажаем...
+											</>
+										) : (
+											<>
+												Посадить семя
+												<Sparkles className="ml-2 h-4 w-4"/>
+											</>
+										)}
+									</Button>
+								</form>
+							</CardContent>
+						</Card>
+					) : (
+						<Card className="border-white/20 shadow-md sticky top-6 bg-white/10 backdrop-blur-md">
+							<CardContent className="p-6 text-center space-y-4">
+								<div className="p-3 bg-white/10 rounded-full shadow-sm border border-white/20 inline-flex">
+									<Leaf className="h-6 w-6 text-white"/>
 								</div>
-
-								<Button
-									type="submit"
-									className="w-full bg-primary hover:bg-primary/90"
-									disabled={!description.trim() || submitting}
-								>
-									{submitting ? (
-										<>
-											<Loader2 className="mr-2 h-4 w-4 animate-spin"/>
-											Сажаем...
-										</>
-									) : (
-										<>
-											Посадить семя
-											<Sparkles className="ml-2 h-4 w-4"/>
-										</>
-									)}
+								<div>
+									<h3 className="font-semibold text-white">Семена живут внутри проекта</h3>
+									<p className="text-xs mt-1 text-white/80">
+										Давай сначала мягко соберём проект — и после этого посев будет работать стабильно.
+									</p>
+								</div>
+								<Button asChild variant="outline" className="w-full rounded-full">
+									<Link to="/problem">Собрать проект</Link>
 								</Button>
-							</form>
-						</CardContent>
-					</Card>
+							</CardContent>
+						</Card>
+					)}
 				</div>
 
 				{/* History - Right Column */}
@@ -327,7 +367,9 @@ export default function SeedJournal() {
 						{seeds.length === 0 && (
 							<div
 								className="text-center py-10  bg-secondary/20 rounded-xl border border-dashed col-span-full">
-								Пока нет записей. Посади свое первое семя!
+								{hasActiveProject
+									? 'Пока нет записей. Посади своё первое семя!'
+									: 'Пока тут тихо. Когда соберём проект, семена начнут появляться здесь автоматически.'}
 							</div>
 						)}
 

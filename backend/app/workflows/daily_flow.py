@@ -14,36 +14,6 @@ class DailyFlowWorkflow:
     
     def __init__(self, qdrant: QdrantKnowledgeBase):
         self.qdrant = qdrant
-
-    @staticmethod
-    def _default_action_templates() -> list[dict[str, str]]:
-        """Default 4 groups used across the app."""
-        return [
-            {
-                "id": "source",
-                "group": "source",
-                "partner_name": "Источник",
-                "why": "Сеешь благодарность → получишь ресурсы",
-            },
-            {
-                "id": "ally",
-                "group": "ally",
-                "partner_name": "Соратник",
-                "why": "Сеешь поддержку → получишь помощь",
-            },
-            {
-                "id": "protege",
-                "group": "protege",
-                "partner_name": "Подопечный",
-                "why": "Сеешь заботу → получишь рост",
-            },
-            {
-                "id": "world",
-                "group": "world",
-                "partner_name": "Внешний мир",
-                "why": "Сеешь сострадание → получишь гармонию",
-            },
-        ]
     
     async def morning_workflow(self, user: UserProfile) -> Dict[str, Any]:
         """Morning workflow: motivation + daily actions"""
@@ -96,39 +66,7 @@ class DailyFlowWorkflow:
     
     async def _generate_daily_actions(self, user: UserProfile) -> List[Dict[str, str]]:
         """Generate 4 daily actions for partner groups"""
-        
-        try:
-            # Try to use AI first
-            ai_message = await generate_morning_message(
-                user_name=user.first_name,
-                streak_days=user.streak_days,
-                total_seeds=user.total_seeds
-            )
-            
-            templates = self._default_action_templates()
-            actions: list[dict[str, str]] = []
-            for template, action_text in zip(templates, ai_message.actions[:4]):
-                actions.append(
-                    {
-                        **template,
-                        "description": action_text,
-                        "completed": False,
-                    }
-                )
-            return actions
-        except Exception:
-            # Fallback to static list if AI fails
-            templates = self._default_action_templates()
-            descriptions = [
-                "Позвони родителям и узнай как дела",
-                "Предложи помощь коллеге",
-                "Научи кого-то чему-то новому",
-                "Пожертвуй 100₽ в благотворительность",
-            ]
-            return [
-                {**template, "description": desc, "completed": False}
-                for template, desc in zip(templates, descriptions)
-            ]
+        return []
     
     async def _analyze_day(self, user: UserProfile) -> Dict[str, Any]:
         """Analyze the day from DB"""

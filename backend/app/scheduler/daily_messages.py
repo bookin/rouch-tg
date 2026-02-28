@@ -103,10 +103,17 @@ class MessageScheduler:
                                 total_seeds=user.total_seeds,
                                 channel="telegram",
                             )
+                            if msg.get("skip"):
+                                continue
+
+                            send_kwargs = {}
+                            if msg.get("reply_markup") is not None:
+                                send_kwargs["reply_markup"] = msg["reply_markup"]
                             success = await safe_send_message(
                                 self.bot,
                                 user.telegram_id,
-                                msg["message"]
+                                msg["message"],
+                                **send_kwargs,
                             )
                             if success:
                                 # Update last sent time (store in UTC)
@@ -146,10 +153,17 @@ class MessageScheduler:
                                 user,
                                 channel="telegram",
                             )
+                            if msg.get("skip"):
+                                continue
+
+                            send_kwargs = {}
+                            if msg.get("reply_markup") is not None:
+                                send_kwargs["reply_markup"] = msg["reply_markup"]
                             success = await safe_send_message(
                                 self.bot,
                                 user.telegram_id,
-                                msg["message"]
+                                msg["message"],
+                                **send_kwargs,
                             )
                             if success:
                                 # Update last sent time (store in UTC)

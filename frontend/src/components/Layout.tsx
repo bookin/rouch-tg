@@ -9,15 +9,18 @@ interface LayoutProps {
 
 export default function Layout({children}: LayoutProps) {
 	const location = useLocation()
-	const isPlainPage = location.pathname === '/onboarding' || location.pathname === '/meditation'
+	const isPlainPage =
+		location.pathname === '/onboarding' ||
+		location.pathname === '/meditation' ||
+		location.pathname === '/coffee'
 
 
 	if (isPlainPage) {
-		return <main className="min-h-screen">{children}</main>
+		return <main className="min-h-screen relative z-10">{children}</main>
 	}
 
 	return (
-		<div className="relative min-h-screen text-foreground font-sans antialiased">
+		<div className="relative z-10 min-h-screen text-foreground font-sans antialiased">
 			{/* Desktop Sidebar */}
 			<Sidebar/>
 
