@@ -1,15 +1,15 @@
 """FastAPI endpoints for Mini App"""
-from fastapi import APIRouter, Depends, HTTPException, Header, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from typing import List, Optional
 from datetime import datetime, UTC
 from pydantic import BaseModel, Field
 from app.models.user import UserProfile
 from app.models.seed import Seed
+from app.models.db_models import UserDB, ProblemHistoryDB
+from app.auth import current_active_user
 from uuid import uuid4
 import logging
 from app.crud_extended import create_karma_plan, get_active_karma_plan, get_daily_plan, create_daily_plan
-from app.crud import get_user_by_telegram_id
-from app.models.db_models import ProblemHistoryDB
 from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
@@ -121,111 +121,45 @@ class ProblemSolveResponse(BaseModel):
 
 
 
-async def get_current_user(
-    authorization: Optional[str] = Header(None)
-) -> UserProfile:
-    """
-    Get current user from Telegram WebApp initData
-    
-    Validates Telegram WebApp initData and returns user profile.
-    For development without frontend, returns mock user.
-    
-    Args:
-        authorization: Telegram initData from Authorization header
-        
-    Returns:
-        UserProfile object
-        
-    Raises:
-        HTTPException: If authentication fails
-    """
-    from app.telegram_auth import validate_telegram_webapp_data, extract_user_from_init_data
-    from app.config import get_settings
-    from app.database import AsyncSessionLocal
-    from app.crud import get_or_create_user, ensure_default_partner_groups
-
-    settings = get_settings()
-
-    # Development mode: allow working without Telegram WebApp
-    if not authorization:
-        if settings.ENVIRONMENT == "production":
-            raise HTTPException(status_code=401, detail="Authentication required")
-
-        async with AsyncSessionLocal() as session:
-            user_db = await get_or_create_user(
-                session,
-                telegram_id=123456789,
-                first_name="Dev User",
-                username="dev",
-            )
-            await ensure_default_partner_groups(session, user_db.id)
-            await session.commit()
-
-        return UserProfile(
-            id=user_db.id,
-            telegram_id=user_db.telegram_id,
-            first_name=user_db.first_name,
-            username=user_db.username,
-            occupation=user_db.occupation or "employee",
-            available_times=user_db.available_times or [],
-            daily_minutes=user_db.daily_minutes or 30,
-            current_habits=user_db.current_habits or [],
-            physical_restrictions=user_db.physical_restrictions,
-            streak_days=user_db.streak_days,
-            total_seeds=user_db.total_seeds,
-            completed_practices=user_db.completed_practices,
-            timezone=user_db.timezone or "UTC",
-            morning_enabled=bool(user_db.morning_enabled),
-            evening_enabled=bool(user_db.evening_enabled),
-            created_at=user_db.created_at,
-            updated_at=user_db.updated_at,
-            last_onboarding_update=user_db.last_onboarding_update,
-        )
-
-    parsed_data = validate_telegram_webapp_data(authorization)
-    if not parsed_data:
-        raise HTTPException(status_code=401, detail="Invalid Telegram authentication")
-
-    user_info = extract_user_from_init_data(parsed_data)
-    if not user_info:
-        raise HTTPException(status_code=401, detail="Could not extract user data")
-
-    async with AsyncSessionLocal() as session:
-        user_db = await get_or_create_user(
-            session,
-            telegram_id=user_info["telegram_id"],
-            first_name=user_info["first_name"],
-            username=user_info.get("username"),
-        )
-        await ensure_default_partner_groups(session, user_db.id)
-        await session.commit()
-
+def user_db_to_profile(u: UserDB) -> UserProfile:
+    """Convert UserDB to UserProfile (for agents that expect Pydantic model)"""
     return UserProfile(
-        id=user_db.id,
-        telegram_id=user_db.telegram_id,
-        first_name=user_db.first_name,
-        username=user_db.username,
-        occupation=user_db.occupation or "employee",
-        available_times=user_db.available_times or [],
-        daily_minutes=user_db.daily_minutes or 30,
-        current_habits=user_db.current_habits or [],
-        physical_restrictions=user_db.physical_restrictions,
-        streak_days=user_db.streak_days,
-        total_seeds=user_db.total_seeds,
-        completed_practices=user_db.completed_practices,
-        timezone=user_db.timezone or "UTC",
-        morning_enabled=bool(user_db.morning_enabled),
-        evening_enabled=bool(user_db.evening_enabled),
-        created_at=user_db.created_at,
-        updated_at=user_db.updated_at,
-        last_onboarding_update=user_db.last_onboarding_update,
+        id=u.id,
+        telegram_id=u.telegram_id or 0,
+        first_name=u.first_name,
+        username=u.username,
+        occupation=u.occupation or "employee",
+        available_times=u.available_times or [],
+        daily_minutes=u.daily_minutes or 30,
+        current_habits=u.current_habits or [],
+        physical_restrictions=u.physical_restrictions,
+        streak_days=u.streak_days or 0,
+        total_seeds=u.total_seeds or 0,
+        completed_practices=u.completed_practices or 0,
+        timezone=u.timezone or "UTC",
+        morning_enabled=bool(u.morning_enabled),
+        evening_enabled=bool(u.evening_enabled),
+        created_at=u.created_at,
+        updated_at=u.updated_at,
+        last_onboarding_update=u.last_onboarding_update,
     )
 
 
-@router.get("/me")
-async def get_me(user: UserProfile = Depends(get_current_user)):
-    """Get current user profile"""
+async def get_current_user(
+    user: UserDB = Depends(current_active_user),
+) -> UserDB:
+    """Hybrid auth dependency (Telegram + JWT).
+    
+    Uses fastapi-users under the hood, which tries each backend
+    (Telegram initData, then JWT Bearer) and returns the authenticated UserDB.
+    """
     return user
+
+
+@router.get("/me")
+async def get_me(user: UserDB = Depends(get_current_user)):
+    """Get current user profile"""
+    return user_db_to_profile(user)
 
 
 @router.get(
@@ -233,7 +167,7 @@ async def get_me(user: UserProfile = Depends(get_current_user)):
     summary="Get daily actions",
     description="Retrieve personalized daily actions based on user profile and current focus"
 )
-async def get_daily_actions(user: UserProfile = Depends(get_current_user)):
+async def get_daily_actions(user: UserDB = Depends(get_current_user)):
     """Get 4 daily actions"""
     from app.knowledge.qdrant import QdrantKnowledgeBase
     from app.agents.daily_manager import DailyManagerAgent
@@ -267,7 +201,7 @@ class UpdateActionCompletionRequest(BaseModel):
 async def update_action_completion(
     action_id: str,
     payload: UpdateActionCompletionRequest,
-    user: UserProfile = Depends(get_current_user)
+    user: UserDB = Depends(get_current_user)
 ):
     """Toggle daily action completion for project tasks (DailyTaskDB only)."""
     from app.database import AsyncSessionLocal
@@ -333,7 +267,7 @@ async def update_action_completion(
     summary="Get daily quote",
     description="Retrieve a daily quote from the knowledge base relevant to user's current focus"
 )
-async def get_daily_quote(user: UserProfile = Depends(get_current_user)):
+async def get_daily_quote(user: UserDB = Depends(get_current_user)):
     """Get quote for the day"""
     from app.knowledge.qdrant import QdrantKnowledgeBase
     from app.config import get_settings
@@ -359,20 +293,15 @@ async def get_daily_quote(user: UserProfile = Depends(get_current_user)):
 @router.get("/seeds")
 async def get_seeds(
     limit: int = 50,
-    user: UserProfile = Depends(get_current_user)
+    user: UserDB = Depends(get_current_user)
 ):
     """Get user's seeds"""
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_seeds, get_user_by_telegram_id
+    from app.crud import get_user_seeds
     
     try:
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, user.telegram_id)
-            
-            if not user_db:
-                return {"seeds": []}
-            
-            seeds_db = await get_user_seeds(db, user_db.id, limit)
+            seeds_db = await get_user_seeds(db, user.id, limit)
             
             seeds = [
                 {
@@ -398,20 +327,16 @@ async def get_seeds(
 @router.post("/seeds", response_model=SeedCreateResponse, status_code=status.HTTP_201_CREATED)
 async def create_seed_endpoint(
     payload: SeedCreateRequest,
-    user: UserProfile = Depends(get_current_user)
+    user: UserDB = Depends(get_current_user)
 ):
     """Create new seed"""
     from app.database import AsyncSessionLocal
-    from app.crud import create_seed, get_user_by_telegram_id, increment_user_seeds_count
+    from app.crud import create_seed, increment_user_seeds_count
     from app.crud_extended import get_active_karma_plan
     
     try:
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, user.telegram_id)
-            if not user_db:
-                raise HTTPException(status_code=404, detail="User not found")
-
-            active_plan = await get_active_karma_plan(db, user_db.id)
+            active_plan = await get_active_karma_plan(db, user.id)
             if not active_plan:
                 raise HTTPException(
                     status_code=403,
@@ -422,7 +347,7 @@ async def create_seed_endpoint(
                 )
             
             seed = Seed(
-                user_id=user_db.id,
+                user_id=user.id,
                 action_type=payload.action_type,
                 description=payload.description,
                 partner_group=payload.partner_group,
@@ -434,7 +359,7 @@ async def create_seed_endpoint(
                 karma_plan_id=active_plan.id,
             )
             seed_db = await create_seed(db, seed)
-            await increment_user_seeds_count(db, user_db.id)
+            await increment_user_seeds_count(db, user.id)
             await db.commit()
             return SeedCreateResponse(success=True, seed_id=seed_db.id).model_dump()
     except HTTPException:
@@ -445,20 +370,15 @@ async def create_seed_endpoint(
 
 
 @router.get("/coffee/today")
-async def get_coffee_today(user: UserProfile = Depends(get_current_user)):
+async def get_coffee_today(user: UserDB = Depends(get_current_user)):
     from app.coffee_meditation import get_local_day_bounds, get_rejoiced_seed_ids, get_today_daily_plan, get_today_seeds, get_user_zoneinfo
-    from app.crud import get_user_by_telegram_id
     from app.crud_extended import get_active_karma_plan
     from app.database import AsyncSessionLocal
     from app.models.db_models import CoffeeMeditationSessionDB
     from sqlalchemy import select
 
     async with AsyncSessionLocal() as db:
-        user_db = await get_user_by_telegram_id(db, user.telegram_id)
-        if not user_db:
-            return {"has_active_project": False, "message": "Давай начнём со /start, чтобы я тебя узнал."}
-
-        active_plan = await get_active_karma_plan(db, user_db.id)
+        active_plan = await get_active_karma_plan(db, user.id)
         if not active_plan:
             raise HTTPException(
                 status_code=403,
@@ -468,7 +388,7 @@ async def get_coffee_today(user: UserProfile = Depends(get_current_user)):
                 },
             )
 
-        user_tz = get_user_zoneinfo(user_db.timezone)
+        user_tz = get_user_zoneinfo(user.timezone)
         bounds = get_local_day_bounds(datetime.now(UTC), user_tz)
 
         daily_plan = await get_today_daily_plan(
@@ -480,7 +400,7 @@ async def get_coffee_today(user: UserProfile = Depends(get_current_user)):
 
         session_result = await db.execute(
             select(CoffeeMeditationSessionDB).where(
-                CoffeeMeditationSessionDB.user_id == user_db.id,
+                CoffeeMeditationSessionDB.user_id == user.id,
                 CoffeeMeditationSessionDB.local_date == bounds.local_date,
             )
         )
@@ -491,7 +411,7 @@ async def get_coffee_today(user: UserProfile = Depends(get_current_user)):
 
         seeds_db = await get_today_seeds(
             db,
-            user_id=user_db.id,
+            user_id=user.id,
             utc_start=bounds.utc_start,
             utc_end=bounds.utc_end,
         )
@@ -566,19 +486,14 @@ async def get_coffee_today(user: UserProfile = Depends(get_current_user)):
 @router.post("/coffee/progress")
 async def save_coffee_progress(
     payload: CoffeeProgressRequest,
-    user: UserProfile = Depends(get_current_user),
+    user: UserDB = Depends(get_current_user),
 ):
     from app.coffee_meditation import get_local_day_bounds, get_rejoiced_seed_ids, get_today_daily_plan, get_user_zoneinfo, get_or_create_session, save_progress
-    from app.crud import get_user_by_telegram_id
     from app.crud_extended import get_active_karma_plan
     from app.database import AsyncSessionLocal
 
     async with AsyncSessionLocal() as db:
-        user_db = await get_user_by_telegram_id(db, user.telegram_id)
-        if not user_db:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        active_plan = await get_active_karma_plan(db, user_db.id)
+        active_plan = await get_active_karma_plan(db, user.id)
         if not active_plan:
             raise HTTPException(
                 status_code=403,
@@ -588,7 +503,7 @@ async def save_coffee_progress(
                 },
             )
 
-        user_tz = get_user_zoneinfo(user_db.timezone)
+        user_tz = get_user_zoneinfo(user.timezone)
         bounds = get_local_day_bounds(datetime.now(UTC), user_tz)
 
         daily_plan = await get_today_daily_plan(
@@ -600,7 +515,7 @@ async def save_coffee_progress(
 
         session = await get_or_create_session(
             db,
-            user_id=user_db.id,
+            user_id=user.id,
             local_date=bounds.local_date,
             karma_plan_id=active_plan.id,
             daily_plan_id=daily_plan.id if daily_plan else None,
@@ -609,7 +524,7 @@ async def save_coffee_progress(
         await save_progress(
             db,
             session=session,
-            user_id=user_db.id,
+            user_id=user.id,
             current_step=payload.current_step,
             notes_draft=payload.notes_draft,
             rejoiced_seed_ids=payload.rejoiced_seed_ids,
@@ -633,21 +548,17 @@ async def save_coffee_progress(
 @router.post("/coffee/complete")
 async def complete_coffee(
     payload: CoffeeCompleteRequest,
-    user: UserProfile = Depends(get_current_user),
+    user: UserDB = Depends(get_current_user),
 ):
     from app.coffee_meditation import complete_session, get_local_day_bounds, get_today_daily_plan, get_user_zoneinfo, get_or_create_session
-    from app.crud import get_user_by_telegram_id, toggle_daily_task_completion
+    from app.crud import toggle_daily_task_completion
     from app.crud_extended import get_active_karma_plan
     from app.database import AsyncSessionLocal
     from app.models.db_models import DailyPlanDB
     from sqlalchemy import update
 
     async with AsyncSessionLocal() as db:
-        user_db = await get_user_by_telegram_id(db, user.telegram_id)
-        if not user_db:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        active_plan = await get_active_karma_plan(db, user_db.id)
+        active_plan = await get_active_karma_plan(db, user.id)
         if not active_plan:
             raise HTTPException(
                 status_code=403,
@@ -657,7 +568,7 @@ async def complete_coffee(
                 },
             )
 
-        user_tz = get_user_zoneinfo(user_db.timezone)
+        user_tz = get_user_zoneinfo(user.timezone)
         bounds = get_local_day_bounds(datetime.now(UTC), user_tz)
 
         daily_plan = await get_today_daily_plan(
@@ -669,7 +580,7 @@ async def complete_coffee(
 
         session = await get_or_create_session(
             db,
-            user_id=user_db.id,
+            user_id=user.id,
             local_date=bounds.local_date,
             karma_plan_id=active_plan.id,
             daily_plan_id=daily_plan.id if daily_plan else None,
@@ -678,7 +589,7 @@ async def complete_coffee(
         result = await complete_session(
             db,
             session_id=session.id,
-            user_id=user_db.id,
+            user_id=user.id,
             notes=payload.notes,
             rejoice_seed_ids=payload.rejoiced_seed_ids,
         )
@@ -707,7 +618,7 @@ async def complete_coffee(
 
                 await toggle_daily_task_completion(
                     db,
-                    user_id=user_db.id,
+                    user_id=user.id,
                     task_id=task_id,
                     completed=True,
                 )
@@ -717,22 +628,17 @@ async def complete_coffee(
 
 
 @router.get("/problems/history")
-async def get_problems_history(user: UserProfile = Depends(get_current_user)):
+async def get_problems_history(user: UserDB = Depends(get_current_user)):
     """Get problem history"""
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id, get_problem_history
+    from app.crud import get_problem_history
     from app.crud_extended import get_active_karma_plan
     
     async with AsyncSessionLocal() as db:
-        user_db = await get_user_by_telegram_id(db, user.telegram_id)
-        if not user_db:
-            return {"history": []}
-        
-        # Determine which history entry (if any) has an active karma plan
-        active_plan = await get_active_karma_plan(db, user_db.id)
+        active_plan = await get_active_karma_plan(db, user.id)
         active_history_id = active_plan.problem_history_id if active_plan else None
 
-        history = await get_problem_history(db, user_db.id)
+        history = await get_problem_history(db, user.id)
         return {
             "history": [
                 {
@@ -755,19 +661,14 @@ class AddToCalendarRequest(BaseModel):
 @router.post("/problem/add-to-calendar")
 async def add_problem_to_calendar(
     _payload: AddToCalendarRequest,
-    user: UserProfile = Depends(get_current_user)
+    user: UserDB = Depends(get_current_user)
 ):
     """Add 30-day plan steps to calendar"""
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id
     from app.crud_extended import get_active_karma_plan
     
     async with AsyncSessionLocal() as db:
-        user_db = await get_user_by_telegram_id(db, user.telegram_id)
-        if not user_db:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        active_plan = await get_active_karma_plan(db, user_db.id)
+        active_plan = await get_active_karma_plan(db, user.id)
         if not active_plan:
             raise HTTPException(
                 status_code=403,
@@ -786,14 +687,14 @@ async def add_problem_to_calendar(
 @router.post("/problem/solve", response_model=ProblemSolveResponse)
 async def solve_problem_endpoint(
         payload: ProblemSolveRequest,
-        user: UserProfile = Depends(get_current_user)
+        user: UserDB = Depends(get_current_user)
 ):
     """Solve problem using AI agent and knowledge base"""
     from app.agents.problem_solver import ProblemSolverAgent
     from app.knowledge.qdrant import QdrantKnowledgeBase
     from app.config import get_settings
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id, save_problem_history
+    from app.crud import save_problem_history
 
     settings = get_settings()
     qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
@@ -803,9 +704,12 @@ async def solve_problem_endpoint(
     from uuid import uuid4
     session_id = payload.session_id or f"web_{user.id}_{uuid4().hex[:8]}"
 
+    # Convert UserDB to UserProfile for agent compatibility
+    user_profile = user_db_to_profile(user)
+
     # Always use diagnostic mode for web problem solving flow
     solution = await agent.analyze_problem(
-        user,
+        user_profile,
         payload.problem,
         session_id=session_id,
         diagnostic_answer=payload.diagnostic_answer,
@@ -816,9 +720,8 @@ async def solve_problem_endpoint(
 
     # Save to history только для финальных решений (без запроса уточнений)
     async with AsyncSessionLocal() as db:
-        user_db = await get_user_by_telegram_id(db, user.telegram_id)
-        if user_db and not solution.get("needs_clarification"):
-            history_item = await save_problem_history(db, user_db.id, payload.problem, solution)
+        if not solution.get("needs_clarification"):
+            history_item = await save_problem_history(db, user.id, payload.problem, solution)
             solution["history_id"] = history_item.id
             await db.commit()
 
@@ -841,19 +744,15 @@ class ProjectSetupResponse(BaseModel):
 @router.get("/projects/setup/{history_id}", response_model=ProjectSetupResponse)
 async def get_project_setup(
     history_id: str,
-    user: UserProfile = Depends(get_current_user)
+    user: UserDB = Depends(get_current_user)
 ):
     """Get setup data for a new project (guide + existing partners)"""
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id, get_user_partners, get_partner_groups
+    from app.crud import get_user_partners, get_partner_groups
     from app.models.db_models import ProblemHistoryDB
     from sqlalchemy import select
     
     async with AsyncSessionLocal() as db:
-        user_db = await get_user_by_telegram_id(db, user.telegram_id)
-        if not user_db:
-            raise HTTPException(status_code=404, detail="User not found")
-            
         # 1. Get history for guide
         res = await db.execute(select(ProblemHistoryDB).where(ProblemHistoryDB.id == history_id))
         hist = res.scalar_one_or_none()
@@ -893,8 +792,8 @@ async def get_project_setup(
             ]
         
         # 2. Get user partners and groups
-        partners_db = await get_user_partners(db, user_db.id)
-        groups_db = await get_partner_groups(db, user_db.id)
+        partners_db = await get_user_partners(db, user.id)
+        groups_db = await get_partner_groups(db, user.id)
         
         # Map group_id to universal_category
         group_map = {g.id: g.universal_category or "world" for g in groups_db}
@@ -937,19 +836,14 @@ class ProjectStatusResponse(BaseModel):
 @router.post("/projects/activate", response_model=ProjectStatusResponse)
 async def activate_project(
     payload: ProjectActivateRequest,
-    user: UserProfile = Depends(get_current_user)
+    user: UserDB = Depends(get_current_user)
 ):
     """Activate a new Karmic Project (Karma Plan)"""
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id
     from app.models.db_models import ProblemHistoryDB
     from sqlalchemy import select
 
     async with AsyncSessionLocal() as db:
-        user_db = await get_user_by_telegram_id(db, user.telegram_id)
-        if not user_db:
-            raise HTTPException(status_code=404, detail="User not found")
-
         # Get the history item to extract strategy
         res = await db.execute(select(ProblemHistoryDB).where(ProblemHistoryDB.id == payload.history_id))
         hist = res.scalar_one_or_none()
@@ -973,7 +867,7 @@ async def activate_project(
         # Create plan
         plan = await create_karma_plan(
             db, 
-            user_db.id, 
+            user.id, 
             payload.history_id, 
             strategy_snapshot, 
             payload.duration_days,
@@ -1007,18 +901,13 @@ async def activate_project(
 
 
 @router.get("/projects/active", response_model=ProjectStatusResponse)
-async def get_active_project(user: UserProfile = Depends(get_current_user)):
+async def get_active_project(user: UserDB = Depends(get_current_user)):
     """Get current active Karmic Project status"""
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id
     from datetime import datetime, UTC
 
     async with AsyncSessionLocal() as db:
-        user_db = await get_user_by_telegram_id(db, user.telegram_id)
-        if not user_db:
-             return {"has_active_project": False}
-             
-        plan = await get_active_karma_plan(db, user_db.id)
+        plan = await get_active_karma_plan(db, user.id)
         if not plan:
             return {"has_active_project": False}
             
@@ -1088,7 +977,7 @@ class DailyCompleteRequest(BaseModel):
 @router.post("/projects/daily/complete")
 async def complete_daily_plan(
     payload: DailyCompleteRequest,
-    user: UserProfile = Depends(get_current_user)
+    user: UserDB = Depends(get_current_user)
 ):
     """Complete daily tasks for the project (Coffee Meditation)"""
     from app.database import AsyncSessionLocal
@@ -1136,26 +1025,21 @@ async def complete_daily_plan(
 
 
 @router.get("/partners", response_model=PartnersResponse)
-async def get_partners(user: UserProfile = Depends(get_current_user)):
+async def get_partners(user: UserDB = Depends(get_current_user)):
     """Get user's partner groups and partners"""
     from app.database import AsyncSessionLocal
     from app.crud import (
-        get_user_by_telegram_id,
         ensure_default_partner_groups,
         get_user_partners,
         get_partner_groups,
     )
 
     async with AsyncSessionLocal() as db:
-        user_db = await get_user_by_telegram_id(db, user.telegram_id)
-        if not user_db:
-            return PartnersResponse(groups=[], partners=[]).model_dump()
-
-        await ensure_default_partner_groups(db, user_db.id)
+        await ensure_default_partner_groups(db, user.id)
         await db.commit()
 
-        groups_db = await get_partner_groups(db, user_db.id)
-        partners_db = await get_user_partners(db, user_db.id)
+        groups_db = await get_partner_groups(db, user.id)
+        partners_db = await get_user_partners(db, user.id)
 
         groups = [
             PartnerGroupOut(
@@ -1186,25 +1070,21 @@ async def get_partners(user: UserProfile = Depends(get_current_user)):
 @router.post("/partners", response_model=PartnerCreateResponse)
 async def create_partner_endpoint(
     payload: PartnerCreateRequest,
-    user: UserProfile = Depends(get_current_user),
+    user: UserDB = Depends(get_current_user),
 ):
     """Create new partner"""
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id, ensure_default_partner_groups
+    from app.crud import ensure_default_partner_groups
     from app.models.db_models import PartnerDB, PartnerGroupDB
     from sqlalchemy import select
 
     async with AsyncSessionLocal() as db:
-        user_db = await get_user_by_telegram_id(db, user.telegram_id)
-        if not user_db:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        await ensure_default_partner_groups(db, user_db.id)
+        await ensure_default_partner_groups(db, user.id)
 
         group_result = await db.execute(
             select(PartnerGroupDB).where(
                 PartnerGroupDB.id == payload.group_id,
-                PartnerGroupDB.user_id == user_db.id,
+                PartnerGroupDB.user_id == user.id,
             )
         )
         group_db = group_result.scalar_one_or_none()
@@ -1213,7 +1093,7 @@ async def create_partner_endpoint(
 
         partner_db = PartnerDB(
             id=str(uuid4()),
-            user_id=user_db.id,
+            user_id=user.id,
             group_id=group_db.id,
             name=payload.name,
             telegram_username=payload.telegram_username,
@@ -1229,7 +1109,7 @@ async def create_partner_endpoint(
 
 @router.get("/practices")
 async def get_practices(
-    user: UserProfile = Depends(get_current_user),
+    user: UserDB = Depends(get_current_user),
     limit: int = Query(default=0, description="Limit results, 0 = all"),
 ):
     """Get all practices from PracticeDB (canonical source)"""
@@ -1289,7 +1169,7 @@ class PracticeCompleteRequest(BaseModel):
 
 
 @router.post("/practices/{practice_id}/start")
-async def start_practice_tracking(practice_id: str, user: UserProfile = Depends(get_current_user)):
+async def start_practice_tracking(practice_id: str, user: UserDB = Depends(get_current_user)):
     """Начать отслеживание практики (PracticeDB must exist)"""
     from app.database import AsyncSessionLocal
     from app.crud import get_or_create_practice_progress
@@ -1299,10 +1179,6 @@ async def start_practice_tracking(practice_id: str, user: UserProfile = Depends(
     
     try:
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, user.telegram_id)
-            if not user_db:
-                return {"error": "User not found"}
-            
             # PracticeDB is canonical — must exist
             practice_result = await db.execute(
                 select(PracticeDB).where(PracticeDB.id == practice_id).limit(1)
@@ -1312,11 +1188,11 @@ async def start_practice_tracking(practice_id: str, user: UserProfile = Depends(
                 return {"error": "Practice not found in catalog"}
             
             # Get active project for karma_plan_id
-            active_plan = await get_active_karma_plan(db, user_db.id)
+            active_plan = await get_active_karma_plan(db, user.id)
             plan_id = active_plan.id if active_plan else None
             
             progress = await get_or_create_practice_progress(
-                db, user_db.id, practice_id, karma_plan_id=plan_id
+                db, user.id, practice_id, karma_plan_id=plan_id
             )
             await db.commit()
             
@@ -1335,7 +1211,7 @@ async def start_practice_tracking(practice_id: str, user: UserProfile = Depends(
 async def complete_practice(
     practice_id: str, 
     request: PracticeCompleteRequest = None,
-    user: UserProfile = Depends(get_current_user)
+    user: UserDB = Depends(get_current_user)
 ):
     """Отметить выполнение практики"""
     from app.database import AsyncSessionLocal
@@ -1347,15 +1223,11 @@ async def complete_practice(
     
     try:
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, user.telegram_id)
-            if not user_db:
-                raise HTTPException(status_code=404, detail="User not found")
-
-            active_plan = await get_active_karma_plan(db, user_db.id)
+            active_plan = await get_active_karma_plan(db, user.id)
             
             result = await complete_practice_and_create_seed(
                 db,
-                user_id=user_db.id,
+                user_id=user.id,
                 practice_id=practice_id,
                 karma_plan_id=(active_plan.id if active_plan else None),
                 emotion_score=request.emotion_score,
@@ -1377,18 +1249,14 @@ async def complete_practice(
 
 
 @router.get("/practices/progress")
-async def get_practices_progress(user: UserProfile = Depends(get_current_user)):
+async def get_practices_progress(user: UserDB = Depends(get_current_user)):
     """Получить прогресс всех практик (включая привычки)"""
     from app.database import AsyncSessionLocal
     from app.crud import get_user_practice_progress
     
     try:
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, user.telegram_id)
-            if not user_db:
-                return {"progress": []}
-            
-            progress_list = await get_user_practice_progress(db, user_db.id)
+            progress_list = await get_user_practice_progress(db, user.id)
             
             from datetime import datetime, timezone
             today = datetime.now(timezone.utc).date()
@@ -1428,17 +1296,14 @@ async def get_practices_progress(user: UserProfile = Depends(get_current_user)):
 
 
 @router.post("/practices/{practice_id}/pause")
-async def pause_practice_endpoint(practice_id: str, user: UserProfile = Depends(get_current_user)):
+async def pause_practice_endpoint(practice_id: str, user: UserDB = Depends(get_current_user)):
     """Приостановить практику"""
     from app.database import AsyncSessionLocal
     from app.crud import pause_practice
     
     try:
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, user.telegram_id)
-            if not user_db:
-                return {"error": "User not found"}
-            ok = await pause_practice(db, user_db.id, practice_id)
+            ok = await pause_practice(db, user.id, practice_id)
             await db.commit()
             return {"success": ok}
     except Exception as e:
@@ -1447,17 +1312,14 @@ async def pause_practice_endpoint(practice_id: str, user: UserProfile = Depends(
 
 
 @router.post("/practices/{practice_id}/resume")
-async def resume_practice_endpoint(practice_id: str, user: UserProfile = Depends(get_current_user)):
+async def resume_practice_endpoint(practice_id: str, user: UserDB = Depends(get_current_user)):
     """Возобновить практику"""
     from app.database import AsyncSessionLocal
     from app.crud import resume_practice
     
     try:
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, user.telegram_id)
-            if not user_db:
-                return {"error": "User not found"}
-            ok = await resume_practice(db, user_db.id, practice_id)
+            ok = await resume_practice(db, user.id, practice_id)
             await db.commit()
             return {"success": ok}
     except Exception as e:
@@ -1466,17 +1328,14 @@ async def resume_practice_endpoint(practice_id: str, user: UserProfile = Depends
 
 
 @router.post("/practices/{practice_id}/hide")
-async def hide_practice_endpoint(practice_id: str, user: UserProfile = Depends(get_current_user)):
+async def hide_practice_endpoint(practice_id: str, user: UserDB = Depends(get_current_user)):
     """Скрыть практику из списков"""
     from app.database import AsyncSessionLocal
     from app.crud import hide_practice
     
     try:
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, user.telegram_id)
-            if not user_db:
-                return {"error": "User not found"}
-            ok = await hide_practice(db, user_db.id, practice_id)
+            ok = await hide_practice(db, user.id, practice_id)
             await db.commit()
             return {"success": ok}
     except Exception as e:
@@ -1485,17 +1344,14 @@ async def hide_practice_endpoint(practice_id: str, user: UserProfile = Depends(g
 
 
 @router.post("/practices/{practice_id}/reset")
-async def reset_practice_endpoint(practice_id: str, user: UserProfile = Depends(get_current_user)):
+async def reset_practice_endpoint(practice_id: str, user: UserDB = Depends(get_current_user)):
     """Сбросить прогресс практики"""
     from app.database import AsyncSessionLocal
     from app.crud import reset_practice
     
     try:
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, user.telegram_id)
-            if not user_db:
-                return {"error": "User not found"}
-            ok = await reset_practice(db, user_db.id, practice_id)
+            ok = await reset_practice(db, user.id, practice_id)
             await db.commit()
             return {"success": ok}
     except Exception as e:
@@ -1504,17 +1360,14 @@ async def reset_practice_endpoint(practice_id: str, user: UserProfile = Depends(
 
 
 @router.delete("/practices/{practice_id}")
-async def delete_practice_endpoint(practice_id: str, user: UserProfile = Depends(get_current_user)):
+async def delete_practice_endpoint(practice_id: str, user: UserDB = Depends(get_current_user)):
     """Удалить практику и все связанные семена"""
     from app.database import AsyncSessionLocal
     from app.crud import delete_practice_all
     
     try:
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, user.telegram_id)
-            if not user_db:
-                return {"error": "User not found"}
-            deleted_seeds = await delete_practice_all(db, user_db.id, practice_id)
+            deleted_seeds = await delete_practice_all(db, user.id, practice_id)
             await db.commit()
             return {"success": True, "deleted_seeds": deleted_seeds}
     except Exception as e:
@@ -1532,7 +1385,7 @@ def _build_recommend_query(strategy: dict | None) -> str:
 
 
 @router.get("/practices/recommend")
-async def get_practice_recommendations(user: UserProfile = Depends(get_current_user)):
+async def get_practice_recommendations(user: UserDB = Depends(get_current_user)):
     """AI рекомендации практик (M6: единый источник для dashboard и бота)"""
     from app.database import AsyncSessionLocal
     from app.crud import get_user_practice_progress
@@ -1542,15 +1395,11 @@ async def get_practice_recommendations(user: UserProfile = Depends(get_current_u
     
     try:
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, user.telegram_id)
-            if not user_db:
-                return {"recommendations": []}
-            
-            existing_progress = await get_user_practice_progress(db, user_db.id)
+            existing_progress = await get_user_practice_progress(db, user.id)
             existing_ids = {str(p.practice_id) for p in existing_progress}
             
             # M6: Context from active project strategy or general development
-            active_plan = await get_active_karma_plan(db, user_db.id)
+            active_plan = await get_active_karma_plan(db, user.id)
             strategy = active_plan.strategy_snapshot if active_plan else None
             need = _build_recommend_query(strategy)
             
@@ -1559,7 +1408,7 @@ async def get_practice_recommendations(user: UserProfile = Depends(get_current_u
             
             recommendations = await qdrant.search_practice(
                 need=need,
-                restrictions=user_db.physical_restrictions.split(',') if user_db.physical_restrictions else None,
+                restrictions=user.physical_restrictions.split(',') if user.physical_restrictions else None,
                 limit=8
             )
             
@@ -1598,42 +1447,34 @@ class OnboardingAnswerRequest(BaseModel):
 
 
 @router.get("/onboarding/start", response_model=OnboardingStepResponse)
-async def start_onboarding(user: UserProfile = Depends(get_current_user)):
+async def start_onboarding(user: UserDB = Depends(get_current_user)):
     """Start or resume onboarding flow"""
     from app.workflows.onboarding import get_step_data, ONBOARDING_STEPS, OnboardingSteps
-    from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id
     
-    async with AsyncSessionLocal() as db:
-        user_db = await get_user_by_telegram_id(db, user.telegram_id)
-        
-        # Check if user already completed onboarding
-        if user_db and user_db.last_onboarding_update:
-            return get_step_data(OnboardingSteps.COMPLETE)
-        
-        # Check current progress based on filled fields
-        # Use sequential checks - stop at first unfinished step
+    # Check if user already completed onboarding
+    if user.last_onboarding_update:
+        return get_step_data(OnboardingSteps.COMPLETE)
+    
+    # Check current progress based on filled fields
+    current_step = OnboardingSteps.OCCUPATION
+    if not user.occupation or user.occupation == "employee":
         current_step = OnboardingSteps.OCCUPATION
-        if user_db:
-            # occupation is "employee" by default, so check if user explicitly set something
-            if not user_db.occupation or user_db.occupation == "employee":
-                current_step = OnboardingSteps.OCCUPATION
-            elif not user_db.available_times or len(user_db.available_times) == 0:
-                current_step = OnboardingSteps.SCHEDULE
-            elif user_db.daily_minutes == 30:  # default value, not explicitly set
-                current_step = OnboardingSteps.DURATION
-            elif not user_db.current_habits or len(user_db.current_habits) == 0:
-                current_step = OnboardingSteps.HABITS
-            else:
-                current_step = OnboardingSteps.PARTNERS
-        
-        return get_step_data(current_step)
+    elif not user.available_times or len(user.available_times) == 0:
+        current_step = OnboardingSteps.SCHEDULE
+    elif user.daily_minutes == 30:  # default value, not explicitly set
+        current_step = OnboardingSteps.DURATION
+    elif not user.current_habits or len(user.current_habits) == 0:
+        current_step = OnboardingSteps.HABITS
+    else:
+        current_step = OnboardingSteps.PARTNERS
+    
+    return get_step_data(current_step)
 
 
 @router.post("/onboarding/answer", response_model=OnboardingStepResponse)
 async def answer_onboarding(
     payload: OnboardingAnswerRequest,
-    user: UserProfile = Depends(get_current_user)
+    user: UserDB = Depends(get_current_user)
 ):
     """Process onboarding step answer and return next step"""
     from app.workflows.onboarding import get_step_data, get_next_step, ONBOARDING_STEPS, save_onboarding_progress, OnboardingSteps
@@ -1651,7 +1492,7 @@ async def answer_onboarding(
             val = None
             
     # Save using shared logic
-    await save_onboarding_progress(user.telegram_id, payload.step, val)
+    await save_onboarding_progress(user.id, payload.step, val)
     
     next_step = get_next_step(payload.step)
     return get_step_data(next_step or OnboardingSteps.COMPLETE)

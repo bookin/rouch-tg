@@ -1,6 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
-import { getUser } from './api/client'
+import { getUser, isTelegramContext, isAuthenticated } from './api/client'
 import { useTelegram } from './hooks/useTelegram'
 import Dashboard from './pages/Dashboard'
 // import Calendar from './pages/Calendar'
@@ -10,6 +10,8 @@ import Practices from './pages/Practices'
 import Problem from './pages/Problem'
 import CoffeePage from './pages/Coffee'
 import Onboarding from './pages/Onboarding'
+import Login from './pages/Login'
+import Register from './pages/Register'
 import Layout from './components/Layout'
 import Lotus from "@/components/Lotus.tsx";
 
@@ -20,8 +22,23 @@ function AppContent() {
   const [checking, setChecking] = useState(true)
 
   useEffect(() => {
-    // Only check when Telegram WebApp is ready (or in dev mode)
-    if (!isReady) return
+    const inTelegram = isTelegramContext()
+
+    // In Telegram context, wait for WebApp to be ready
+    if (inTelegram && !isReady) return
+
+    // Skip auth check for login/register pages
+    if (location.pathname === '/login' || location.pathname === '/register') {
+      setChecking(false)
+      return
+    }
+
+    // In web context, check if we have a token
+    if (!inTelegram && !isAuthenticated()) {
+      setChecking(false)
+      navigate('/login')
+      return
+    }
 
     const checkUser = async () => {
       try {
@@ -32,6 +49,10 @@ function AppContent() {
         }
       } catch (error) {
         console.error('Failed to check user status:', error)
+        // In web context, redirect to login on auth failure
+        if (!inTelegram) {
+          navigate('/login')
+        }
       } finally {
         setChecking(false)
       }
@@ -54,6 +75,8 @@ function AppContent() {
 		<Lotus/>
 		  <Layout>
       <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
         <Route path="/" element={<Dashboard />} />
         {/*<Route path="/calendar" element={<Calendar />} />*/}
         <Route path="/partners" element={<Partners />} />

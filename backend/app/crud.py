@@ -34,7 +34,11 @@ async def create_user(db: AsyncSession, telegram_id: int, first_name: str, usern
     user = UserDB(
         telegram_id=telegram_id,
         first_name=first_name,
-        username=username
+        username=username,
+        hashed_password="!telegram-no-password",
+        is_active=True,
+        is_superuser=False,
+        is_verified=True,
     )
     db.add(user)
     await db.flush()
@@ -51,6 +55,10 @@ async def get_or_create_user(db: AsyncSession, telegram_id: int, first_name: str
         telegram_id=telegram_id,
         first_name=first_name,
         username=username,
+        hashed_password="!telegram-no-password",
+        is_active=True,
+        is_superuser=False,
+        is_verified=True,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     ).on_conflict_do_update(
@@ -64,7 +72,14 @@ async def get_or_create_user(db: AsyncSession, telegram_id: int, first_name: str
     
     await db.execute(stmt)
     await db.flush()
-    return await get_user_by_telegram_id(db, telegram_id)
+    
+    user = await get_user_by_telegram_id(db, telegram_id)
+    
+    # Ensure default partner groups for new users
+    await ensure_default_partner_groups(db, user.id)
+    await db.flush()
+    
+    return user
 
 
 async def get_active_users(db: AsyncSession, morning_enabled: bool = None, evening_enabled: bool = None) -> List[UserDB]:

@@ -21,13 +21,24 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from datetime import datetime, UTC
 from app.database import Base
+from fastapi_users_db_sqlalchemy import SQLAlchemyBaseUserTable
 
-class UserDB(Base):
-    """User database model"""
+class UserDB(SQLAlchemyBaseUserTable[int], Base):
+    """User database model with FastAPI Users integration"""
     __tablename__ = "users"
     
+    # Integer PK (not UUID)
     id = Column(Integer, primary_key=True, index=True)
-    telegram_id = Column(Integer, unique=True, index=True, nullable=False)
+    
+    # Override fastapi-users base columns for hybrid auth
+    email = Column(String(320), unique=True, index=True, nullable=True)
+    hashed_password = Column(String(1024), nullable=True)
+    is_active = Column(Boolean, nullable=False, server_default="true")
+    is_superuser = Column(Boolean, nullable=False, server_default="false")
+    is_verified = Column(Boolean, nullable=False, server_default="false")
+    
+    # Telegram-specific
+    telegram_id = Column(Integer, unique=True, index=True, nullable=True)
     first_name = Column(String, nullable=False)
     username = Column(String, nullable=True)
     

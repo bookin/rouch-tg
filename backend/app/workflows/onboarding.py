@@ -142,14 +142,15 @@ def get_next_step(current_step: str) -> Optional[str]:
     return ONBOARDING_STEPS[current_step].get("next_step")
 
 
-async def save_onboarding_progress(telegram_id: int, step: str, answer: Any):
+async def save_onboarding_progress(user_id_or_telegram_id: int, step: str, answer: Any, *, by_telegram_id: bool = False):
     """
     Save onboarding progress to DB.
     
     Args:
-        telegram_id: User's Telegram ID
+        user_id_or_telegram_id: User's DB id or Telegram ID
         step: Current step name (from OnboardingSteps)
         answer: The answer to save (string, list, or int)
+        by_telegram_id: If True, lookup by telegram_id (for bot); otherwise by user.id (for web)
     """
     from app.database import AsyncSessionLocal
     from app.crud import get_user_by_telegram_id
@@ -160,7 +161,11 @@ async def save_onboarding_progress(telegram_id: int, step: str, answer: Any):
         return
 
     async with AsyncSessionLocal() as db:
-        user_db = await get_user_by_telegram_id(db, telegram_id)
+        if by_telegram_id:
+            user_db = await get_user_by_telegram_id(db, user_id_or_telegram_id)
+        else:
+            from app.models.db_models import UserDB
+            user_db = await db.get(UserDB, user_id_or_telegram_id)
         if not user_db:
             return
         

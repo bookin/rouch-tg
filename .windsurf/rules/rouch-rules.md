@@ -2,10 +2,10 @@
 trigger: always_on
 ---
 
-python - 3.12 / pep8
+python - 3.12 / uv / pep8
 
 frontend - react 19.x / radix / tailwind / vite / typescript
-backend - python 3.12 / pep8 / fastapi / alembic / postgresql
+backend - python 3.12 / uv / pep8 / fastapi / alembic / postgresql
 
 backend path - /Users/anton/Sites/rouch/backend
 frontend path - /Users/anton/Sites/rouch/frontend
@@ -14,6 +14,8 @@ frontend path - /Users/anton/Sites/rouch/frontend
 есть make команды для работы с alembic и просмотра логов, смотри команды в файле /Users/anton/Sites/rouch/Makefile
 
 - не пытайся создавать фалы с миграциями, используй команду `make migrate-create -m "<description>"` для атоматического создания миграции после изминений схем в файлах моделей
+
+- не правь миграционные файлы вручную, меняй модели и пересоздавай миграции если требуется
 
 - не пытайся сам применить миграции, используй команду `make migrate-up` для применения миграций
 

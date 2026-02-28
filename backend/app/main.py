@@ -103,6 +103,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Auth routers (fastapi-users)
+from app.auth import fastapi_users, telegram_backend, jwt_backend
+from app.models.schemas.user import UserRead, UserCreate, UserUpdate
+
+app.include_router(
+    fastapi_users.get_auth_router(jwt_backend),
+    prefix="/auth/jwt",
+    tags=["auth"],
+)
+
+app.include_router(
+    fastapi_users.get_register_router(UserRead, UserCreate),
+    prefix="/auth",
+    tags=["auth"],
+)
+
+app.include_router(
+    fastapi_users.get_users_router(UserRead, UserUpdate),
+    prefix="/users",
+    tags=["users"],
+)
+
 # Include routers
 app.include_router(webapp_router)
 app.include_router(calendar_router)

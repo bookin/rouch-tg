@@ -270,7 +270,7 @@ async def process_occupation(message: Message, state: FSMContext):
     selected_id = next((opt["id"] for opt in step_data["options"] if opt["label"] == message.text), "other")
     
     # Save using shared logic
-    await save_onboarding_progress(message.from_user.id, current_step, selected_id)
+    await save_onboarding_progress(message.from_user.id, current_step, selected_id, by_telegram_id=True)
     await state.update_data(occupation=selected_id)
     
     # Move to next step
@@ -302,7 +302,7 @@ async def process_schedule_selection(callback: CallbackQuery, state: FSMContext)
             return
         
         # Save using shared logic
-        await save_onboarding_progress(callback.from_user.id, OnboardingSteps.SCHEDULE, current_selection)
+        await save_onboarding_progress(callback.from_user.id, OnboardingSteps.SCHEDULE, current_selection, by_telegram_id=True)
         
         await callback.message.delete()
         
@@ -350,7 +350,7 @@ async def process_duration(message: Message, state: FSMContext):
     selected_id = next((opt["id"] for opt in step_data["options"] if opt["label"] == message.text), "30")
     
     # Save using shared logic
-    await save_onboarding_progress(message.from_user.id, current_step, int(selected_id))
+    await save_onboarding_progress(message.from_user.id, current_step, int(selected_id), by_telegram_id=True)
     await state.update_data(daily_minutes=int(selected_id))
     
     next_step_name = get_next_step(current_step)
@@ -377,7 +377,7 @@ async def process_habit_selection(callback: CallbackQuery, state: FSMContext):
     
     if action == "done":
         # Save using shared logic
-        await save_onboarding_progress(callback.from_user.id, OnboardingSteps.HABITS, current_selection)
+        await save_onboarding_progress(callback.from_user.id, OnboardingSteps.HABITS, current_selection, by_telegram_id=True)
         
         await callback.message.delete()
         
@@ -432,7 +432,7 @@ async def process_restrictions(message: Message, state: FSMContext):
     value = None if text == "➡️ Пропустить" else text
     
     # Save using shared logic
-    await save_onboarding_progress(message.from_user.id, current_step, value)
+    await save_onboarding_progress(message.from_user.id, current_step, value, by_telegram_id=True)
     await state.update_data(physical_restrictions=value)
     
     next_step_name = get_next_step(current_step)
@@ -452,7 +452,7 @@ async def process_restrictions(message: Message, state: FSMContext):
 async def process_partners_confirm(message: Message, state: FSMContext):
     """Finalize onboarding"""
     # Save partner step (mark as complete)
-    await save_onboarding_progress(message.from_user.id, OnboardingSteps.PARTNERS, "continue")
+    await save_onboarding_progress(message.from_user.id, OnboardingSteps.PARTNERS, "continue", by_telegram_id=True)
     
     await state.clear()
     

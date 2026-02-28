@@ -85,6 +85,7 @@ class Settings(BaseSettings):
     
     # Security
     SECRET_KEY: str = Field(default="your-secret-key-change-in-production", description="Secret key for signatures")
+    JWT_SECRET_KEY: str = Field(default="change-me-in-production-please!!", description="JWT secret for fastapi-users")
     
     # Logging
     LOG_LEVEL: str = Field(default="INFO", description="Logging level")

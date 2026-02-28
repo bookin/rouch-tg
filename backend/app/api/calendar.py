@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, func, literal
 import logging
 
-from app.models.user import UserProfile
+from app.models.db_models import UserDB
 from app.api.webapp import get_current_user
 
 
@@ -68,26 +68,21 @@ class CalendarStatsResponse(BaseModel):
 async def get_calendar_data(
     start_date: date = Query(..., description="Start date for calendar range"),
     end_date: date = Query(..., description="End date for calendar range"),
-    user: UserProfile = Depends(get_current_user)
+    user: UserDB = Depends(get_current_user)
 ) -> Dict[str, Any]:
     """Get all calendar events for the specified date period"""
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id
     from app.models.db_models import SeedDB, PracticeDB, PartnerActionDB, PartnerDB
     
     try:
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, user.telegram_id)
-            if not user_db:
-                return {"seeds": [], "practices": [], "partnerActions": []}
-            
             start_dt = datetime.combine(start_date, datetime.min.time())
             end_dt = datetime.combine(end_date, datetime.max.time())
             
             # Get seeds
             seeds_result = await db.execute(
                 select(SeedDB).where(
-                    SeedDB.user_id == user_db.id,
+                    SeedDB.user_id == user.id,
                     SeedDB.timestamp >= start_dt,
                     SeedDB.timestamp <= end_dt
                 )
@@ -108,7 +103,7 @@ async def get_calendar_data(
                 select(SeedDB, PracticeDB)
                 .outerjoin(PracticeDB, PracticeDB.id == SeedDB.practice_id)
                 .where(
-                    SeedDB.user_id == user_db.id,
+                    SeedDB.user_id == user.id,
                     SeedDB.practice_id.isnot(None),
                     SeedDB.timestamp >= start_dt,
                     SeedDB.timestamp <= end_dt,
@@ -134,7 +129,7 @@ async def get_calendar_data(
                 select(PartnerActionDB, PartnerDB)
                 .outerjoin(PartnerDB, PartnerDB.id == PartnerActionDB.partner_id)
                 .where(
-                    PartnerActionDB.user_id == user_db.id,
+                    PartnerActionDB.user_id == user.id,
                     PartnerActionDB.timestamp >= start_dt,
                     PartnerActionDB.timestamp <= end_dt,
                 )
@@ -167,32 +162,21 @@ async def get_calendar_data(
 async def get_calendar_stats(
     start_date: date = Query(...),
     end_date: date = Query(...),
-    user: UserProfile = Depends(get_current_user)
+    user: UserDB = Depends(get_current_user)
 ) -> Dict[str, Any]:
     """Get statistics for the period"""
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id
     from app.models.db_models import SeedDB, PartnerActionDB, PartnerDB
     
     try:
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, user.telegram_id)
-            if not user_db:
-                return CalendarStatsResponse(
-                    seedsCount=0,
-                    practicesCount=0,
-                    partnerActionsCount=0,
-                    streakDays=0,
-                    topPartners=[],
-                ).model_dump()
-            
             start_dt = datetime.combine(start_date, datetime.min.time())
             end_dt = datetime.combine(end_date, datetime.max.time())
             
             # Count seeds
             seeds_count = await db.execute(
                 select(func.count(SeedDB.id)).where(
-                    SeedDB.user_id == user_db.id,
+                    SeedDB.user_id == user.id,
                     SeedDB.timestamp >= start_dt,
                     SeedDB.timestamp <= end_dt
                 )
@@ -201,7 +185,7 @@ async def get_calendar_stats(
             # Count practices (seeds with practice_id)
             practices_count = await db.execute(
                 select(func.count(SeedDB.id)).where(
-                    SeedDB.user_id == user_db.id,
+                    SeedDB.user_id == user.id,
                     SeedDB.practice_id.isnot(None),
                     SeedDB.timestamp >= start_dt,
                     SeedDB.timestamp <= end_dt
@@ -211,7 +195,7 @@ async def get_calendar_stats(
             # Count partner actions
             actions_count = await db.execute(
                 select(func.count(PartnerActionDB.id)).where(
-                    PartnerActionDB.user_id == user_db.id,
+                    PartnerActionDB.user_id == user.id,
                     PartnerActionDB.timestamp >= start_dt,
                     PartnerActionDB.timestamp <= end_dt
                 )
@@ -227,7 +211,7 @@ async def get_calendar_stats(
                 select(partner_name_expr.label("name"), func.count(PartnerActionDB.id).label("count"))
                 .outerjoin(PartnerDB, PartnerDB.id == PartnerActionDB.partner_id)
                 .where(
-                    PartnerActionDB.user_id == user_db.id,
+                    PartnerActionDB.user_id == user.id,
                     PartnerActionDB.timestamp >= start_dt,
                     PartnerActionDB.timestamp <= end_dt,
                 )
@@ -241,7 +225,7 @@ async def get_calendar_stats(
                 "seedsCount": seeds_count.scalar() or 0,
                 "practicesCount": practices_count.scalar() or 0,
                 "partnerActionsCount": actions_count.scalar() or 0,
-                "streakDays": user_db.streak_days,
+                "streakDays": user.streak_days or 0,
                 "topPartners": top_partners
             }
     except Exception as e:

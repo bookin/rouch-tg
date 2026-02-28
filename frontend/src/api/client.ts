@@ -10,19 +10,90 @@ export const api = axios.create({
   }
 })
 
-// Add Telegram WebApp authentication interceptor
+// Hybrid auth interceptor: Telegram initData OR JWT Bearer token
 api.interceptors.request.use((config) => {
-  // Get Telegram WebApp initData
+  // 1. Try Telegram WebApp initData first
   if (window.Telegram?.WebApp) {
     const initData = window.Telegram.WebApp.initData
     if (initData) {
       config.headers.Authorization = initData
+      return config
     }
+  }
+  // 2. Fallback to JWT token from localStorage
+  const token = localStorage.getItem('auth_token')
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
   }
   return config
 }, (error) => {
   return Promise.reject(error)
 })
+
+// Handle 401 responses - clear token and redirect to login
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      const isTelegram = !!window.Telegram?.WebApp?.initData
+      if (!isTelegram) {
+        localStorage.removeItem('auth_token')
+        // Don't redirect if already on login page
+        if (!window.location.pathname.includes('/login')) {
+          window.location.href = '/login'
+        }
+      }
+    }
+    return Promise.reject(error)
+  }
+)
+
+// ===== Auth API =====
+
+export const isTelegramContext = (): boolean => {
+  return !!window.Telegram?.WebApp?.initData
+}
+
+export const getStoredToken = (): string | null => {
+  return localStorage.getItem('auth_token')
+}
+
+export const isAuthenticated = (): boolean => {
+  return isTelegramContext() || !!getStoredToken()
+}
+
+export interface LoginPayload {
+  username: string // email
+  password: string
+}
+
+export interface RegisterPayload {
+  email: string
+  password: string
+  first_name: string
+  occupation?: string
+}
+
+export const loginUser = async (payload: LoginPayload) => {
+  const formData = new URLSearchParams()
+  formData.append('username', payload.username)
+  formData.append('password', payload.password)
+  const response = await api.post('/auth/jwt/login', formData, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  })
+  const { access_token } = response.data
+  localStorage.setItem('auth_token', access_token)
+  return response.data
+}
+
+export const registerUser = async (payload: RegisterPayload) => {
+  const response = await api.post('/auth/register', payload)
+  return response.data
+}
+
+export const logoutUser = () => {
+  localStorage.removeItem('auth_token')
+}
 
 // API methods
 export const getUser = async () => {
