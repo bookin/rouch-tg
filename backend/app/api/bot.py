@@ -90,6 +90,14 @@ class ProjectSetupState(StatesGroup):
     waiting_for_world = State()
 
 
+class CoffeeState(StatesGroup):
+    """States for interactive coffee meditation in bot"""
+    step_1 = State()
+    step_2 = State()
+    step_3 = State()
+    step_4_notes = State()
+
+
 # Map generic steps to FSM states
 STEP_STATE_MAP = {
     OnboardingSteps.OCCUPATION: OnboardingState.occupation,
@@ -171,17 +179,21 @@ async def cmd_coffee(message: Message):
 
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
+                [InlineKeyboardButton(text="☕️ Начать прямо здесь", callback_data="cf_start")],
                 [
                     InlineKeyboardButton(
-                        text="☕️ Открыть кофе‑медитацию",
+                        text="📱 Открыть в приложении",
                         web_app=WebAppInfo(url=f"{settings.WEBAPP_URL}/coffee"),
                     )
-                ]
+                ],
             ]
         )
 
         await message.answer(
-            "Готов(а)? Давай сделаем кофе‑медитацию. Я буду бережно сохранять прогресс по мере шагов.",
+            "☕️ Кофе‑медитация\n\n"
+            "Мягкий ритуал, чтобы усилить посаженные семена "
+            "и наполнить день теплом.\n\n"
+            "Как тебе удобнее?",
             reply_markup=kb,
         )
     except Exception as e:
@@ -1895,6 +1907,359 @@ async def reset_confirm(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text("Произошла ошибка при сбросе данных. Попробуй позже.")
         
     await callback.answer()
+
+
+# =============================================================================
+# Interactive Coffee Meditation (bot flow)
+# =============================================================================
+
+async def _cf_load_data(telegram_id: int):
+    """Load all data needed for coffee meditation session."""
+    from app.database import AsyncSessionLocal
+    from app.crud import get_user_by_telegram_id
+    from app.crud_extended import get_active_karma_plan
+    from app.coffee_meditation import (
+        get_user_zoneinfo,
+        get_local_day_bounds,
+        get_or_create_session,
+        get_today_seeds,
+        get_today_daily_plan,
+        get_rejoiced_seed_ids,
+    )
+    from datetime import datetime, UTC
+
+    async with AsyncSessionLocal() as db:
+        user_db = await get_user_by_telegram_id(db, telegram_id)
+        if not user_db:
+            return None
+
+        plan = await get_active_karma_plan(db, user_db.id)
+        if not plan:
+            return None
+
+        tz = get_user_zoneinfo(user_db.timezone)
+        now = datetime.now(UTC)
+        bounds = get_local_day_bounds(now, tz)
+
+        daily_plan = await get_today_daily_plan(
+            db, karma_plan_id=plan.id, utc_start=bounds.utc_start, utc_end=bounds.utc_end
+        )
+        seeds = await get_today_seeds(
+            db, user_id=user_db.id, utc_start=bounds.utc_start, utc_end=bounds.utc_end
+        )
+        session = await get_or_create_session(
+            db,
+            user_id=user_db.id,
+            local_date=bounds.local_date,
+            karma_plan_id=plan.id,
+            daily_plan_id=daily_plan.id if daily_plan else None,
+        )
+        rejoiced = await get_rejoiced_seed_ids(db, session_id=session.id)
+        await db.commit()
+
+        tasks_list = []
+        if daily_plan and daily_plan.tasks:
+            tasks_list = [
+                {"id": str(t.id), "desc": t.description, "completed": t.completed}
+                for t in daily_plan.tasks
+            ]
+
+        seeds_list = [
+            {"id": s.id, "desc": s.description, "rc": s.rejoice_count or 0}
+            for s in seeds
+        ]
+
+        return {
+            "user_id": user_db.id,
+            "session_id": session.id,
+            "seeds": seeds_list,
+            "tasks": tasks_list,
+            "rejoiced": rejoiced,
+        }
+
+
+def _cf_seeds_keyboard(seeds: list, rejoiced: list[str]) -> InlineKeyboardMarkup:
+    """Build inline keyboard for seed rejoice toggles."""
+    buttons = []
+    for i, s in enumerate(seeds[:10]):
+        is_on = s["id"] in rejoiced
+        icon = "✨" if is_on else "🌱"
+        label = f"{icon} {s['desc'][:38]}"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"cf_rj_{i}")])
+    buttons.append([InlineKeyboardButton(text="Далее ☕️", callback_data="cf_next_4")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+@router.callback_query(F.data == "cf_start")
+async def cf_start(callback: CallbackQuery, state: FSMContext):
+    """Start coffee meditation — Step 1: Breathing."""
+    await callback.answer()
+
+    data = await _cf_load_data(callback.from_user.id)
+    if not data:
+        await callback.message.edit_text(
+            "Сейчас у тебя нет активного проекта. Давай сначала спокойно соберём его."
+        )
+        return
+
+    await state.update_data(
+        cf_session_id=data["session_id"],
+        cf_user_id=data["user_id"],
+        cf_seeds=data["seeds"],
+        cf_tasks=data["tasks"],
+        cf_rejoiced=data["rejoiced"],
+    )
+    await state.set_state(CoffeeState.step_1)
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Далее ☕️", callback_data="cf_next_2")]]
+    )
+
+    await callback.message.edit_text(
+        "🧘 *Шаг 1 · Подготовка*\n\n"
+        "Сделай пару спокойных вдохов.\n"
+        "Давай мягко вспомним всё хорошее,\n"
+        "что уже случилось сегодня.\n\n"
+        "_Не торопись. Просто побудь здесь секунду._",
+        parse_mode="Markdown",
+        reply_markup=kb,
+    )
+
+
+@router.callback_query(F.data == "cf_next_2")
+async def cf_step_2(callback: CallbackQuery, state: FSMContext):
+    """Step 2: Review day — tasks & seeds."""
+    await callback.answer()
+    fsm = await state.get_data()
+    if not fsm.get("cf_session_id"):
+        await callback.message.edit_text("Сессия не найдена. Попробуй /coffee заново.")
+        await state.clear()
+        return
+
+    await state.set_state(CoffeeState.step_2)
+
+    tasks = fsm.get("cf_tasks", [])
+    seeds = fsm.get("cf_seeds", [])
+
+    text = "📋 *Шаг 2 · Обзор дня*\n\n"
+
+    if tasks:
+        text += "*Твои шаги на сегодня:*\n"
+        for t in tasks[:8]:
+            mark = "✅" if t["completed"] else "⬜️"
+            text += f"{mark} {t['desc']}\n"
+        text += "\n"
+    else:
+        text += "_Шагов на сегодня пока нет — и это нормально._\n\n"
+
+    if seeds:
+        text += f"*Семена за сегодня:* {len(seeds)}\n"
+        for s in seeds[:5]:
+            text += f"🌱 {s['desc'][:50]}\n"
+        if len(seeds) > 5:
+            text += f"_...и ещё {len(seeds) - 5}_\n"
+    else:
+        text += "_Семян пока нет. Даже маленькое доброе дело уже считается._\n"
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Далее ☕️", callback_data="cf_next_3")]]
+    )
+
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+
+
+@router.callback_query(F.data == "cf_next_3")
+async def cf_step_3(callback: CallbackQuery, state: FSMContext):
+    """Step 3: Rejoice — pick seeds to amplify."""
+    await callback.answer()
+    fsm = await state.get_data()
+    if not fsm.get("cf_session_id"):
+        await callback.message.edit_text("Сессия не найдена. Попробуй /coffee заново.")
+        await state.clear()
+        return
+
+    await state.set_state(CoffeeState.step_3)
+
+    seeds = fsm.get("cf_seeds", [])
+    rejoiced = fsm.get("cf_rejoiced", [])
+
+    if not seeds:
+        text = (
+            "✨ *Шаг 3 · Радость*\n\n"
+            "_Сегодня семян ещё нет. Просто вспомни любое доброе дело — "
+            "даже самое маленькое — и порадуйся ему в сердце._"
+        )
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="Далее ☕️", callback_data="cf_next_4")]]
+        )
+    else:
+        text = (
+            "✨ *Шаг 3 · Радость*\n\n"
+            "Выбери семена, которым хочешь порадоваться.\n"
+            "Каждое нажатие усиливает семя.\n"
+        )
+        kb = _cf_seeds_keyboard(seeds, rejoiced)
+
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("cf_rj_"))
+async def cf_toggle_rejoice(callback: CallbackQuery, state: FSMContext):
+    """Toggle rejoice on a seed."""
+    fsm = await state.get_data()
+    seeds = fsm.get("cf_seeds", [])
+    rejoiced = list(fsm.get("cf_rejoiced", []))
+
+    try:
+        idx = int(callback.data.split("_")[2])
+    except (ValueError, IndexError):
+        await callback.answer("Ошибка")
+        return
+
+    if idx < 0 or idx >= len(seeds):
+        await callback.answer("Ошибка")
+        return
+
+    seed_id = seeds[idx]["id"]
+    if seed_id in rejoiced:
+        rejoiced.remove(seed_id)
+        await callback.answer("Убрано")
+    else:
+        rejoiced.append(seed_id)
+        await callback.answer("Радость! ✨")
+
+    await state.update_data(cf_rejoiced=rejoiced)
+
+    # Save progress to backend
+    try:
+        from app.database import AsyncSessionLocal
+        from app.coffee_meditation import save_progress
+        from app.models.db_models import CoffeeMeditationSessionDB
+        from sqlalchemy import select
+
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(CoffeeMeditationSessionDB).where(
+                    CoffeeMeditationSessionDB.id == fsm["cf_session_id"]
+                )
+            )
+            session = result.scalar_one_or_none()
+            if session:
+                await save_progress(
+                    db,
+                    session=session,
+                    user_id=fsm["cf_user_id"],
+                    current_step=2,
+                    notes_draft=None,
+                    rejoiced_seed_ids=rejoiced,
+                )
+                await db.commit()
+    except Exception as e:
+        logger.error(f"cf_toggle_rejoice save error: {e}", exc_info=True)
+
+    # Rebuild keyboard
+    kb = _cf_seeds_keyboard(seeds, rejoiced)
+    try:
+        await callback.message.edit_reply_markup(reply_markup=kb)
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data == "cf_next_4")
+async def cf_step_4(callback: CallbackQuery, state: FSMContext):
+    """Step 4: Notes + dedication."""
+    await callback.answer()
+    fsm = await state.get_data()
+    if not fsm.get("cf_session_id"):
+        await callback.message.edit_text("Сессия не найдена. Попробуй /coffee заново.")
+        await state.clear()
+        return
+
+    await state.set_state(CoffeeState.step_4_notes)
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Пропустить", callback_data="cf_skip_notes")],
+        ]
+    )
+
+    await callback.message.edit_text(
+        "🙏 *Шаг 4 · Посвящение*\n\n"
+        "Если хочешь — напиши пару тёплых слов для себя.\n"
+        "Или просто нажми «Пропустить».\n\n"
+        "_Например: «Сегодня я молодец, потому что...»_",
+        parse_mode="Markdown",
+        reply_markup=kb,
+    )
+
+
+@router.message(CoffeeState.step_4_notes)
+async def cf_receive_notes(message: Message, state: FSMContext):
+    """Receive notes text from user and complete."""
+    fsm = await state.get_data()
+    notes = message.text.strip() if message.text else None
+
+    await _cf_complete(message, state, fsm, notes)
+
+
+@router.callback_query(F.data == "cf_skip_notes")
+async def cf_skip_notes(callback: CallbackQuery, state: FSMContext):
+    """Skip notes and complete."""
+    await callback.answer()
+    fsm = await state.get_data()
+
+    await _cf_complete(callback.message, state, fsm, notes=None, edit=True)
+
+
+async def _cf_complete(message: Message, state: FSMContext, fsm: dict, notes: str | None, edit: bool = False):
+    """Finalize the coffee meditation session."""
+    from app.database import AsyncSessionLocal
+    from app.coffee_meditation import complete_session, save_progress
+    from app.models.db_models import CoffeeMeditationSessionDB
+    from sqlalchemy import select
+
+    session_id = fsm.get("cf_session_id")
+    user_id = fsm.get("cf_user_id")
+    rejoiced = fsm.get("cf_rejoiced", [])
+
+    if not session_id:
+        text = "Сессия не найдена. Попробуй /coffee заново."
+        if edit:
+            await message.edit_text(text)
+        else:
+            await message.answer(text)
+        await state.clear()
+        return
+
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await complete_session(
+                db,
+                session_id=session_id,
+                user_id=user_id,
+                notes=notes,
+                rejoice_seed_ids=rejoiced,
+            )
+            await db.commit()
+    except Exception as e:
+        logger.error(f"cf_complete error: {e}", exc_info=True)
+
+    await state.clear()
+
+    seeds_count = len(fsm.get("cf_seeds", []))
+    rejoiced_count = len(rejoiced)
+
+    text = "✅ *Кофе‑медитация завершена!*\n\n"
+    if rejoiced_count:
+        text += f"✨ Усилено семян: {rejoiced_count}\n"
+    if notes:
+        text += f"📝 Записано: _{notes[:80]}{'...' if len(notes) > 80 else ''}_\n"
+    text += "\nКаждое мгновение осознанности — это семя. Хорошего дня! ☀️"
+
+    if edit:
+        await message.edit_text(text, parse_mode="Markdown")
+    else:
+        await message.answer(text, parse_mode="Markdown")
 
 
 # Register router

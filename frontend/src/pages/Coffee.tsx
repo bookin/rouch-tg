@@ -278,208 +278,208 @@ export default function CoffeePage() {
             </div>
           </div>
 
-            {step === 1 && (
-              <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                {dailyTasks.length > 0 ? (
-                  <div className="space-y-2">
-                    <div className="text-xs font-bold uppercase tracking-wider text-white/60">Твои шаги на сегодня</div>
-                    <div className="space-y-2">
-                      {dailyTasks.map((t) => (
-                        <div
-                          key={t.id}
-                          className={cn(
-                            'rounded-2xl border p-4 flex items-start gap-3 backdrop-blur-main',
-                            t.completed
-                              ? 'bg-white/15 border-white/25'
-                              : 'bg-white/10 hover:bg-white/15 border-white/20'
-                          )}
-                        >
-                          <div
-                            className={cn(
-                              'h-9 w-9 rounded-full flex items-center justify-center shrink-0 border',
-                              t.completed
-                                ? 'bg-green-500/15 border-green-400/30 text-green-200'
-                                : 'bg-white/10 border-white/20 text-white/70'
-                            )}
-                          >
-                            {t.completed ? <Star className="h-4 w-4 fill-current" /> : <Sprout className="h-4 w-4" />}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-white">{t.description}</p>
-                            {t.why && <p className="text-xs text-white/60 mt-1">{t.why}</p>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-center p-4 italic bg-white/10 rounded-2xl border border-white/20 backdrop-blur-main text-white/70">
-                    На сегодня нет списка шагов — ничего страшного. Даже маленькое доброе действие уже считается.
-                  </div>
-                )}
-
+          {step === 1 && (
+            <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              {dailyTasks.length > 0 ? (
                 <div className="space-y-2">
-                  <div className="text-xs font-bold uppercase tracking-wider text-white/60">Семена за сегодня</div>
-
-                  {seeds.length === 0 ? (
-                    <div className="text-center p-4 italic bg-white/10 rounded-2xl border border-white/20 backdrop-blur-main text-white/70">
-                      Сегодня семян ещё нет. Если хочешь — просто вспомни любое доброе дело, даже самое небольшое.
-                    </div>
-                  ) : (
-                    <div className="space-y-2 max-h-[240px] overflow-y-auto pr-1 scrollbar-none">
-                      {seeds.map((s) => (
-                        <div
-                          key={s.id}
-                          className="p-4 rounded-2xl border bg-white/10 border-white/20 flex items-center gap-3 backdrop-blur-main"
-                        >
-                          <div className="h-9 w-9 rounded-full bg-white/10 border border-white/20 flex items-center justify-center shrink-0 text-white/70">
-                            <Sprout className="h-5 w-5" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-white truncate">{s.description}</p>
-                            {typeof s.rejoice_count === 'number' && (
-                              <p className="text-[11px] text-white/60 mt-1">Радость: {s.rejoice_count}</p>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {step === 2 && (
-              <div className="space-y-3 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="text-xs font-bold uppercase tracking-wider text-white/60">Выбери семена для радости</div>
-
-                {seeds.length === 0 && (
-                  <div className="text-center p-4 italic bg-white/10 rounded-2xl border border-white/20 backdrop-blur-main text-white/70">
-                    Сегодня семян ещё нет. Если хочется — ты можешь посадить семя в «Журнале».
-                  </div>
-                )}
-
-                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1 scrollbar-none">
-                  {seeds.map((s) => {
-                    const isRejoiced = rejoiced.includes(s.id)
-                    return (
+                  <div className="text-xs font-bold uppercase tracking-wider text-white/60">Твои шаги на сегодня</div>
+                  <div className="space-y-2">
+                    {dailyTasks.map((t) => (
                       <div
-                        key={s.id}
-                        onClick={() => toggleRejoice(s.id)}
+                        key={t.id}
                         className={cn(
-                          'p-4 rounded-2xl border transition-all cursor-pointer flex items-center gap-3 relative overflow-hidden group backdrop-blur-main',
-                          isRejoiced
-                            ? 'bg-orange-500/10 border-orange-400/30 shadow-sm'
-                            : 'bg-white/10 hover:bg-white/15 border-white/20 hover:border-white/35'
+                          'rounded-2xl border p-4 flex items-start gap-3 backdrop-blur-main',
+                          t.completed
+                            ? 'bg-white/15 border-white/25'
+                            : 'bg-white/10 hover:bg-white/15 border-white/20'
                         )}
                       >
                         <div
                           className={cn(
-                            'h-10 w-10 rounded-full flex items-center justify-center shrink-0 transition-colors border',
-                            isRejoiced
-                              ? 'bg-orange-500/15 border-orange-400/30 text-orange-200'
+                            'h-9 w-9 rounded-full flex items-center justify-center shrink-0 border',
+                            t.completed
+                              ? 'bg-green-500/15 border-green-400/30 text-green-200'
                               : 'bg-white/10 border-white/20 text-white/70'
                           )}
                         >
-                          {isRejoiced ? (
-                            <Star className="h-5 w-5 fill-current" />
-                          ) : (
-                            <Sprout className="h-5 w-5" />
+                          {t.completed ? <Star className="h-4 w-4 fill-current" /> : <Sprout className="h-4 w-4" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-white">{t.description}</p>
+                          {t.why && <p className="text-xs text-white/60 mt-1">{t.why}</p>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center p-4 italic bg-white/10 rounded-2xl border border-white/20 backdrop-blur-main text-white/70">
+                  На сегодня нет списка шагов — ничего страшного. Даже маленькое доброе действие уже считается.
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <div className="text-xs font-bold uppercase tracking-wider text-white/60">Семена за сегодня</div>
+
+                {seeds.length === 0 ? (
+                  <div className="text-center p-4 italic bg-white/10 rounded-2xl border border-white/20 backdrop-blur-main text-white/70">
+                    Сегодня семян ещё нет. Если хочешь — просто вспомни любое доброе дело, даже самое небольшое.
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-[240px] overflow-y-auto pr-1 scrollbar-none">
+                    {seeds.map((s) => (
+                      <div
+                        key={s.id}
+                        className="p-4 rounded-2xl border bg-white/10 border-white/20 flex items-center gap-3 backdrop-blur-main"
+                      >
+                        <div className="h-9 w-9 rounded-full bg-white/10 border border-white/20 flex items-center justify-center shrink-0 text-white/70">
+                          <Sprout className="h-5 w-5" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-white truncate">{s.description}</p>
+                          {typeof s.rejoice_count === 'number' && (
+                            <p className="text-[11px] text-white/60 mt-1">Радость: {s.rejoice_count}</p>
                           )}
                         </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-0.5">
-                            {isRejoiced && (
-                              <span className="text-xs font-bold text-orange-200 animate-in fade-in zoom-in">РАДОСТЬ!</span>
-                            )}
-                            {typeof s.rejoice_count === 'number' && (
-                              <span className="text-[10px] text-white/60">{s.rejoice_count} раз(а)</span>
-                            )}
-                          </div>
-                          <p className="text-sm font-medium text-white truncate">{s.description}</p>
+          {step === 2 && (
+            <div className="space-y-3 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="text-xs font-bold uppercase tracking-wider text-white/60">Выбери семена для радости</div>
+
+              {seeds.length === 0 && (
+                <div className="text-center p-4 italic bg-white/10 rounded-2xl border border-white/20 backdrop-blur-main text-white/70">
+                  Сегодня семян ещё нет. Если хочется — ты можешь посадить семя в «Журнале».
+                </div>
+              )}
+
+              <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1 scrollbar-none">
+                {seeds.map((s) => {
+                  const isRejoiced = rejoiced.includes(s.id)
+                  return (
+                    <div
+                      key={s.id}
+                      onClick={() => toggleRejoice(s.id)}
+                      className={cn(
+                        'p-4 rounded-2xl border transition-all cursor-pointer flex items-center gap-3 relative overflow-hidden group backdrop-blur-main',
+                        isRejoiced
+                          ? 'bg-orange-500/10 border-orange-400/30 shadow-sm'
+                          : 'bg-white/10 hover:bg-white/15 border-white/20 hover:border-white/35'
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          'h-10 w-10 rounded-full flex items-center justify-center shrink-0 transition-colors border',
+                          isRejoiced
+                            ? 'bg-orange-500/15 border-orange-400/30 text-orange-200'
+                            : 'bg-white/10 border-white/20 text-white/70'
+                        )}
+                      >
+                        {isRejoiced ? (
+                          <Star className="h-5 w-5 fill-current" />
+                        ) : (
+                          <Sprout className="h-5 w-5" />
+                        )}
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          {isRejoiced && (
+                            <span className="text-xs font-bold text-orange-200 animate-in fade-in zoom-in">РАДОСТЬ!</span>
+                          )}
+                          {typeof s.rejoice_count === 'number' && (
+                            <span className="text-[10px] text-white/60">{s.rejoice_count} раз(а)</span>
+                          )}
                         </div>
-
-                        {isRejoiced && <div className="absolute right-0 top-0 bottom-0 w-1 bg-orange-400" />}
+                        <p className="text-sm font-medium text-white truncate">{s.description}</p>
                       </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
 
-            {step === 3 && (
-              <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="space-y-2">
-                  <Label className="text-white">Пара тёплых слов для себя</Label>
-                  <Textarea
-                    value={notesDraft}
-                    onChange={(e) => onNotesChange(e.target.value)}
-                    placeholder="Например: Сегодня я молодец(умница), потому что..."
-                    className="min-h-[110px]"
-                  />
-                  <p className="text-xs text-white/60">Мы сохраняем это мягко, по мере того как ты пишешь.</p>
-                </div>
-
-                {dailyTasks.length > 0 && (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-4">
-                      <Label className="text-white">Какие шаги ты сделал(а) сегодня?</Label>
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          id="complete_project_day"
-                          checked={completeProjectDay}
-                          onCheckedChange={(c) => setCompleteProjectDay(Boolean(c))}
-                        />
-                        <Label htmlFor="complete_project_day" className="text-sm font-normal cursor-pointer">
-                          Закрыть день
-                        </Label>
-                      </div>
+                      {isRejoiced && <div className="absolute right-0 top-0 bottom-0 w-1 bg-orange-400" />}
                     </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
-                    <div className="space-y-2">
-                      {dailyTasks.map((t) => {
-                        const checked = completedTaskIds.includes(t.id)
-                        return (
-                          <div
-                            key={t.id}
-                            className={cn(
-                              'p-4 rounded-2xl border bg-white/10 border-white/20 flex items-start gap-3 backdrop-blur-main'
-                            )}
-                          >
-                            <Checkbox
-                              id={`task_${t.id}`}
-                              checked={checked}
-                              onCheckedChange={() => toggleTask(t.id)}
-                              className="mt-1"
-                            />
-                            <div className="flex-1 min-w-0">
-                              <Label htmlFor={`task_${t.id}`} className="text-sm font-medium cursor-pointer">
-                                {t.description}
-                              </Label>
-                              {t.why && <p className="text-xs text-white/60 mt-1">{t.why}</p>}
-                            </div>
+          {step === 3 && (
+            <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="space-y-2">
+                <Label className="text-white">Пара тёплых слов для себя</Label>
+                <Textarea
+                  value={notesDraft}
+                  onChange={(e) => onNotesChange(e.target.value)}
+                  placeholder="Например: Сегодня я молодец(умница), потому что..."
+                  className="min-h-[110px]"
+                />
+                <p className="text-xs text-white/60">Мы сохраняем это мягко, по мере того как ты пишешь.</p>
+              </div>
+
+              {dailyTasks.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <Label className="text-white">Какие шаги ты сделал(а) сегодня?</Label>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="complete_project_day"
+                        checked={completeProjectDay}
+                        onCheckedChange={(c) => setCompleteProjectDay(Boolean(c))}
+                      />
+                      <Label htmlFor="complete_project_day" className="text-sm font-normal cursor-pointer">
+                        Закрыть день
+                      </Label>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    {dailyTasks.map((t) => {
+                      const checked = completedTaskIds.includes(t.id)
+                      return (
+                        <div
+                          key={t.id}
+                          className={cn(
+                            'p-4 rounded-2xl border bg-white/10 border-white/20 flex items-start gap-3 backdrop-blur-main'
+                          )}
+                        >
+                          <Checkbox
+                            id={`task_${t.id}`}
+                            checked={checked}
+                            onCheckedChange={() => toggleTask(t.id)}
+                            className="mt-1"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <Label htmlFor={`task_${t.id}`} className="text-sm font-medium cursor-pointer">
+                              {t.description}
+                            </Label>
+                            {t.why && <p className="text-xs text-white/60 mt-1">{t.why}</p>}
                           </div>
-                        )
-                      })}
-                    </div>
+                        </div>
+                      )
+                    })}
                   </div>
-                )}
+                </div>
+              )}
 
-                {dailyTasks.length === 0 && (
-                  <div className="flex items-center gap-2 text-white">
-                    <Checkbox
-                      id="complete_project_day_empty"
-                      checked={completeProjectDay}
-                      onCheckedChange={(c) => setCompleteProjectDay(Boolean(c))}
-                    />
-                    <Label htmlFor="complete_project_day_empty" className="text-sm font-normal cursor-pointer">
-                      Закрыть день проекта
-                    </Label>
-                  </div>
-                )}
-              </div>
-            )}
+              {dailyTasks.length === 0 && (
+                <div className="flex items-center gap-2 text-white">
+                  <Checkbox
+                    id="complete_project_day_empty"
+                    checked={completeProjectDay}
+                    onCheckedChange={(c) => setCompleteProjectDay(Boolean(c))}
+                  />
+                  <Label htmlFor="complete_project_day_empty" className="text-sm font-normal cursor-pointer">
+                    Закрыть день проекта
+                  </Label>
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 

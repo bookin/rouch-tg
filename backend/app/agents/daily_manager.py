@@ -767,19 +767,18 @@ class DailyManagerAgent:
             return 0
     
     async def _get_completed_actions(self, user_id: int) -> list:
-        """Get completed actions for today (UTC-based day)."""
+        """Get completed daily tasks for today (UTC-based day)."""
         from app.database import AsyncSessionLocal
-        from app.models.db_models import PartnerActionDB
+        from app.models.db_models import DailyTaskDB, DailyPlanDB, KarmaPlanDB
         from sqlalchemy import select
 
         try:
             async with AsyncSessionLocal() as db:
                 today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
                 result = await db.execute(
-                    select(PartnerActionDB).where(
-                        PartnerActionDB.user_id == user_id,
-                        PartnerActionDB.timestamp >= today_start,
-                        PartnerActionDB.completed == True,
+                    select(DailyTaskDB).where(
+                        DailyTaskDB.completed == True,
+                        DailyTaskDB.completed_at >= today_start,
                     )
                 )
                 return result.scalars().all()
