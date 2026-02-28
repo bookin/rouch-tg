@@ -153,9 +153,6 @@ def create_daily_agent() -> Agent[MessageContext, DailyMessage]:
         
         prompt = f"Пользователь: {context.user_name}\n"
         
-        if context.user_focus:
-            prompt += f"Текущий фокус: {context.user_focus}\n"
-        
         if context.plan_strategy:
             prompt += "\n--- АКТИВНЫЙ КАРМИЧЕСКИЙ ПРОЕКТ ---\n"
             prompt += f"Проблема: {context.plan_strategy.get('problem_text', 'Не указана')}\n"
