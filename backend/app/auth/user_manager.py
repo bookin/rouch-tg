@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from app.auth.database import get_user_db
 from app.config import get_settings
-from app.models.db_models import UserDB
+from app.models.db.user import UserDB
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -22,11 +22,25 @@ class UserManager(IntegerIDMixin, BaseUserManager[UserDB, int]):  # type: ignore
 
     async def on_after_register(self, user: UserDB, request: Optional[Request] = None):
         logger.info(f"User {user.id} registered (email: {user.email})")
+        if user.email:
+            from app.email.service import send_welcome_email
+            await send_welcome_email(user.email, user.first_name or "друг")
 
     async def on_after_forgot_password(
         self, user: UserDB, token: str, request: Optional[Request] = None
     ):
         logger.info(f"User {user.id} forgot password. Reset token generated.")
+        if user.email:
+            from app.email.service import send_reset_password_email
+            await send_reset_password_email(user.email, user.first_name or "друг", token)
+
+    async def on_after_request_verify(
+        self, user: UserDB, token: str, request: Optional[Request] = None
+    ):
+        logger.info(f"User {user.id} requested email verification.")
+        if user.email:
+            from app.email.service import send_verification_email
+            await send_verification_email(user.email, user.first_name or "друг", token)
 
     # ===== Custom methods for Telegram =====
 
@@ -54,7 +68,7 @@ class UserManager(IntegerIDMixin, BaseUserManager[UserDB, int]):  # type: ignore
             return user
 
         # Create new Telegram user
-        from app.crud import ensure_default_partner_groups
+        from app.repositories.partner import PartnerGroupRepository
 
         user = UserDB(
             telegram_id=user_info["telegram_id"],
@@ -71,7 +85,7 @@ class UserManager(IntegerIDMixin, BaseUserManager[UserDB, int]):  # type: ignore
         await self.user_db.session.refresh(user)  # type: ignore[attr-defined]
 
         # Ensure default partner groups for new user
-        await ensure_default_partner_groups(self.user_db.session, user.id)  # type: ignore[attr-defined, arg-type]
+        await PartnerGroupRepository().ensure_defaults(self.user_db.session, user.id)  # type: ignore[attr-defined, arg-type]
         await self.user_db.session.flush()  # type: ignore[attr-defined]
 
         return user

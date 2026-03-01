@@ -4,7 +4,8 @@ from app.models.user import UserProfile
 from app.knowledge.qdrant import QdrantKnowledgeBase
 from app.ai import generate_morning_message, generate_evening_message
 from app.database import AsyncSessionLocal
-from app.models.db_models import SeedDB, DailyTaskDB
+from app.models.db.seed import SeedDB
+from app.models.db.daily import DailyTaskDB
 from sqlalchemy import select, func
 from datetime import datetime, UTC
 

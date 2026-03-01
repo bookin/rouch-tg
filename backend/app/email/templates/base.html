@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ app_name }}</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: #0f1117;
+            color: #e4e4e7;
+        }
+        .container {
+            max-width: 560px;
+            margin: 0 auto;
+            padding: 40px 24px;
+        }
+        .card {
+            background: linear-gradient(135deg, #1a1d2e 0%, #161927 100%);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 16px;
+            padding: 40px 32px;
+        }
+        .logo {
+            text-align: center;
+            font-size: 48px;
+            margin-bottom: 8px;
+        }
+        .app-name {
+            text-align: center;
+            font-size: 14px;
+            color: #71717a;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-bottom: 32px;
+        }
+        h1 {
+            font-size: 22px;
+            font-weight: 600;
+            color: #fafafa;
+            margin: 0 0 16px 0;
+            text-align: center;
+        }
+        p {
+            font-size: 15px;
+            line-height: 1.7;
+            color: #a1a1aa;
+            margin: 0 0 16px 0;
+        }
+        .highlight {
+            color: #e4e4e7;
+            font-weight: 500;
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            max-width: 280px;
+            margin: 28px auto;
+            padding: 14px 24px;
+            background: linear-gradient(135deg, #4f7942 0%, #3d6b33 100%);
+            color: #ffffff!important;
+            text-decoration: none;
+            text-align: center;
+            font-size: 15px;
+            font-weight: 600;
+            border-radius: 12px;
+            letter-spacing: 0.3px;
+        }
+        .btn:hover {
+            background: linear-gradient(135deg, #5a8a4a 0%, #4a7d3e 100%);
+        }
+        .divider {
+            border: none;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            margin: 28px 0;
+        }
+        .footer {
+            text-align: center;
+            font-size: 12px;
+            color: #52525b;
+            margin-top: 32px;
+            line-height: 1.6;
+        }
+        .footer a {
+            color: #71717a;
+            text-decoration: none;
+        }
+        .quote {
+            font-style: italic;
+            text-align: center;
+            color: #71717a;
+            font-size: 13px;
+            padding: 16px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="logo">🪷</div>
+            <div class="app-name">{{ app_name }}</div>
+            {% block content %}{% endblock %}
+        </div>
+        <div class="footer">
+            <p>
+                Это письмо отправлено автоматически от {{ app_name }}.<br>
+                Если ты не ожидал(а) его — просто проигнорируй.
+            </p>
+        </div>
+    </div>
+</body>
+</html>

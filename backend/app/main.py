@@ -103,6 +103,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Centralized error handler
+from app.core.exceptions import AppException
+from app.core.error_handler import app_exception_handler
+app.add_exception_handler(AppException, app_exception_handler)
+
 # Auth routers (fastapi-users)
 from app.auth import fastapi_users, telegram_backend, jwt_backend
 from app.models.schemas.user import UserRead, UserCreate, UserUpdate

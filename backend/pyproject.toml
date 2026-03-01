@@ -27,12 +27,16 @@ dependencies = [
     "langgraph-checkpoint-postgres==3.0.4",
     "fastapi-users[sqlalchemy]>=15.0.4",
     "email-validator>=2.3.0",
+    "fastapi-mail>=1.6.2",
 ]
 
 [dependency-groups]
 dev = [
     "ruff>=0.15.2",
-    "mypy>=1.19.1"
+    "mypy>=1.19.1",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.25",
+    "pytest-cov>=6.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -165,3 +169,10 @@ exclude = [
 [[tool.mypy.overrides]]
 ignore_errors = true
 module = ["alembic.versions.*", "app.db.migrations.*", "app.lib.dto.*"]
+
+# ------------------- PYTEST -------------------
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-v --tb=short"

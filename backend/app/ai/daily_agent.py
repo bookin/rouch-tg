@@ -6,7 +6,7 @@ from sqlalchemy import select
 from app.ai.models import get_model
 from app.utils.typing_loader import broadcast_status
 from app.database import AsyncSessionLocal
-from app.models.db_models import PartnerDB
+from app.models.db.partner import PartnerDB
 
 
 class MessageContext(BaseModel):

@@ -78,7 +78,7 @@ async def main():
 async def _upsert_practices_to_db(practice_items):
     """Upsert practices from KnowledgeItem list into PracticeDB."""
     from app.database import AsyncSessionLocal
-    from app.models.db_models import PracticeDB
+    from app.models.db.practice import PracticeDB
     from sqlalchemy import select
 
     async with AsyncSessionLocal() as db:

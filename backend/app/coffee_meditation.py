@@ -10,10 +10,12 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db_models import (
+from app.models.db.coffee import (
     CoffeeMeditationRejoicedSeedDB,
     CoffeeMeditationSessionDB,
-    DailyPlanDB,
+)
+from app.models.db.daily import DailyPlanDB
+from app.models.db.seed import (
     SeedDB,
 )
 

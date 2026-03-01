@@ -1,6 +1,6 @@
 """FastAPIUsers setup with Telegram + JWT backends"""
 from fastapi_users import FastAPIUsers
-from app.models.db_models import UserDB
+from app.models.db.user import UserDB
 from app.auth.user_manager import get_user_manager
 from app.auth.telegram_backend import telegram_backend
 from app.auth.jwt_backend import jwt_backend

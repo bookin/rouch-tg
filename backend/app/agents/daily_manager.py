@@ -5,7 +5,7 @@ import logging
 import asyncio
 from pydantic import BaseModel
 from app.models.user import UserProfile
-from app.models.db_models import DailyTaskDB
+from app.models.db.daily import DailyTaskDB
 from app.knowledge.qdrant import QdrantKnowledgeBase
 from app.workflows.daily_flow import DailyFlowWorkflow
 from app.ai import generate_morning_message, generate_evening_message
@@ -52,15 +52,18 @@ class DailyManagerAgent:
         (webapp /daily/actions, команда /today и т.п.).
         """
         from app.database import AsyncSessionLocal
-        from app.crud_extended import get_active_karma_plan, get_daily_plan, create_daily_plan
+        from app.repositories.karma_plan import KarmaPlanRepository
+        from app.repositories.daily import DailyPlanRepository
 
         try:
             async with AsyncSessionLocal() as db:
                 now = datetime.now(UTC)
                 actions: list[dict[str, Any]] = []
+                _kp_repo = KarmaPlanRepository()
+                _dp_repo = DailyPlanRepository()
 
                 # 0. Check for active Karma Plan
-                active_plan = await get_active_karma_plan(db, user_id)
+                active_plan = await _kp_repo.get_active(db, user_id)
 
                 if active_plan:
                     # --- PROJECT MODE ---
@@ -91,7 +94,7 @@ class DailyManagerAgent:
                                 ) or "physical"
 
                     # Try to get today's daily plan
-                    daily_plan = await get_daily_plan(db, active_plan.id, now)
+                    daily_plan = await _dp_repo.get_by_date_range(db, active_plan.id, now)
 
                     if daily_plan and daily_plan.tasks and not regenerate:
                         # Tasks already exist for today – utilize DailyTaskDB objects
@@ -202,7 +205,7 @@ class DailyManagerAgent:
                                 db.add(task)
                         else:
                             # Create new plan with tasks
-                            daily_plan = await create_daily_plan(
+                            daily_plan = await _dp_repo.create_with_tasks(
                                 db,
                                 active_plan.id,
                                 day_number,
@@ -267,20 +270,22 @@ class DailyManagerAgent:
           через раздел «Проблема» в веб‑приложении.
         """
         from app.database import AsyncSessionLocal
-        from app.crud import (
-            get_latest_message_log,
-            create_message_log,
-            get_user_practice_progress,
-        )
-        from app.crud_extended import get_active_karma_plan, get_daily_plan, create_daily_plan
+        from app.repositories.karma_plan import KarmaPlanRepository
+        from app.repositories.daily import DailyPlanRepository
+        from app.repositories.message_log import MessageLogRepository
+        from app.services.practice_service import PracticeService
         
         try:
             async with AsyncSessionLocal() as db:
                 now = datetime.now(UTC)
                 actions: list[dict[str, Any]] = []
+                _kp_repo = KarmaPlanRepository()
+                _dp_repo = DailyPlanRepository()
+                _ml_repo = MessageLogRepository()
+                _practice_svc = PracticeService()
 
                 # 0. Check for active Karma Plan
-                active_plan = await get_active_karma_plan(db, user_id)
+                active_plan = await _kp_repo.get_active(db, user_id)
 
                 if active_plan:
                     # --- PROJECT MODE ---
@@ -314,7 +319,7 @@ class DailyManagerAgent:
 
                     # First, try to reuse cached message from MessageLogDB
                     if not regenerate:
-                        cached = await get_latest_message_log(
+                        cached = await _ml_repo.get_latest(
                             db,
                             user_id=user_id,
                             message_type="morning",
@@ -326,7 +331,7 @@ class DailyManagerAgent:
                             return cached.payload
 
                     # Prepare tasks: reuse existing daily plan tasks or generate new ones
-                    daily_plan = await get_daily_plan(db, active_plan.id, now)
+                    daily_plan = await _dp_repo.get_by_date_range(db, active_plan.id, now)
 
                     if daily_plan and daily_plan.tasks:
                         # Tasks already exist for today – just reuse them and generate text/quote
@@ -423,7 +428,7 @@ class DailyManagerAgent:
                                 )
                                 db.add(task)
                         else:
-                            daily_plan = await create_daily_plan(
+                            daily_plan = await _dp_repo.create_with_tasks(
                                 db,
                                 active_plan.id,
                                 day_number,
@@ -455,7 +460,7 @@ class DailyManagerAgent:
                     actions.sort(key=lambda x: x.get("order", 0))
 
                     # Add practice tracking actions
-                    practice_progress_list = await get_user_practice_progress(db, user_id)
+                    practice_progress_list = await _practice_svc.get_user_progress(db, user_id)
                     active_practices = [p for p in practice_progress_list if not p.is_habit]
                     
                     for practice in active_practices[:3]:  # Limit to 3 practices
@@ -494,7 +499,7 @@ class DailyManagerAgent:
                     }
 
                     # Log message for caching/analytics
-                    await create_message_log(
+                    await _ml_repo.create_log(
                         db,
                         user_id=user_id,
                         message_type="morning",
@@ -510,7 +515,8 @@ class DailyManagerAgent:
 
                 # --- NO ACTIVE PROJECT (classic mode отключён) ---
                 from app.config import get_settings
-                from app.models.db_models import MessageLogDB, UserDB
+                from app.models.db.message_log import MessageLogDB
+                from app.models.db.user import UserDB
                 from sqlalchemy import func, select
                 from zoneinfo import ZoneInfo
                 import random
@@ -604,7 +610,7 @@ class DailyManagerAgent:
                     "template_key": chosen["key"],
                 }
 
-                await create_message_log(
+                await _ml_repo.create_log(
                     db,
                     user_id=user_id,
                     message_type="no_plan_nudge",
@@ -664,19 +670,21 @@ class DailyManagerAgent:
         """Generate evening message using AI"""
         
         from app.database import AsyncSessionLocal
-        from app.crud import get_latest_message_log, create_message_log
-        from app.crud_extended import get_active_karma_plan
+        from app.repositories.karma_plan import KarmaPlanRepository
+        from app.repositories.message_log import MessageLogRepository
 
         try:
             now = datetime.now(UTC)
+            _kp_repo = KarmaPlanRepository()
+            _ml_repo = MessageLogRepository()
 
             async with AsyncSessionLocal() as db:
-                active_plan = await get_active_karma_plan(db, user.id)
+                active_plan = await _kp_repo.get_active(db, user.id)
                 if not active_plan:
                     return {"skip": True}
 
                 if not regenerate:
-                    cached = await get_latest_message_log(
+                    cached = await _ml_repo.get_latest(
                         db,
                         user_id=user.id,
                         message_type="evening",
@@ -718,10 +726,10 @@ class DailyManagerAgent:
 
             # Log message for caching/analytics
             async with AsyncSessionLocal() as db:
-                active_plan = await get_active_karma_plan(db, user.id)
+                active_plan = await _kp_repo.get_active(db, user.id)
                 if not active_plan:
                     return {"skip": True}
-                await create_message_log(
+                await _ml_repo.create_log(
                     db,
                     user_id=user.id,
                     message_type="evening",
@@ -749,7 +757,7 @@ class DailyManagerAgent:
     async def _get_today_seeds(self, user_id: int) -> int:
         """Get count of seeds planted today (UTC-based day)."""
         from app.database import AsyncSessionLocal
-        from app.models.db_models import SeedDB
+        from app.models.db.seed import SeedDB
         from sqlalchemy import select, func
 
         try:
@@ -769,7 +777,8 @@ class DailyManagerAgent:
     async def _get_completed_actions(self, user_id: int) -> list:
         """Get completed daily tasks for today (UTC-based day)."""
         from app.database import AsyncSessionLocal
-        from app.models.db_models import DailyTaskDB, DailyPlanDB, KarmaPlanDB
+        from app.models.db.daily import DailyTaskDB, DailyPlanDB
+        from app.models.db.karma_plan import KarmaPlanDB
         from sqlalchemy import select
 
         try:

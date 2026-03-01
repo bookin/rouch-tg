@@ -1,4 +1,4 @@
-.PHONY: help up down restart logs init-knowledge clean
+.PHONY: help up down restart logs init-knowledge clean lint typecheck test
 
 help:
 	@echo "Rouch Karma Manager - Commands:"
@@ -11,6 +11,9 @@ help:
 	@echo "  make migrate-create  - Create a new migration revision (usage: make migrate-create m=\"message\")"
 	@echo "  make clean-data      - Clear database volumes and re-initialize everything"
 	@echo "  make full-reset      - Full purge: clear volumes, rebuild images without cache, and re-initialize"
+	@echo "  make lint            - Run ruff linter on backend"
+	@echo "  make typecheck       - Run mypy type checker on backend"
+	@echo "  make test            - Run pytest on backend"
 
 up:
 	docker-compose up -d
@@ -53,3 +56,15 @@ full-reset:
 	$(MAKE) init-knowledge
 
 clean: full-reset
+
+lint:
+	docker-compose exec backend uv run ruff check app/
+
+lint-fix:
+	docker-compose exec backend uv run ruff check --fix app/
+
+typecheck:
+	docker-compose exec backend uv run mypy app/ --ignore-missing-imports
+
+test:
+	docker-compose exec backend uv run pytest tests/ -v --tb=short

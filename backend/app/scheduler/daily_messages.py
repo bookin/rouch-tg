@@ -55,7 +55,7 @@ class MessageScheduler:
     async def _check_and_send_messages(self):
         """Check current time for all users and send appropriate messages"""
         from app.telegram_utils import safe_send_message
-        from app.crud import get_active_users
+        from app.repositories.user import UserRepository
         from app.database import AsyncSessionLocal
         import logging
         import asyncio
@@ -68,10 +68,11 @@ class MessageScheduler:
             try:
                 morning_users = []
                 evening_users = []
+                _user_repo = UserRepository()
                 if self.settings.MORNING_ENABLED:
-                    morning_users = await get_active_users(db, morning_enabled=True)
+                    morning_users = await _user_repo.get_active_users(db, morning_enabled=True)
                 if self.settings.EVENING_ENABLED:
-                    evening_users = await get_active_users(db, evening_enabled=True)
+                    evening_users = await _user_repo.get_active_users(db, evening_enabled=True)
                 
                 morning_sent = 0
                 evening_sent = 0

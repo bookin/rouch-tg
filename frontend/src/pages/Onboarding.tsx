@@ -1,10 +1,11 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../api/client'
-import { ArrowRight, Check, ChevronRight, Loader2, Send, User } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
+import { api, logoutUser } from '../api/client'
+import { Loader2, ArrowRight, ArrowLeft, LogOut, Sparkles } from 'lucide-react'
+import {Button, ButtonOption} from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Card, CardContent } from '@/components/ui/card'
+import { Progress } from '@/components/ui/progress'
 
 interface OnboardingOption {
     id: string
@@ -20,41 +21,28 @@ interface OnboardingStep {
     options: OnboardingOption[]
     field: string | null
     completed: boolean
-}
-
-interface ChatMessage {
-    id: string
-    type: 'bot' | 'user'
-    text: string
-    options?: OnboardingOption[]
-    showOptions?: boolean
+    prev_step?: string | null
+    current_value?: any
 }
 
 export default function Onboarding() {
     const navigate = useNavigate()
-    const [messages, setMessages] = useState<ChatMessage[]>([])
     const [currentStep, setCurrentStep] = useState<OnboardingStep | null>(null)
     const [loading, setLoading] = useState(true)
-    const [selectedMulti, setSelectedMulti] = useState<string[]>([])
+    const [submitting, setSubmitting] = useState(false)
+    
+    // Form state
+    const [singleChoice, setSingleChoice] = useState<string>('')
+    const [multiChoice, setMultiChoice] = useState<string[]>([])
     const [textInput, setTextInput] = useState('')
-    const [isTyping, setIsTyping] = useState(false)
-    const messagesEndRef = useRef<HTMLDivElement>(null)
 
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }
-
-    useEffect(() => {
-        scrollToBottom()
-    }, [messages, isTyping])
-
-    // Start onboarding on mount
     useEffect(() => {
         startOnboarding()
     }, [])
 
     const startOnboarding = async () => {
         try {
+            setLoading(true)
             const response = await api.get('/api/onboarding/start')
             const step = response.data as OnboardingStep
 
@@ -63,8 +51,7 @@ export default function Onboarding() {
                 return
             }
 
-            setCurrentStep(step)
-            addBotMessage(step)
+            setupStep(step)
             setLoading(false)
         } catch (error) {
             console.error('Failed to start onboarding:', error)
@@ -72,84 +59,73 @@ export default function Onboarding() {
         }
     }
 
-    const addBotMessage = (step: OnboardingStep) => {
-        setIsTyping(true)
-
-        setTimeout(() => {
-            setIsTyping(false)
-            const newMessage: ChatMessage = {
-                id: `bot-${Date.now()}`,
-                type: 'bot',
-                text: step.message,
-                options: step.options,
-                showOptions: true
-            }
-            setMessages(prev => [...prev, newMessage])
-        }, 400)
+    const loadStep = async (stepId: string) => {
+        try {
+            setLoading(true)
+            const response = await api.get(`/api/onboarding/step/${stepId}`)
+            setupStep(response.data as OnboardingStep)
+            setLoading(false)
+        } catch (error) {
+            console.error('Failed to load step:', error)
+            setLoading(false)
+        }
     }
 
-    const handleSingleChoice = async (optionId: string, label: string) => {
-        if (!currentStep) return
-
-        // Add user message
-        setMessages(prev => prev.map(m => ({ ...m, showOptions: false })))
-        setMessages(prev => [...prev, {
-            id: `user-${Date.now()}`,
-            type: 'user',
-            text: label
-        }])
-
-        await submitAnswer(optionId)
-    }
-
-    const handleMultiChoiceToggle = (optionId: string) => {
-        setSelectedMulti(prev =>
-            prev.includes(optionId)
-                ? prev.filter(id => id !== optionId)
-                : [...prev, optionId]
-        )
-    }
-
-    const handleMultiChoiceSubmit = async () => {
-        if (!currentStep || selectedMulti.length === 0) return
-
-        const labels = currentStep.options
-            .filter(o => selectedMulti.includes(o.id))
-            .map(o => o.label)
-            .join(', ')
-
-        setMessages(prev => prev.map(m => ({ ...m, showOptions: false })))
-        setMessages(prev => [...prev, {
-            id: `user-${Date.now()}`,
-            type: 'user',
-            text: labels
-        }])
-
-        await submitAnswer(undefined, selectedMulti)
-        setSelectedMulti([])
-    }
-
-    const handleTextSubmit = async () => {
-        if (!currentStep) return
-
-        const answer = textInput.trim() || 'skip'
-        const displayText = textInput.trim() || 'Пропущено'
-
-        setMessages(prev => prev.map(m => ({ ...m, showOptions: false })))
-        setMessages(prev => [...prev, {
-            id: `user-${Date.now()}`,
-            type: 'user',
-            text: displayText
-        }])
-
-        await submitAnswer(answer)
+    const setupStep = (step: OnboardingStep) => {
+        setCurrentStep(step)
+        
+        // Reset local state based on current value or defaults
+        setSingleChoice('')
+        setMultiChoice([])
         setTextInput('')
+        
+        if (step.current_value !== undefined && step.current_value !== null) {
+            const hasOption = (val: string) => step.options.some(opt => opt.id === val)
+            
+            if (step.input_type === 'single_choice') {
+                const val = String(step.current_value)
+                if (hasOption(val)) {
+                    setSingleChoice(val)
+                } else if (val) {
+                    setSingleChoice('other')
+                    setTextInput(val)
+                }
+            } else if (step.input_type === 'multi_choice') {
+                const vals = Array.isArray(step.current_value) ? step.current_value : []
+                const standardVals = vals.filter(v => hasOption(String(v)))
+                const customVals = vals.filter(v => !hasOption(String(v)) && String(v) !== 'none')
+                
+                let finalMulti = [...standardVals]
+                if (customVals.length > 0) {
+                    finalMulti.push('other')
+                    setTextInput(customVals[0])
+                }
+                
+                setMultiChoice(finalMulti)
+            } else if (step.input_type === 'text_optional') {
+                if (step.current_value && step.current_value !== 'skip') {
+                    setTextInput(String(step.current_value))
+                }
+            }
+        }
+    }
+
+    const handleLogout = () => {
+        logoutUser()
+        navigate('/login')
+    }
+
+    const handleBack = () => {
+        if (currentStep?.prev_step) {
+            loadStep(currentStep.prev_step)
+        }
     }
 
     const submitAnswer = async (answer?: string, answers?: string[]) => {
         if (!currentStep) return
 
         try {
+            setSubmitting(true)
             const response = await api.post('/api/onboarding/answer', {
                 step: currentStep.step,
                 answer,
@@ -157,172 +133,270 @@ export default function Onboarding() {
             })
 
             const nextStep = response.data as OnboardingStep
-            setCurrentStep(nextStep)
 
             if (nextStep.completed) {
-                setIsTyping(true)
+                setCurrentStep(nextStep)
                 setTimeout(() => {
-                    setIsTyping(false)
-                    setMessages(prev => [...prev, {
-                        id: `bot-complete`,
-                        type: 'bot',
-                        text: nextStep.message
-                    }])
-
-                    // Redirect after showing completion message
-                    setTimeout(() => {
-                        navigate('/')
-                    }, 2000)
-                }, 400)
+                    navigate('/')
+                }, 2000)
             } else {
-                addBotMessage(nextStep)
+                setupStep(nextStep)
             }
         } catch (error) {
             console.error('Failed to submit answer:', error)
+        } finally {
+            setSubmitting(false)
         }
+    }
+
+    const handleNext = () => {
+        if (!currentStep) return
+
+        if (currentStep.input_type === 'single_choice' || currentStep.input_type === 'confirm') {
+            let val = singleChoice || (currentStep.options.length > 0 ? currentStep.options[0].id : 'continue')
+            if (val === 'other' && textInput.trim()) {
+                val = textInput.trim()
+            }
+            submitAnswer(val)
+        } else if (currentStep.input_type === 'multi_choice') {
+            let finalAnswers = [...multiChoice]
+            if (finalAnswers.includes('other') && textInput.trim()) {
+                finalAnswers = finalAnswers.filter(a => a !== 'other')
+                finalAnswers.push(textInput.trim())
+            }
+            submitAnswer(undefined, finalAnswers)
+        } else if (currentStep.input_type === 'text_optional') {
+            const val = textInput.trim() || 'skip'
+            submitAnswer(val)
+        }
+    }
+
+    const isNextDisabled = () => {
+        if (!currentStep || submitting) return true
+        if (currentStep.input_type === 'single_choice') {
+            if (!singleChoice) return true
+            if (singleChoice === 'other' && !textInput.trim()) return true
+        }
+        if (currentStep.input_type === 'multi_choice') {
+            if (multiChoice.length === 0) return true
+            if (multiChoice.includes('other') && !textInput.trim()) return true
+        }
+        return false
     }
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center min-h-screen ">
+            <div className="flex items-center justify-center min-h-screen">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
         )
     }
 
+    if (!currentStep) return null
+
+    const progressPercent = Math.round((currentStep.step_number / currentStep.total_steps) * 100)
+
+    if (currentStep.completed) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-screen p-4">
+                <Card className="max-w-md w-full bg-white/10 border-white/20 backdrop-blur-md shadow-xl text-center p-8">
+                    <Sparkles className="w-16 h-16 text-yellow-300 mx-auto mb-6" />
+                    <h2 className="text-2xl font-bold text-white mb-4 whitespace-pre-wrap">
+                        {currentStep.message}
+                    </h2>
+                    <Loader2 className="h-6 w-6 animate-spin text-white/50 mx-auto mt-8" />
+                </Card>
+            </div>
+        )
+    }
+
     return (
-        <div className="flex flex-col h-screen bg-transparent font-sans">
+        <div className="flex flex-col min-h-screen max-w-2xl mx-auto p-4 md:p-6 w-full relative z-10">
             {/* Header */}
-            <div className="px-5 py-4 bg-white/30 backdrop-blur-xl border-b border-white/30 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-md">
-                    <User className="h-5 w-5" />
-                </div>
-                <div>
-                    <div className="font-bold text-sm">Rouch Karma Manager</div>
-                    <div className="text-xs  font-medium">
-                        {currentStep && `Шаг ${currentStep.step_number} из ${currentStep.total_steps}`}
+            <div className="flex justify-between items-center mb-8 mt-4">
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-md">
+                        <Sparkles className="h-5 w-5" />
+                    </div>
+                    <div>
+                        <h1 className="text-lg font-bold text-white leading-tight">Rouch</h1>
+                        <p className="text-xs text-white/60 font-medium">Кармический менеджер</p>
                     </div>
                 </div>
+                <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={handleLogout} 
+                    className="text-white/80 hover:text-white hover:bg-white/10"
+                >
+                    <LogOut className="h-4 w-4 mr-2" />
+                    Выйти
+                </Button>
             </div>
 
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-none">
-                {messages.map(message => (
-                    <div 
-                        key={message.id} 
-                        className={cn(
-                            "flex w-full animate-in fade-in slide-in-from-bottom-2 duration-300",
-                            message.type === 'user' ? "justify-end" : "justify-start"
-                        )}
-                    >
-                        <div className={cn(
-                            "max-w-[85%] px-4 py-3 shadow-sm text-sm leading-relaxed backdrop-blur-main",
-                            message.type === 'user'
-                                ? "bg-primary text-primary-foreground rounded-2xl rounded-tr-sm shadow-md"
-                                : "bg-white/70 border border-white/40 rounded-2xl rounded-tl-sm shadow-sm"
-                        )}>
-                            {message.text}
-                        </div>
-                    </div>
-                ))}
+            {/* Progress */}
+            <div className="mb-6 space-y-2">
+                <div className="flex justify-between text-xs font-semibold text-white/70 uppercase tracking-wider">
+                    <span>Шаг {currentStep.step_number} из {currentStep.total_steps}</span>
+                    <span>{progressPercent}%</span>
+                </div>
+                <Progress value={progressPercent} className="h-2 bg-white/10" />
+            </div>
 
-                {/* Typing indicator */}
-                {isTyping && (
-                    <div className="flex justify-start animate-in fade-in zoom-in duration-300">
-                        <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-white/50 border border-white/30 flex items-center gap-1.5 h-10 w-16 justify-center backdrop-blur-main">
-                            <div className="w-1.5 h-1.5 bg-muted-foreground/40 rounded-full animate-bounce delay-0" />
-                            <div className="w-1.5 h-1.5 bg-muted-foreground/40 rounded-full animate-bounce delay-150" />
-                            <div className="w-1.5 h-1.5 bg-muted-foreground/40 rounded-full animate-bounce delay-300" />
-                        </div>
+            {/* Main Content */}
+            <Card className="bg-white/10 border-white/20 backdrop-blur-md shadow-xl flex-1 md:flex-none">
+                <CardContent className="p-6 md:p-8 flex flex-col h-full">
+                    <h2 className="text-xl md:text-2xl font-bold text-white mb-8 whitespace-pre-wrap leading-relaxed">
+                        {currentStep.message}
+                    </h2>
+
+                    <div className="flex-1 flex flex-col justify-center space-y-4">
+                        {/* Single Choice */}
+						{/* || currentStep.input_type === 'confirm' */}
+
+                        {(currentStep.input_type === 'single_choice') && (
+                            <div className="grid gap-3">
+                                {currentStep.options.map(option => (
+                                    <div key={option.id} className="flex flex-col gap-2">
+										<ButtonOption
+											selected={singleChoice === option.id}
+											className="p-4"
+											onClick={() => setSingleChoice(option.id)}
+										>
+											<span className="font-medium text-lg">{option.label}</span>
+										</ButtonOption>
+                                        
+                                        {option.id === 'other' && singleChoice === 'other' && (
+                                            <Input
+                                                value={textInput}
+                                                onChange={(e) => setTextInput(e.target.value)}
+                                                placeholder="Напиши свой вариант..."
+                                                autoFocus
+                                                className="bg-white/5 border-white/20 text-white placeholder:text-white/30 h-14 text-lg mt-1 animate-in fade-in slide-in-from-top-2"
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') handleNext()
+                                                }}
+                                            />
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* Multi Choice */}
+                        {currentStep.input_type === 'multi_choice' && (
+                            <div className="grid gap-3">
+                                {currentStep.options.map(option => {
+                                    const isSelected = multiChoice.includes(option.id)
+                                    const handleToggle = () => {
+                                        if (option.id === 'none') {
+                                            setMultiChoice(['none'])
+                                        } else {
+                                            setMultiChoice(prev => {
+                                                const withoutNone = prev.filter(id => id !== 'none')
+                                                return isSelected 
+                                                    ? withoutNone.filter(id => id !== option.id)
+                                                    : [...withoutNone, option.id]
+                                            })
+                                        }
+                                    }
+                                    
+                                    return (
+                                        <div key={option.id} className="flex flex-col gap-2">
+											<ButtonOption
+												selected={isSelected}
+												className="p-4"
+												onClick={handleToggle}
+												indicator="checkbox"
+											>
+												<span className="font-medium text-lg">{option.label}</span>
+											</ButtonOption>
+                                            
+                                            {option.id === 'other' && isSelected && (
+                                                <Input
+                                                    value={textInput}
+                                                    onChange={(e) => setTextInput(e.target.value)}
+                                                    placeholder="Напиши свой вариант..."
+                                                    autoFocus
+                                                    className="bg-white/5 border-white/20 text-white placeholder:text-white/30 h-14 text-lg mt-1 animate-in fade-in slide-in-from-top-2"
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') handleNext()
+                                                    }}
+                                                />
+                                            )}
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        )}
+
+                        {/* Text Input */}
+                        {currentStep.input_type === 'text_optional' && (
+                            <div className="space-y-4">
+                                <Input
+                                    value={textInput}
+                                    onChange={(e) => setTextInput(e.target.value)}
+                                    placeholder="Напиши здесь свои комментарии..."
+                                    className="bg-white/5 border-white/20 text-white placeholder:text-white/30 h-14 text-lg"
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') handleNext()
+                                    }}
+                                />
+                                {currentStep.options
+									.filter(option => !["skip", "continue"].includes(option.id))
+									.map(option => (
+										<ButtonOption
+											key={option.id}
+											// selected={singleChoice === option.id}
+											className="p-4"
+											onClick={() => {
+												setTextInput('')
+												submitAnswer('skip')
+											}}
+											indicator={false}
+										>
+											<span className="font-medium text-lg">{option.label}</span>
+										</ButtonOption>
+                                ))}
+                            </div>
+                        )}
                     </div>
+                </CardContent>
+            </Card>
+
+            {/* Navigation */}
+            <div className="flex justify-between items-center mt-6">
+                {currentStep.prev_step ? (
+                    <Button 
+                        variant="outline" 
+                        size="lg"
+                        onClick={handleBack}
+                        disabled={submitting}
+                        className="border-white/20 text-white hover:bg-white/10 bg-transparent rounded-xl"
+                    >
+                        <ArrowLeft className="w-5 h-5 mr-2" />
+                        Назад
+                    </Button>
+                ) : (
+                    <div /> // Placeholder for flex spacing
                 )}
 
-                <div ref={messagesEndRef} />
+                <Button 
+                    size="lg"
+                    onClick={handleNext}
+                    disabled={isNextDisabled()}
+                    className="bg-white text-primary hover:bg-white/90 font-bold rounded-xl px-8 shadow-lg shadow-white/10"
+                >
+                    {submitting ? (
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                        <>
+                            Продолжить
+                            <ArrowRight className="w-5 h-5 ml-2" />
+                        </>
+                    )}
+                </Button>
             </div>
-
-            {/* Input area */}
-            {currentStep && !currentStep.completed && messages.length > 0 && messages[messages.length - 1].showOptions && (
-                <div className="p-4 bg-white/60 border-t border-white/30 backdrop-blur-xl shadow-[0_-4px_20px_rgba(0,0,0,0.05)] animate-in slide-in-from-bottom-10 duration-500">
-                    
-                    {/* Single Choice & Confirm */}
-                    {(currentStep.input_type === 'single_choice' || currentStep.input_type === 'confirm') && (
-                        <div className="flex flex-col gap-2">
-                            {currentStep.options.map(option => (
-                                <Button
-                                    key={option.id}
-                                    variant="outline"
-                                    onClick={() => handleSingleChoice(option.id, option.label)}
-                                    className="w-full justify-start h-auto py-3.5 text-sm font-medium bg-white/50 hover:bg-primary/10 hover:text-primary border-white/40 hover:border-primary/30 transition-all text-left backdrop-blur-main shadow-sm"
-                                >
-                                    {option.label}
-                                </Button>
-                            ))}
-                        </div>
-                    )}
-
-                    {/* Multi Choice */}
-                    {currentStep.input_type === 'multi_choice' && (
-                        <div className="flex flex-col gap-2">
-                            {currentStep.options.map(option => {
-                                const isSelected = selectedMulti.includes(option.id)
-                                return (
-                                    <Button
-                                        key={option.id}
-                                        variant="outline"
-                                        onClick={() => handleMultiChoiceToggle(option.id)}
-                                        className={cn(
-                                            "w-full justify-between h-auto py-3.5 text-sm font-medium transition-all group backdrop-blur-main border-white/40 shadow-sm",
-                                            isSelected 
-                                                ? "bg-primary/10 border-primary text-primary hover:bg-primary/15" 
-                                                : "bg-white/50 hover:bg-white/70"
-                                        )}
-                                    >
-                                        {option.label}
-                                        <div className={cn(
-                                            "w-5 h-5 rounded border flex items-center justify-center transition-colors",
-                                            isSelected ? "bg-primary border-primary text-primary-foreground" : "border-muted-foreground/30 bg-white/50"
-                                        )}>
-                                            {isSelected && <Check className="h-3 w-3" />}
-                                        </div>
-                                    </Button>
-                                )
-                            })}
-                            <Button
-                                onClick={handleMultiChoiceSubmit}
-                                disabled={selectedMulti.length === 0}
-                                className="w-full mt-2 font-bold shadow-lg shadow-primary/20"
-                            >
-                                Продолжить
-                                <ArrowRight className="ml-2 h-4 w-4" />
-                            </Button>
-                        </div>
-                    )}
-
-                    {/* Text Input */}
-                    {currentStep.input_type === 'text_optional' && (
-                        <div className="flex gap-2 items-center">
-                            <Input
-                                type="text"
-                                value={textInput}
-                                onChange={(e) => setTextInput(e.target.value)}
-                                placeholder="Напиши здесь..."
-                                className="bg-white/50 border-white/40 focus:bg-white/80 shadow-inner"
-                                onKeyDown={(e) => e.key === 'Enter' && handleTextSubmit()}
-                            />
-                            <Button
-                                onClick={handleTextSubmit}
-                                size="icon"
-                                className={cn(
-                                    "shrink-0 transition-all shadow-md",
-                                    !textInput.trim() && "opacity-80 bg-secondary hover:bg-secondary/80"
-                                )}
-                            >
-                                {textInput.trim() ? <Send className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                            </Button>
-                        </div>
-                    )}
-                </div>
-            )}
         </div>
     )
 }

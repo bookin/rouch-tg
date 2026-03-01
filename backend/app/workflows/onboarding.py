@@ -41,6 +41,7 @@ ONBOARDING_STEPS = {
             {"id": "other", "label": "🌟 Другое"},
         ],
         "next_step": OnboardingSteps.SCHEDULE,
+        "prev_step": None,
     },
     OnboardingSteps.SCHEDULE: {
         "number": 2,
@@ -54,6 +55,7 @@ ONBOARDING_STEPS = {
             {"id": "evening", "label": "🌙 Вечер (19:00-22:00)"},
         ],
         "next_step": OnboardingSteps.DURATION,
+        "prev_step": OnboardingSteps.OCCUPATION,
     },
     OnboardingSteps.DURATION: {
         "number": 2,
@@ -67,6 +69,7 @@ ONBOARDING_STEPS = {
             {"id": "60", "label": "⏱ 1 час+"},
         ],
         "next_step": OnboardingSteps.HABITS,
+        "prev_step": OnboardingSteps.SCHEDULE,
     },
     OnboardingSteps.HABITS: {
         "number": 3,
@@ -79,9 +82,11 @@ ONBOARDING_STEPS = {
             {"id": "yoga", "label": "🧘‍♀️ Йога"},
             {"id": "sport", "label": "💪 Спорт"},
             {"id": "journaling", "label": "📝 Дневник"},
+            {"id": "other", "label": "🌟 Другое"},
             {"id": "none", "label": "❌ Ничего из этого"},
         ],
         "next_step": OnboardingSteps.RESTRICTIONS,
+        "prev_step": OnboardingSteps.DURATION,
     },
     OnboardingSteps.RESTRICTIONS: {
         "number": 3,
@@ -93,6 +98,7 @@ ONBOARDING_STEPS = {
             {"id": "skip", "label": "➡️ Пропустить"},
         ],
         "next_step": OnboardingSteps.PARTNERS,
+        "prev_step": OnboardingSteps.HABITS,
     },
     OnboardingSteps.PARTNERS: {
         "number": 5,
@@ -104,6 +110,7 @@ ONBOARDING_STEPS = {
             {"id": "continue", "label": "✅ Понятно, продолжаем!"},
         ],
         "next_step": OnboardingSteps.COMPLETE,
+        "prev_step": OnboardingSteps.RESTRICTIONS,
     },
     OnboardingSteps.COMPLETE: {
         "number": 5,
@@ -113,16 +120,22 @@ ONBOARDING_STEPS = {
         "input_type": "complete",
         "options": [],
         "next_step": None,
+        "prev_step": OnboardingSteps.PARTNERS,
     },
 }
 
 
-def get_step_data(step: str) -> dict:
+def get_step_data(step: str, user: Any = None) -> dict:
     """Get data for a specific step"""
     if step not in ONBOARDING_STEPS:
         step = OnboardingSteps.OCCUPATION
     
     step_info = ONBOARDING_STEPS[step]
+    
+    current_value = None
+    if user and step_info.get("field"):
+        current_value = getattr(user, step_info["field"], None)
+
     return {
         "step": step,
         "step_number": step_info["number"],
@@ -132,6 +145,8 @@ def get_step_data(step: str) -> dict:
         "options": step_info["options"],
         "field": step_info["field"],
         "completed": step == OnboardingSteps.COMPLETE,
+        "prev_step": step_info.get("prev_step"),
+        "current_value": current_value,
     }
 
 
@@ -153,7 +168,7 @@ async def save_onboarding_progress(user_id_or_telegram_id: int, step: str, answe
         by_telegram_id: If True, lookup by telegram_id (for bot); otherwise by user.id (for web)
     """
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id
+    from app.repositories.user import UserRepository
     from datetime import datetime, UTC
     
     step_info = ONBOARDING_STEPS.get(step)
@@ -162,9 +177,9 @@ async def save_onboarding_progress(user_id_or_telegram_id: int, step: str, answe
 
     async with AsyncSessionLocal() as db:
         if by_telegram_id:
-            user_db = await get_user_by_telegram_id(db, user_id_or_telegram_id)
+            user_db = await UserRepository().get_by_telegram_id(db, user_id_or_telegram_id)
         else:
-            from app.models.db_models import UserDB
+            from app.models.db.user import UserDB
             user_db = await db.get(UserDB, user_id_or_telegram_id)
         if not user_db:
             return

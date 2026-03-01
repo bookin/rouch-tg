@@ -87,6 +87,17 @@ class Settings(BaseSettings):
     SECRET_KEY: str = Field(default="your-secret-key-change-in-production", description="Secret key for signatures")
     JWT_SECRET_KEY: str = Field(default="change-me-in-production-please!!", description="JWT secret for fastapi-users")
     
+    # Email (Gmail SMTP)
+    MAIL_USERNAME: str = Field(default="", description="Gmail address for sending emails")
+    MAIL_PASSWORD: str = Field(default="", description="Gmail App Password (not regular password)")
+    MAIL_FROM: str = Field(default="", description="From email address (defaults to MAIL_USERNAME)")
+    MAIL_FROM_NAME: str = Field(default="Rouch Karma Manager", description="Sender display name")
+    MAIL_PORT: int = Field(default=587, description="SMTP port")
+    MAIL_SERVER: str = Field(default="smtp.gmail.com", description="SMTP server")
+    MAIL_STARTTLS: bool = Field(default=True, description="Use STARTTLS")
+    MAIL_SSL_TLS: bool = Field(default=False, description="Use SSL/TLS")
+    MAIL_ENABLED: bool = Field(default=False, description="Enable email sending")
+    
     # Logging
     LOG_LEVEL: str = Field(default="INFO", description="Logging level")
     

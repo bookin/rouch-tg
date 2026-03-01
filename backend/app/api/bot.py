@@ -113,7 +113,7 @@ STEP_STATE_MAP = {
 async def cmd_start(message: Message, state: FSMContext):
     """Handle /start command"""
     from app.database import AsyncSessionLocal
-    from app.crud import get_or_create_user
+    from app.services.user_service import UserService
     
     user = message.from_user
     logger.info(f"User {user.id} ({user.first_name}) started bot")
@@ -123,7 +123,8 @@ async def cmd_start(message: Message, state: FSMContext):
     try:
         # Get or create user in database
         async with AsyncSessionLocal() as db:
-            user_db = await get_or_create_user(
+            user_svc = UserService()
+            user_db = await user_svc.get_or_create_telegram_user(
                 db,
                 telegram_id=user.id,
                 first_name=user.first_name,
@@ -160,19 +161,19 @@ async def cmd_start(message: Message, state: FSMContext):
 @router.message(Command("coffee"))
 async def cmd_coffee(message: Message):
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id
-    from app.crud_extended import get_active_karma_plan
+    from app.repositories.user import UserRepository
+    from app.repositories.karma_plan import KarmaPlanRepository
 
     try:
         settings = get_settings()
 
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, message.from_user.id)
+            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
             if not user_db:
                 await message.answer("Сначала начни с команды /start")
                 return
 
-            plan = await get_active_karma_plan(db, user_db.id)
+            plan = await KarmaPlanRepository().get_active(db, user_db.id)
             if not plan:
                 await _send_need_project(message)
                 return
@@ -266,8 +267,10 @@ async def process_occupation(message: Message, state: FSMContext):
     current_step = OnboardingSteps.OCCUPATION
     step_data = get_step_data(current_step)
     
-    # Find selected option id
-    selected_id = next((opt["id"] for opt in step_data["options"] if opt["label"] == message.text), "other")
+    # Check if text matches any label, otherwise treat as custom text
+    selected_id = next((opt["id"] for opt in step_data["options"] if opt["label"] == message.text), None)
+    if not selected_id:
+        selected_id = message.text  # Use raw text if not a predefined label
     
     # Save using shared logic
     await save_onboarding_progress(message.from_user.id, current_step, selected_id, by_telegram_id=True)
@@ -474,8 +477,9 @@ async def process_partners_confirm(message: Message, state: FSMContext):
 async def _ask_partner_category(message: Message, state: FSMContext, category: str):
     """Ask user for a partner in a specific category"""
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id, get_partners_by_universal_category
-    from app.models.db_models import PartnerDB
+    from app.repositories.user import UserRepository
+    from app.services.partner_service import PartnerService
+    from app.models.db.partner import PartnerDB
     from sqlalchemy import select
     
     data = await state.get_data()
@@ -521,9 +525,9 @@ async def _ask_partner_category(message: Message, state: FSMContext, category: s
     # Check if user has existing partners in this category
     has_existing = False
     async with AsyncSessionLocal() as db:
-        user_db = await get_user_by_telegram_id(db, message.from_user.id if isinstance(message, Message) else message.from_user.id)
+        user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id if isinstance(message, Message) else message.from_user.id)
         if user_db:
-            existing = await get_partners_by_universal_category(db, user_db.id, category)
+            existing = await PartnerService().get_partners_by_category(db, user_db.id, category)
             if existing:
                 has_existing = True
     
@@ -608,18 +612,19 @@ async def show_existing_partners(callback: CallbackQuery, state: FSMContext):
     _, _, category = callback.data.split("_")
     
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id, get_partners_by_universal_category
+    from app.repositories.user import UserRepository
+    from app.services.partner_service import PartnerService
     
     data = await state.get_data()
     project_partners = data.get("project_partners", {})
     selected_in_cat = project_partners.get(category, [])
     
     async with AsyncSessionLocal() as db:
-        user_db = await get_user_by_telegram_id(db, callback.from_user.id)
+        user_db = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
         if not user_db:
             await callback.answer("Ошибка пользователя")
             return
-        partners = await get_partners_by_universal_category(db, user_db.id, category)
+        partners = await PartnerService().get_partners_by_category(db, user_db.id, category)
         
     kb_rows = []
     for p in partners:
@@ -736,17 +741,19 @@ async def process_contact_type(callback: CallbackQuery, state: FSMContext):
         return
 
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id, get_default_partner_group_by_category, create_partner
+    from app.repositories.user import UserRepository
+    from app.services.partner_service import PartnerService
     from app.models.partner import Partner
     from uuid import uuid4
 
+    partner_svc = PartnerService()
     async with AsyncSessionLocal() as db:
-        user_db = await get_user_by_telegram_id(db, callback.from_user.id)
+        user_db = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
         if not user_db:
             await callback.answer("Пользователь не найден")
             return
             
-        group = await get_default_partner_group_by_category(db, user_db.id, category)
+        group = await partner_svc.get_default_group_by_category(db, user_db.id, category)
         if not group:
             await callback.answer("Группа не найдена")
             return
@@ -758,7 +765,7 @@ async def process_contact_type(callback: CallbackQuery, state: FSMContext):
             user_id=user_db.id,
             contact_type=ctype
         )
-        created = await create_partner(db, p)
+        created = await partner_svc.create_partner(db, p)
         await db.commit()
         
         # Add to selection
@@ -812,8 +819,9 @@ async def _process_partner_input(message: Message, state: FSMContext, current_ca
 async def _finish_project_setup(message: Message, state: FSMContext):
     """Finish setup and activate project"""
     from app.database import AsyncSessionLocal
-    from app.crud_extended import create_karma_plan
-    from app.crud import get_user_by_telegram_id, save_problem_history
+    from app.repositories.karma_plan import KarmaPlanRepository
+    from app.repositories.user import UserRepository
+    from app.repositories.problem import ProblemHistoryRepository
     from app.knowledge.qdrant import QdrantKnowledgeBase
     
     data = await state.get_data()
@@ -829,11 +837,11 @@ async def _finish_project_setup(message: Message, state: FSMContext):
         
     try:
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, message.from_user.id)
+            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
             if user_db:
                 # 1. Ensure we have a history record for this solution
                 if not history_id:
-                    history = await save_problem_history(db, user_db.id, problem_text, solution)
+                    history = await ProblemHistoryRepository().save(db, user_db.id, problem_text, solution)
                     history_id = history.id
                 
                 # Extract strategy
@@ -848,14 +856,14 @@ async def _finish_project_setup(message: Message, state: FSMContext):
                 }
 
                 # 2. Create Plan with Partners
-                await create_karma_plan(
+                await KarmaPlanRepository().create_plan(
                     db,
                     user_db.id,
                     history_id,
                     strategy_snapshot,
                     duration_days=30,
                     project_partners=project_partners,
-                    isolation_settings=isolation_settings
+                    isolation_settings=isolation_settings,
                 )
                 
                 await db.commit()
@@ -936,7 +944,7 @@ async def process_problem_description(message: Message, state: FSMContext):
     from app.knowledge.qdrant import QdrantKnowledgeBase
     from app.agents.problem_solver import ProblemSolverAgent
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id
+    from app.repositories.user import UserRepository
     
     problem_text = message.text
     
@@ -949,7 +957,7 @@ async def process_problem_description(message: Message, state: FSMContext):
         agent = ProblemSolverAgent(qdrant)
         
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, message.from_user.id)
+            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
             if not user_db:
                 await message.answer("Пользователь не найден.")
                 return
@@ -1040,7 +1048,8 @@ async def process_world_partner(message: Message, state: FSMContext):
     from app.knowledge.qdrant import QdrantKnowledgeBase
     from app.agents.problem_solver import ProblemSolverAgent
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id, save_problem_history
+    from app.repositories.user import UserRepository
+    from app.repositories.problem import ProblemHistoryRepository
     
     user_answer = message.text.strip()
     data = await state.get_data()
@@ -1061,7 +1070,7 @@ async def process_world_partner(message: Message, state: FSMContext):
         agent = ProblemSolverAgent(qdrant)
         
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, message.from_user.id)
+            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
             if not user_db:
                 await message.answer("Пользователь не найден.")
                 await state.clear()
@@ -1105,12 +1114,12 @@ async def process_world_partner(message: Message, state: FSMContext):
 async def _show_complete_solution(message: Message, state: FSMContext, problem_text: str, solution: dict, user_db):
     """Show complete solution and save to database"""
     from app.database import AsyncSessionLocal
-    from app.crud import save_problem_history
+    from app.repositories.problem import ProblemHistoryRepository
     
     try:
         async with AsyncSessionLocal() as db:
             # Save to database (no special active flag on history)
-            history = await save_problem_history(
+            history = await ProblemHistoryRepository().save(
                 db, 
                 user_db.id, 
                 problem_text, 
@@ -1160,7 +1169,7 @@ async def _show_complete_solution(message: Message, state: FSMContext, problem_t
 async def cmd_today(message: Message):
     """Quick text list for today"""
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id
+    from app.repositories.user import UserRepository
     from app.agents.daily_manager import DailyManagerAgent
     from app.knowledge.qdrant import QdrantKnowledgeBase
     from app.config import get_settings
@@ -1171,7 +1180,7 @@ async def cmd_today(message: Message):
         
         async with AsyncSessionLocal() as db:
             # Get or create user
-            user_db = await get_user_by_telegram_id(db, message.from_user.id)
+            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
             
             if not user_db:
                 await message.answer(
@@ -1240,17 +1249,17 @@ async def cmd_done(message: Message, state: FSMContext):
     """Quick mark action as done"""
 
     try:
-        from app.crud_extended import get_active_karma_plan
-        from app.crud import get_user_by_telegram_id
+        from app.repositories.user import UserRepository
+        from app.repositories.karma_plan import KarmaPlanRepository
         from app.database import AsyncSessionLocal
 
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, message.from_user.id)
+            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
             if not user_db:
                 await message.answer("Сначала начни с команды /start")
                 return
 
-            plan = await get_active_karma_plan(db, user_db.id)
+            plan = await KarmaPlanRepository().get_active(db, user_db.id)
             if not plan:
                 await _send_need_project(message)
                 return
@@ -1265,13 +1274,11 @@ async def cmd_done(message: Message, state: FSMContext):
 async def process_action_done(message: Message, state: FSMContext):
     """Process completed action"""
     from app.database import AsyncSessionLocal
-    from app.crud import (
-		get_user_by_telegram_id,
-		toggle_daily_task_completion,
-	)
+    from app.repositories.user import UserRepository
+    from app.repositories.karma_plan import KarmaPlanRepository
+    from app.services.daily_service import DailyService
     from app.agents.daily_manager import DailyManagerAgent
     from app.knowledge.qdrant import QdrantKnowledgeBase
-    from app.crud_extended import get_active_karma_plan
     
     text = message.text.strip()
     
@@ -1279,13 +1286,13 @@ async def process_action_done(message: Message, state: FSMContext):
         settings = get_settings()
         
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, message.from_user.id)
+            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
             
             if not user_db:
                 await message.answer("Ошибка: пользователь не найден. Нажми /start")
                 return
 
-            plan = await get_active_karma_plan(db, user_db.id)
+            plan = await KarmaPlanRepository().get_active(db, user_db.id)
             if not plan:
                 await _send_need_project(message)
                 return
@@ -1314,7 +1321,7 @@ async def process_action_done(message: Message, state: FSMContext):
                     
                     if action_id.isdigit():
                         # Project Mode: DailyTaskDB
-                        await toggle_daily_task_completion(
+                        await DailyService().toggle_task_completion(
                             db,
                             user_id=user_db.id,
                             task_id=int(action_id),
@@ -1376,17 +1383,17 @@ async def cmd_seed(message: Message, state: FSMContext):
     """Quick seed logging"""
     
     try:
-        from app.crud_extended import get_active_karma_plan
-        from app.crud import get_user_by_telegram_id
+        from app.repositories.user import UserRepository
+        from app.repositories.karma_plan import KarmaPlanRepository
         from app.database import AsyncSessionLocal
 
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, message.from_user.id)
+            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
             if not user_db:
                 await message.answer("Сначала начни с команды /start")
                 return
 
-            plan = await get_active_karma_plan(db, user_db.id)
+            plan = await KarmaPlanRepository().get_active(db, user_db.id)
             if not plan:
                 await _send_need_project(message)
                 return
@@ -1406,8 +1413,9 @@ async def cmd_seed(message: Message, state: FSMContext):
 async def process_seed(message: Message, state: FSMContext):
     """Process seed description"""
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id, create_seed, increment_user_seeds_count
-    from app.crud_extended import get_active_karma_plan
+    from app.repositories.user import UserRepository
+    from app.repositories.karma_plan import KarmaPlanRepository
+    from app.services.seed_service import SeedService
     from app.models.seed import Seed
     from datetime import datetime, UTC, timedelta
     from zoneinfo import ZoneInfo
@@ -1416,11 +1424,12 @@ async def process_seed(message: Message, state: FSMContext):
     description = message.text.strip()
     
     try:
+        seed_svc = SeedService()
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, message.from_user.id)
+            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
             
             if user_db:
-                plan = await get_active_karma_plan(db, user_db.id)
+                plan = await KarmaPlanRepository().get_active(db, user_db.id)
                 if not plan:
                     await _send_need_project(message)
                     return
@@ -1442,8 +1451,8 @@ async def process_seed(message: Message, state: FSMContext):
                     karma_plan_id=plan.id,
                 )
                 
-                await create_seed(db, seed)
-                await increment_user_seeds_count(db, user_db.id)
+                await seed_svc.create_seed(db, seed)
+                await seed_svc.user_repo.increment_seeds_count(db, user_db.id)
                 await db.commit()
 
                 logger.info(f"User {message.from_user.id} planted seed: {description}")
@@ -1480,16 +1489,17 @@ async def process_seed(message: Message, state: FSMContext):
 async def cmd_practice(message: Message):
     """Show practice progress"""
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id, get_user_practice_progress
+    from app.repositories.user import UserRepository
+    from app.services.practice_service import PracticeService
     
     try:
         async with AsyncSessionLocal() as db:
-            user = await get_user_by_telegram_id(db, message.from_user.id)
+            user = await UserRepository().get_by_telegram_id(db, message.from_user.id)
             if not user:
                 await message.answer("Сначала начни с команды /start")
                 return
             
-            progress_list = await get_user_practice_progress(db, user.id)
+            progress_list = await PracticeService().get_user_progress(db, user.id)
             
             # Filter visible
             visible = [p for p in progress_list if not p.is_hidden] if progress_list else []
@@ -1502,9 +1512,9 @@ async def cmd_practice(message: Message):
             # === Empty state: show recommendations ===
             if is_empty:
                 from app.knowledge.qdrant import QdrantKnowledgeBase
-                from app.crud_extended import get_active_karma_plan
+                from app.repositories.karma_plan import KarmaPlanRepository
                 
-                plan = await get_active_karma_plan(db, user.id)
+                plan = await KarmaPlanRepository().get_active(db, user.id)
                 strategy = plan.strategy_snapshot if plan else None
                 need = _build_recommend_query(strategy)
                 
@@ -1617,22 +1627,23 @@ def _build_recommend_query(strategy: dict | None) -> str:
 async def cb_practice_start(callback: CallbackQuery):
     """Start tracking a practice from bot recommendation"""
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id, get_or_create_practice_progress
-    from app.crud_extended import get_active_karma_plan
+    from app.repositories.user import UserRepository
+    from app.repositories.karma_plan import KarmaPlanRepository
+    from app.services.practice_service import PracticeService
     
     practice_id = callback.data.split(":", 1)[1]
     
     try:
         async with AsyncSessionLocal() as db:
-            user = await get_user_by_telegram_id(db, callback.from_user.id)
+            user = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
             if not user:
                 await callback.answer("Сначала /start", show_alert=True)
                 return
             
-            plan = await get_active_karma_plan(db, user.id)
+            plan = await KarmaPlanRepository().get_active(db, user.id)
             karma_plan_id = plan.id if plan else None
             
-            await get_or_create_practice_progress(db, user.id, practice_id, karma_plan_id=karma_plan_id)
+            await PracticeService().practice_repo.get_or_create(db, user.id, practice_id, karma_plan_id=karma_plan_id)
             await db.commit()
         
         await callback.answer("✅ Практика добавлена!")
@@ -1649,22 +1660,23 @@ async def cb_practice_start(callback: CallbackQuery):
 async def cb_practice_complete(callback: CallbackQuery):
     """Complete a practice from bot"""
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id, complete_practice_and_create_seed
-    from app.crud_extended import get_active_karma_plan
+    from app.repositories.user import UserRepository
+    from app.repositories.karma_plan import KarmaPlanRepository
+    from app.services.practice_service import PracticeService
     
     practice_id = callback.data.split(":", 1)[1]
     
     try:
         async with AsyncSessionLocal() as db:
-            user = await get_user_by_telegram_id(db, callback.from_user.id)
+            user = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
             if not user:
                 await callback.answer("Сначала /start", show_alert=True)
                 return
 
-            plan = await get_active_karma_plan(db, user.id)
+            plan = await KarmaPlanRepository().get_active(db, user.id)
             karma_plan_id = plan.id if plan else None
             
-            result = await complete_practice_and_create_seed(
+            result = await PracticeService().complete_and_create_seed(
                 db,
                 user_id=user.id,
                 practice_id=practice_id,
@@ -1698,23 +1710,25 @@ async def cb_practice_complete(callback: CallbackQuery):
 async def cb_practice_recommend(callback: CallbackQuery):
     """Show practice recommendations from bot"""
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id, get_user_practice_progress
+    from app.repositories.user import UserRepository
+    from app.repositories.karma_plan import KarmaPlanRepository
+    from app.services.practice_service import PracticeService
     from app.knowledge.qdrant import QdrantKnowledgeBase
-    from app.crud_extended import get_active_karma_plan
     
     try:
+        practice_svc = PracticeService()
         async with AsyncSessionLocal() as db:
-            user = await get_user_by_telegram_id(db, callback.from_user.id)
+            user = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
             if not user:
                 await callback.answer("Сначала /start", show_alert=True)
                 return
             
-            plan = await get_active_karma_plan(db, user.id)
+            plan = await KarmaPlanRepository().get_active(db, user.id)
             strategy = plan.strategy_snapshot if plan else None
             need = _build_recommend_query(strategy)
             
             # Get existing practice IDs to filter
-            progress_list = await get_user_practice_progress(db, user.id)
+            progress_list = await practice_svc.get_user_progress(db, user.id)
             existing_ids = {p.practice_id for p in progress_list} if progress_list else set()
             
             qdrant = QdrantKnowledgeBase()
@@ -1772,38 +1786,40 @@ async def cb_practice_manage(callback: CallbackQuery):
 async def cb_practice_action(callback: CallbackQuery):
     """Execute a practice management action"""
     from app.database import AsyncSessionLocal
-    from app.crud import (
-        get_user_by_telegram_id,
-        pause_practice, resume_practice,
-        hide_practice, reset_practice, delete_practice_all
-    )
+    from app.repositories.user import UserRepository
+    from app.services.practice_service import PracticeService
     
     parts = callback.data.split(":")
     action = parts[1]
     practice_id = parts[2]
     
     action_labels = {
-        "pause": ("⏸ Практика приостановлена", pause_practice),
-        "resume": ("▶️ Практика возобновлена", resume_practice),
-        "hide": ("👁 Практика скрыта", hide_practice),
-        "reset": ("🔄 Прогресс сброшен", reset_practice),
-        "delete": ("🗑 Практика и семена удалены", delete_practice_all),
+        "pause": "⏸ Практика приостановлена",
+        "resume": "▶️ Практика возобновлена",
+        "hide": "👁 Практика скрыта",
+        "reset": "🔄 Прогресс сброшен",
+        "delete": "🗑 Практика и семена удалены",
     }
     
     if action not in action_labels:
         await callback.answer("Неизвестное действие", show_alert=True)
         return
     
-    label, crud_fn = action_labels[action]
+    label = action_labels[action]
     
     try:
+        practice_svc = PracticeService()
+        # Map callback action names to service method names
+        method_map = {"delete": "delete_all"}
+        method_name = method_map.get(action, action)
         async with AsyncSessionLocal() as db:
-            user = await get_user_by_telegram_id(db, callback.from_user.id)
+            user = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
             if not user:
                 await callback.answer("Сначала /start", show_alert=True)
                 return
             
-            await crud_fn(db, user.id, practice_id)
+            svc_method = getattr(practice_svc, method_name)
+            await svc_method(db, user.id, practice_id)
             await db.commit()
         
         await callback.answer(label)
@@ -1880,14 +1896,15 @@ async def reset_cancel(callback: CallbackQuery):
 async def reset_confirm(callback: CallbackQuery, state: FSMContext):
     """Confirm reset"""
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id, reset_user_progress
+    from app.repositories.user import UserRepository
+    from app.services.user_service import UserService
     
     try:
         async with AsyncSessionLocal() as db:
-            user_db = await get_user_by_telegram_id(db, callback.from_user.id)
+            user_db = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
             
             if user_db:
-                await reset_user_progress(db, user_db.id)
+                await UserService().reset_progress(db, user_db.id)
                 await db.commit()
                 
                 # Clear state
@@ -1916,8 +1933,8 @@ async def reset_confirm(callback: CallbackQuery, state: FSMContext):
 async def _cf_load_data(telegram_id: int):
     """Load all data needed for coffee meditation session."""
     from app.database import AsyncSessionLocal
-    from app.crud import get_user_by_telegram_id
-    from app.crud_extended import get_active_karma_plan
+    from app.repositories.user import UserRepository
+    from app.repositories.karma_plan import KarmaPlanRepository
     from app.coffee_meditation import (
         get_user_zoneinfo,
         get_local_day_bounds,
@@ -1929,11 +1946,11 @@ async def _cf_load_data(telegram_id: int):
     from datetime import datetime, UTC
 
     async with AsyncSessionLocal() as db:
-        user_db = await get_user_by_telegram_id(db, telegram_id)
+        user_db = await UserRepository().get_by_telegram_id(db, telegram_id)
         if not user_db:
             return None
 
-        plan = await get_active_karma_plan(db, user_db.id)
+        plan = await KarmaPlanRepository().get_active(db, user_db.id)
         if not plan:
             return None
 
@@ -2134,7 +2151,7 @@ async def cf_toggle_rejoice(callback: CallbackQuery, state: FSMContext):
     try:
         from app.database import AsyncSessionLocal
         from app.coffee_meditation import save_progress
-        from app.models.db_models import CoffeeMeditationSessionDB
+        from app.models.db.coffee import CoffeeMeditationSessionDB
         from sqlalchemy import select
 
         async with AsyncSessionLocal() as db:
@@ -2215,7 +2232,7 @@ async def _cf_complete(message: Message, state: FSMContext, fsm: dict, notes: st
     """Finalize the coffee meditation session."""
     from app.database import AsyncSessionLocal
     from app.coffee_meditation import complete_session, save_progress
-    from app.models.db_models import CoffeeMeditationSessionDB
+    from app.models.db.coffee import CoffeeMeditationSessionDB
     from sqlalchemy import select
 
     session_id = fsm.get("cf_session_id")

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Подтверди свой email ✉️</h1>
+
+<p>
+    Привет, <span class="highlight">{{ first_name }}</span>!
+</p>
+
+<p>
+    Для завершения регистрации в {{ app_name }} подтверди свой email-адрес, 
+    нажав на кнопку ниже.
+</p>
+
+<a href="{{ verify_url }}" class="btn">Подтвердить email</a>
+
+<hr class="divider">
+
+<p style="font-size: 13px;">
+    Если ты не создавал(а) аккаунт — просто проигнорируй это письмо.
+</p>
+
+<div class="quote">
+    «Первый шаг на пути осознанности — решиться его сделать.»
+</div>
+{% endblock %}

@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, func, literal
 import logging
 
-from app.models.db_models import UserDB
+from app.models.db.user import UserDB
 from app.api.webapp import get_current_user
 
 
@@ -72,7 +72,9 @@ async def get_calendar_data(
 ) -> Dict[str, Any]:
     """Get all calendar events for the specified date period"""
     from app.database import AsyncSessionLocal
-    from app.models.db_models import SeedDB, PracticeDB, PartnerActionDB, PartnerDB
+    from app.models.db.seed import SeedDB
+    from app.models.db.practice import PracticeDB
+    from app.models.db.partner import PartnerActionDB, PartnerDB
     
     try:
         async with AsyncSessionLocal() as db:
@@ -166,7 +168,8 @@ async def get_calendar_stats(
 ) -> Dict[str, Any]:
     """Get statistics for the period"""
     from app.database import AsyncSessionLocal
-    from app.models.db_models import SeedDB, PartnerActionDB, PartnerDB
+    from app.models.db.seed import SeedDB
+    from app.models.db.partner import PartnerActionDB, PartnerDB
     
     try:
         async with AsyncSessionLocal() as db:

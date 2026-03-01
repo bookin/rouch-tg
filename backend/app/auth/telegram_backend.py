@@ -8,7 +8,7 @@ from fastapi.security import APIKeyHeader
 from fastapi_users.authentication import AuthenticationBackend, Strategy
 from fastapi_users import BaseUserManager
 
-from app.models.db_models import UserDB
+from app.models.db.user import UserDB
 from app.telegram_auth import validate_telegram_webapp_data, extract_user_from_init_data
 
 logger = logging.getLogger(__name__)
