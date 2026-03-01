@@ -51,6 +51,7 @@ class UserDB(SQLAlchemyBaseUserTable[int], Base):
     completed_practices: Mapped[int] = mapped_column(default=0)
 
     # Settings
+    link_prompt_dismissed: Mapped[bool] = mapped_column(default=False)
     timezone: Mapped[str] = mapped_column(String, default="UTC")
     morning_enabled: Mapped[bool] = mapped_column(default=True)
     evening_enabled: Mapped[bool] = mapped_column(default=True)

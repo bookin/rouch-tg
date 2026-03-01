@@ -1,5 +1,6 @@
 import {useEffect, useState} from 'react'
-import {getDailyQuote, getDailyActions, toggleDailyAction, getPracticesProgress, completePractice, getPracticeRecommendations, startPracticeTracking, PracticeProgress, getActiveProject} from '../api/client'
+import {getDailyQuote, getDailyActions, toggleDailyAction, getPracticesProgress, completePractice, getPracticeRecommendations, startPracticeTracking, PracticeProgress, getActiveProject, getProfile, isTelegramContext} from '../api/client'
+import LinkAccountPrompt from '../components/LinkAccountPrompt'
 import {useTelegram} from '../hooks/useTelegram'
 import {Link} from 'react-router-dom'
 import {Quote, Coffee, Check, Target, Sparkles, Loader2, Flame, TrendingUp, Play, Plus, ArrowRight} from 'lucide-react'
@@ -31,6 +32,7 @@ export default function Dashboard() {
 	const [practiceLoading, setPracticeLoading] = useState<string | null>(null)
 	const [initialLoading, setInitialLoading] = useState(true)
 	const [hasActiveProject, setHasActiveProject] = useState(false)
+	const [showLinkPrompt, setShowLinkPrompt] = useState(false)
 
 	// Filter: only visible active/habit practices
 	const visiblePractices = practices.filter(p => !p.is_hidden && (p.is_active || p.is_habit))
@@ -95,6 +97,12 @@ export default function Dashboard() {
 
 	useEffect(() => {
 		fetchData()
+		// Check if we should show link prompt (miniapp, no email, not dismissed)
+		if (isTelegramContext()) {
+			getProfile().then(p => {
+				if (!p.email && !p.link_prompt_dismissed) setShowLinkPrompt(true)
+			}).catch(() => {})
+		}
 	}, [])
 
 	const handleToggleAction = async (id: string, currentStatus: boolean) => {
@@ -130,6 +138,10 @@ export default function Dashboard() {
 				</h1>
 				<p className="">Твой путь к осознанности начинается здесь.</p>
 			</div>
+
+			{showLinkPrompt && (
+				<LinkAccountPrompt onDismiss={() => setShowLinkPrompt(false)} />
+			)}
 
 			<div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 				{/* Quote Card */}

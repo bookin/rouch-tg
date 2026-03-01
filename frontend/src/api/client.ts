@@ -38,8 +38,9 @@ api.interceptors.response.use(
       const isTelegram = !!window.Telegram?.WebApp?.initData
       if (!isTelegram) {
         localStorage.removeItem('auth_token')
-        // Don't redirect if already on login page
-        if (!window.location.pathname.includes('/login')) {
+        // Don't redirect if on login or public pages that handle auth themselves
+        const noRedirect = ['/login', '/register', '/verify-email', '/merge']
+        if (!noRedirect.some(p => window.location.pathname.startsWith(p))) {
           window.location.href = '/login'
         }
       }
@@ -454,5 +455,145 @@ export const resetPractice = async (practiceId: string) => {
 
 export const deletePractice = async (practiceId: string) => {
   const response = await api.delete(`/api/practices/${practiceId}`)
+  return response.data
+}
+
+// ===== Account / Profile API =====
+
+export interface UserProfile {
+  id: number
+  first_name: string | null
+  email: string | null
+  telegram_id: number | null
+  has_password: boolean
+  occupation: string | null
+  available_times: string[]
+  daily_minutes: number | null
+  current_habits: string[]
+  physical_restrictions: string | null
+  timezone: string
+  morning_enabled: boolean
+  evening_enabled: boolean
+  current_focus: string | null
+  link_prompt_dismissed: boolean
+  is_verified: boolean
+}
+
+export const getProfile = async (): Promise<UserProfile> => {
+  const response = await api.get<UserProfile>('/api/account/profile')
+  return response.data
+}
+
+export const updateProfile = async (fields: Partial<Pick<UserProfile,
+  'first_name' | 'occupation' | 'available_times' | 'daily_minutes' |
+  'current_habits' | 'physical_restrictions' | 'timezone' |
+  'morning_enabled' | 'evening_enabled' | 'current_focus'
+>>) => {
+  const response = await api.patch('/api/account/profile', fields)
+  return response.data
+}
+
+export const requestEmailLink = async (email: string) => {
+  const response = await api.post('/api/account/link-email', { email })
+  return response.data
+}
+
+export const verifyEmailToken = async (token: string) => {
+  const response = await api.post('/api/account/verify-email', { token })
+  // Auto-store JWT if returned (auto-login after email verification)
+  if (response.data.access_token) {
+    storeAuthToken(response.data.access_token)
+  }
+  return response.data
+}
+
+export const setPassword = async (password: string) => {
+  const response = await api.post('/api/account/set-password', { password })
+  return response.data
+}
+
+export const setPasswordByToken = async (token: string, password: string) => {
+  const response = await api.post('/api/account/set-password-by-token', { token, password })
+  // Auto-store JWT if returned
+  if (response.data.access_token) {
+    storeAuthToken(response.data.access_token)
+  }
+  return response.data
+}
+
+export const storeAuthToken = (token: string) => {
+  localStorage.setItem('auth_token', token)
+}
+
+export const changePassword = async (currentPassword: string, newPassword: string) => {
+  const response = await api.post('/api/account/change-password', {
+    current_password: currentPassword,
+    new_password: newPassword,
+  })
+  return response.data
+}
+
+export interface TelegramLinkResponse {
+  success: boolean
+  token: string
+  deep_link: string | null
+  bot_username: string | null
+  expires_at: string | null
+}
+
+export const generateTelegramLink = async (): Promise<TelegramLinkResponse> => {
+  const response = await api.post<TelegramLinkResponse>('/api/account/link-telegram')
+  return response.data
+}
+
+export interface MergePreviewData {
+  target: {
+    id: number
+    first_name: string | null
+    email: string | null
+    telegram_id: number | null
+    has_active_project: boolean
+    active_project_problem: string | null
+    seeds_count: number
+    partners_count: number
+    problems_count: number
+    karma_plans_count: number
+    practices_count: number
+    coffee_sessions_count: number
+  }
+  source: {
+    id: number
+    first_name: string | null
+    email: string | null
+    telegram_id: number | null
+    has_active_project: boolean
+    active_project_problem: string | null
+    seeds_count: number
+    partners_count: number
+    problems_count: number
+    karma_plans_count: number
+    practices_count: number
+    coffee_sessions_count: number
+  }
+  has_project_conflict: boolean
+}
+
+export const getMergePreview = async (sourceUserId: number): Promise<MergePreviewData> => {
+  const response = await api.get<MergePreviewData>('/api/account/merge-preview', {
+    params: { source_user_id: sourceUserId }
+  })
+  return response.data
+}
+
+export const confirmMerge = async (sourceUserId: number, keepProjectFrom?: number) => {
+  const response = await api.post('/api/account/confirm-merge', {
+    source_user_id: sourceUserId,
+    keep_project_from: keepProjectFrom,
+  })
+  return response.data
+}
+
+export const dismissLinkPrompt = async () => {
+  const response = await api.post('/api/account/dismiss-link-prompt')
   return response.data
 }

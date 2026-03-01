@@ -130,6 +130,10 @@ app.include_router(
     tags=["users"],
 )
 
+# Account endpoints
+from app.api.endpoints.account import router as account_router
+app.include_router(account_router, prefix="/api/account", tags=["account"])
+
 # Include routers
 app.include_router(webapp_router)
 app.include_router(calendar_router)

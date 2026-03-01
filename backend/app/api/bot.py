@@ -98,6 +98,14 @@ class CoffeeState(StatesGroup):
     step_4_notes = State()
 
 
+class SettingsState(StatesGroup):
+    """States for /settings edits"""
+    waiting_for_name = State()
+    waiting_for_occupation = State()
+    waiting_for_email = State()
+    waiting_for_timezone = State()
+
+
 # Map generic steps to FSM states
 STEP_STATE_MAP = {
     OnboardingSteps.OCCUPATION: OnboardingState.occupation,
@@ -111,17 +119,20 @@ STEP_STATE_MAP = {
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
-    """Handle /start command"""
+    """Handle /start command, including deep link payloads for account linking."""
     from app.database import AsyncSessionLocal
     from app.services.user_service import UserService
+    from app.services.account_link import AccountLinkService
     
     user = message.from_user
     logger.info(f"User {user.id} ({user.first_name}) started bot")
     
     await state.clear()
 
+    # Extract deep link payload: /start link_XXXXX
+    deep_link_payload = message.text.split(maxsplit=1)[1] if message.text and " " in message.text else None
+
     try:
-        # Get or create user in database
         async with AsyncSessionLocal() as db:
             user_svc = UserService()
             user_db = await user_svc.get_or_create_telegram_user(
@@ -132,7 +143,46 @@ async def cmd_start(message: Message, state: FSMContext):
             )
             await db.commit()
 
-            # Check if onboarding is needed
+            # ── Deep link: account linking ──
+            if deep_link_payload and deep_link_payload.startswith("link_"):
+                link_token = deep_link_payload[5:]  # strip "link_" prefix
+                link_svc = AccountLinkService()
+                web_user, tg_conflict = await link_svc.verify_telegram_link_token(
+                    db, link_token, user.id
+                )
+                if not web_user:
+                    await message.answer(
+                        "Ссылка для привязки устарела или уже использована.\n"
+                        "Попробуй создать новую в настройках приложения."
+                    )
+                elif tg_conflict:
+                    # Merge needed — store in state for confirmation
+                    await state.update_data(
+                        merge_target_id=web_user.id,
+                        merge_source_id=tg_conflict.id,
+                    )
+                    kb = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="✅ Объединить аккаунты", callback_data="merge_confirm")],
+                        [InlineKeyboardButton(text="❌ Отмена", callback_data="merge_cancel")],
+                    ])
+                    await message.answer(
+                        "🔗 Обнаружены два аккаунта\n\n"
+                        "У тебя уже есть аккаунт в Telegram и отдельный аккаунт в приложении. "
+                        "Хочешь объединить их? Все данные сольются в один аккаунт.",
+                        reply_markup=kb,
+                    )
+                    await db.commit()
+                    return
+                else:
+                    await db.commit()
+                    await message.answer(
+                        "✅ Telegram успешно привязан к твоему аккаунту!\n\n"
+                        "Теперь ты можешь пользоваться и ботом, и приложением — всё синхронизировано."
+                    )
+                    await show_main_menu(message)
+                    return
+
+            # ── Onboarding check ──
             needs_onboarding = not user_db.last_onboarding_update
 
             if needs_onboarding:
@@ -151,8 +201,22 @@ async def cmd_start(message: Message, state: FSMContext):
                 await message.answer(welcome_text, reply_markup=keyboard)
                 return
 
+            # ── Email prompt (after onboarding, if no email and not dismissed) ──
+            if not user_db.email and not user_db.link_prompt_dismissed:
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📧 Указать email", callback_data="settings_email")],
+                    [InlineKeyboardButton(text="Позже", callback_data="skip_email_prompt")],
+                ])
+                await message.answer(
+                    "С возвращением! 🧘\n\n"
+                    "Если хочешь — привяжи email, чтобы использовать приложение "
+                    "через браузер и не потерять данные.",
+                    reply_markup=kb,
+                )
+                return
+
     except Exception as e:
-        logger.error(f"Error creating user: {e}", exc_info=True)
+        logger.error(f"Error in cmd_start: {e}", exc_info=True)
 
     # Standard welcome for existing users
     await show_main_menu(message)
@@ -1927,6 +1991,394 @@ async def reset_confirm(callback: CallbackQuery, state: FSMContext):
 
 
 # =============================================================================
+# Settings & Account Linking Handlers
+# =============================================================================
+
+@router.message(Command("settings"))
+async def cmd_settings(message: Message, state: FSMContext):
+    """Show settings menu with inline buttons."""
+    from app.database import AsyncSessionLocal
+    from app.repositories.user import UserRepository
+
+    await state.clear()
+
+    try:
+        async with AsyncSessionLocal() as db:
+            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
+            if not user_db:
+                await message.answer("Сначала начни с /start")
+                return
+
+        buttons = [
+            [InlineKeyboardButton(text=f"👤 Имя: {user_db.first_name or '—'}", callback_data="settings_name")],
+            [InlineKeyboardButton(text=f"💼 Занятие: {user_db.occupation or '—'}", callback_data="settings_occupation")],
+            [InlineKeyboardButton(text=f"🌍 Часовой пояс: {user_db.timezone or 'UTC'}", callback_data="settings_tz")],
+            [InlineKeyboardButton(
+                text=f"🌅 Утренние: {'✅' if user_db.morning_enabled else '❌'}",
+                callback_data="settings_toggle_morning",
+            )],
+            [InlineKeyboardButton(
+                text=f"🌙 Вечерние: {'✅' if user_db.evening_enabled else '❌'}",
+                callback_data="settings_toggle_evening",
+            )],
+        ]
+
+        if user_db.email:
+            buttons.append([InlineKeyboardButton(text=f"📧 Email: {user_db.email}", callback_data="noop")])
+        else:
+            buttons.append([InlineKeyboardButton(text="📧 Привязать email", callback_data="settings_email")])
+
+        buttons.append([InlineKeyboardButton(text="🔙 Закрыть", callback_data="settings_close")])
+
+        await message.answer(
+            "⚙️ *Настройки*\n\nЧто хочешь изменить?",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        logger.error(f"Error in cmd_settings: {e}", exc_info=True)
+        await message.answer("Не удалось открыть настройки. Попробуй позже.")
+
+
+@router.callback_query(F.data == "settings_close")
+async def cb_settings_close(callback: CallbackQuery):
+    await callback.message.edit_text("Настройки закрыты ✅")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "noop")
+async def cb_noop(callback: CallbackQuery):
+    await callback.answer()
+
+
+@router.callback_query(F.data == "skip_email_prompt")
+async def cb_skip_email_prompt(callback: CallbackQuery):
+    """Skip email prompt from /start — persist dismissal so it won't show again."""
+    from app.database import AsyncSessionLocal
+    from app.services.account_link import AccountLinkService
+    from app.repositories.user import UserRepository
+
+    try:
+        async with AsyncSessionLocal() as db:
+            user_db = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
+            if user_db:
+                await AccountLinkService().dismiss_link_prompt(db, user_db.id)
+                await db.commit()
+    except Exception as e:
+        logger.error(f"Error dismissing link prompt: {e}", exc_info=True)
+
+    await callback.message.edit_text("Хорошо! Привязать email можно в любое время через /settings")
+    await callback.answer()
+    await show_main_menu(callback.message)
+
+
+# ── Settings: Name ──
+
+@router.callback_query(F.data == "settings_name")
+async def cb_settings_name(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(SettingsState.waiting_for_name)
+    await callback.message.edit_text("Как тебя зовут? Напиши новое имя:")
+    await callback.answer()
+
+
+@router.message(SettingsState.waiting_for_name)
+async def process_settings_name(message: Message, state: FSMContext):
+    from app.database import AsyncSessionLocal
+    from app.services.account_link import AccountLinkService
+
+    name = message.text.strip()
+    if not name or len(name) > 100:
+        await message.answer("Имя должно быть от 1 до 100 символов. Попробуй ещё:")
+        return
+
+    try:
+        async with AsyncSessionLocal() as db:
+            from app.repositories.user import UserRepository
+            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
+            if user_db:
+                await AccountLinkService().update_profile(db, user_db.id, first_name=name)
+                await db.commit()
+        await state.clear()
+        await message.answer(f"Имя обновлено: *{name}* ✅\n\n/settings — вернуться в настройки", parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Error updating name: {e}", exc_info=True)
+        await message.answer("Не получилось обновить имя. Попробуй позже.")
+        await state.clear()
+
+
+# ── Settings: Occupation ──
+
+@router.callback_query(F.data == "settings_occupation")
+async def cb_settings_occupation(callback: CallbackQuery, state: FSMContext):
+    step_data = get_step_data(OnboardingSteps.OCCUPATION)
+    kb = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=opt["label"])] for opt in step_data["options"]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+    await state.set_state(SettingsState.waiting_for_occupation)
+    await callback.message.answer("Чем ты занимаешься? Выбери или напиши:", reply_markup=kb)
+    await callback.answer()
+
+
+@router.message(SettingsState.waiting_for_occupation)
+async def process_settings_occupation(message: Message, state: FSMContext):
+    from app.database import AsyncSessionLocal
+    from app.services.account_link import AccountLinkService
+
+    step_data = get_step_data(OnboardingSteps.OCCUPATION)
+    selected = next((opt["id"] for opt in step_data["options"] if opt["label"] == message.text), None)
+    occupation = selected or message.text.strip()
+
+    try:
+        async with AsyncSessionLocal() as db:
+            from app.repositories.user import UserRepository
+            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
+            if user_db:
+                await AccountLinkService().update_profile(db, user_db.id, occupation=occupation)
+                await db.commit()
+        await state.clear()
+        await message.answer(
+            f"Занятие обновлено ✅\n\n/settings — вернуться в настройки",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+    except Exception as e:
+        logger.error(f"Error updating occupation: {e}", exc_info=True)
+        await message.answer("Не получилось обновить. Попробуй позже.")
+        await state.clear()
+
+
+# ── Settings: Timezone ──
+
+@router.callback_query(F.data == "settings_tz")
+async def cb_settings_tz(callback: CallbackQuery, state: FSMContext):
+    common_tz = [
+        ("🇷🇺 Москва (UTC+3)", "Europe/Moscow"),
+        ("🇷🇺 Екатеринбург (UTC+5)", "Asia/Yekaterinburg"),
+        ("🇷🇺 Новосибирск (UTC+7)", "Asia/Novosibirsk"),
+        ("🇺🇦 Киев (UTC+2)", "Europe/Kiev"),
+        ("🇰🇿 Алматы (UTC+6)", "Asia/Almaty"),
+        ("🇺🇸 Нью-Йорк (UTC-5)", "America/New_York"),
+        ("🇬🇧 Лондон (UTC+0)", "Europe/London"),
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=label, callback_data=f"set_tz:{tz}")]
+        for label, tz in common_tz
+    ] + [[InlineKeyboardButton(text="✏️ Ввести вручную", callback_data="set_tz_custom")]])
+    await callback.message.edit_text("Выбери свой часовой пояс:", reply_markup=kb)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("set_tz:"))
+async def cb_set_tz(callback: CallbackQuery):
+    from app.database import AsyncSessionLocal
+    from app.services.account_link import AccountLinkService
+
+    tz = callback.data.split(":", 1)[1]
+    try:
+        async with AsyncSessionLocal() as db:
+            from app.repositories.user import UserRepository
+            user_db = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
+            if user_db:
+                await AccountLinkService().update_profile(db, user_db.id, timezone=tz)
+                await db.commit()
+        await callback.message.edit_text(f"Часовой пояс: *{tz}* ✅\n\n/settings — настройки", parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Error setting tz: {e}", exc_info=True)
+        await callback.message.edit_text("Ошибка. Попробуй позже.")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "set_tz_custom")
+async def cb_set_tz_custom(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(SettingsState.waiting_for_timezone)
+    await callback.message.edit_text(
+        "Введи название часового пояса (например: `Europe/Moscow`, `Asia/Tokyo`):",
+        parse_mode="Markdown",
+    )
+    await callback.answer()
+
+
+@router.message(SettingsState.waiting_for_timezone)
+async def process_settings_tz(message: Message, state: FSMContext):
+    from app.database import AsyncSessionLocal
+    from app.services.account_link import AccountLinkService
+    from zoneinfo import ZoneInfo
+
+    tz_name = message.text.strip()
+    try:
+        ZoneInfo(tz_name)  # validate
+    except (KeyError, ValueError):
+        await message.answer("Не удалось распознать часовой пояс. Попробуй ещё (например `Europe/Moscow`):")
+        return
+
+    try:
+        async with AsyncSessionLocal() as db:
+            from app.repositories.user import UserRepository
+            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
+            if user_db:
+                await AccountLinkService().update_profile(db, user_db.id, timezone=tz_name)
+                await db.commit()
+        await state.clear()
+        await message.answer(f"Часовой пояс: *{tz_name}* ✅\n\n/settings — настройки", parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Error setting tz: {e}", exc_info=True)
+        await message.answer("Ошибка. Попробуй позже.")
+        await state.clear()
+
+
+# ── Settings: Toggle morning/evening ──
+
+@router.callback_query(F.data == "settings_toggle_morning")
+async def cb_toggle_morning(callback: CallbackQuery):
+    from app.database import AsyncSessionLocal
+    from app.services.account_link import AccountLinkService
+
+    try:
+        async with AsyncSessionLocal() as db:
+            from app.repositories.user import UserRepository
+            user_db = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
+            if user_db:
+                new_val = not user_db.morning_enabled
+                await AccountLinkService().update_profile(db, user_db.id, morning_enabled=new_val)
+                await db.commit()
+                status = "включены ✅" if new_val else "выключены ❌"
+                await callback.message.edit_text(
+                    f"Утренние сообщения {status}\n\n/settings — настройки"
+                )
+    except Exception as e:
+        logger.error(f"Error toggling morning: {e}", exc_info=True)
+        await callback.message.edit_text("Ошибка. Попробуй позже.")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "settings_toggle_evening")
+async def cb_toggle_evening(callback: CallbackQuery):
+    from app.database import AsyncSessionLocal
+    from app.services.account_link import AccountLinkService
+
+    try:
+        async with AsyncSessionLocal() as db:
+            from app.repositories.user import UserRepository
+            user_db = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
+            if user_db:
+                new_val = not user_db.evening_enabled
+                await AccountLinkService().update_profile(db, user_db.id, evening_enabled=new_val)
+                await db.commit()
+                status = "включены ✅" if new_val else "выключены ❌"
+                await callback.message.edit_text(
+                    f"Вечерние сообщения {status}\n\n/settings — настройки"
+                )
+    except Exception as e:
+        logger.error(f"Error toggling evening: {e}", exc_info=True)
+        await callback.message.edit_text("Ошибка. Попробуй позже.")
+    await callback.answer()
+
+
+# ── Settings: Email linking ──
+
+@router.callback_query(F.data == "settings_email")
+async def cb_settings_email(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(SettingsState.waiting_for_email)
+    await callback.message.edit_text(
+        "📧 Введи свой email:\n\n"
+        "Мы отправим письмо с подтверждением, чтобы привязать аккаунт."
+    )
+    await callback.answer()
+
+
+@router.message(SettingsState.waiting_for_email)
+async def process_settings_email(message: Message, state: FSMContext):
+    import re
+    from app.database import AsyncSessionLocal
+    from app.services.account_link import AccountLinkService
+    from app.email.service import send_verification_email
+
+    email = message.text.strip().lower()
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        await message.answer("Это не похоже на email. Попробуй ещё:")
+        return
+
+    try:
+        async with AsyncSessionLocal() as db:
+            from app.repositories.user import UserRepository
+            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
+            if not user_db:
+                await message.answer("Пользователь не найден. Нажми /start")
+                await state.clear()
+                return
+
+            link_svc = AccountLinkService()
+            token = await link_svc.create_email_verify_token(db, user_db.id, email)
+            sent = await send_verification_email(email, user_db.first_name or "друг", token)
+            await db.commit()
+
+        await state.clear()
+        if sent:
+            await message.answer(
+                f"📬 Письмо отправлено на *{email}*\n\n"
+                "Открой почту и нажми на ссылку для подтверждения.",
+                parse_mode="Markdown",
+            )
+        else:
+            await message.answer(
+                f"Email *{email}* сохранён, но отправка письма временно недоступна.\n"
+                "Попробуй позже через /settings",
+                parse_mode="Markdown",
+            )
+    except Exception as e:
+        logger.error(f"Error in email linking: {e}", exc_info=True)
+        await message.answer("Произошла ошибка. Попробуй позже.")
+        await state.clear()
+
+
+# ── Merge callbacks (from /start deep link) ──
+
+@router.callback_query(F.data == "merge_confirm")
+async def cb_merge_confirm(callback: CallbackQuery, state: FSMContext):
+    from app.database import AsyncSessionLocal
+    from app.services.account_merge import AccountMergeService
+
+    data = await state.get_data()
+    target_id = data.get("merge_target_id")
+    source_id = data.get("merge_source_id")
+
+    if not target_id or not source_id:
+        await callback.message.edit_text("Данные для объединения устарели. Попробуй привязать аккаунт заново.")
+        await callback.answer()
+        return
+
+    try:
+        async with AsyncSessionLocal() as db:
+            merge_svc = AccountMergeService()
+            ok = await merge_svc.execute_merge(db, target_id, source_id)
+            await db.commit()
+
+        await state.clear()
+        if ok:
+            await callback.message.edit_text(
+                "✅ Аккаунты объединены!\n\n"
+                "Все данные слиты вместе. Теперь всё в одном месте."
+            )
+        else:
+            await callback.message.edit_text("Не удалось объединить. Попробуй позже.")
+    except Exception as e:
+        logger.error(f"Merge error: {e}", exc_info=True)
+        await callback.message.edit_text("Ошибка при объединении. Попробуй позже.")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "merge_cancel")
+async def cb_merge_cancel(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_text(
+        "Объединение отменено.\n"
+        "Ты можешь привязать аккаунт позже через /settings"
+    )
+    await callback.answer()
+
+
+# =============================================================================
 # Interactive Coffee Meditation (bot flow)
 # =============================================================================
 
@@ -2284,9 +2736,11 @@ dp.include_router(router)
 
 
 shutdown_event = asyncio.Event()
+bot_username: str = ""
 
 async def start_bot():
     """Start the bot"""
+    global bot_username
     logger.info("Starting Telegram bot...")
     retry_delay = 5
     shutdown_event.clear()
@@ -2295,7 +2749,8 @@ async def start_bot():
             try:
                 # Get bot info
                 bot_info = await bot.get_me()
-                logger.info(f"Bot @{bot_info.username} started successfully")
+                bot_username = bot_info.username or ""
+                logger.info(f"Bot @{bot_username} started successfully")
 
                 # Set bot commands menu
                 commands = [
@@ -2306,6 +2761,7 @@ async def start_bot():
                     BotCommand(command="coffee", description="☕️ Кофе-медитация"),
                     BotCommand(command="seed", description="🌱 Записать семя"),
                     BotCommand(command="done", description="✅ Отметить выполнение"),
+                    BotCommand(command="settings", description="⚙️ Настройки профиля"),
                     BotCommand(command="reset", description="🔄 Сброс прогресса"),
                 ]
                 await bot.set_my_commands(commands)

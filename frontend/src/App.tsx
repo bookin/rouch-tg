@@ -12,6 +12,9 @@ import CoffeePage from './pages/Coffee'
 import Onboarding from './pages/Onboarding'
 import Login from './pages/Login'
 import Register from './pages/Register'
+import VerifyEmail from './pages/VerifyEmail'
+import Settings from './pages/Settings'
+import MergeAccounts from './pages/MergeAccounts'
 import Layout from './components/Layout'
 import Lotus from "@/components/Lotus.tsx";
 
@@ -27,8 +30,9 @@ function AppContent() {
     // In Telegram context, wait for WebApp to be ready
     if (inTelegram && !isReady) return
 
-    // Skip auth check for login/register pages
-    if (location.pathname === '/login' || location.pathname === '/register') {
+    // Skip auth check for public pages
+    const publicPaths = ['/login', '/register', '/verify-email', '/merge']
+    if (publicPaths.some(p => location.pathname.startsWith(p))) {
       setChecking(false)
       return
     }
@@ -87,6 +91,9 @@ function AppContent() {
         <Route path="/coffee" element={<CoffeePage />} />
         <Route path="/meditation" element={<Navigate to="/coffee" replace />} />
         <Route path="/onboarding" element={<Onboarding />} />
+        <Route path="/verify-email" element={<VerifyEmail />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="/merge" element={<MergeAccounts />} />
       </Routes>
     </Layout>
 	  </div>

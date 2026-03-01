@@ -52,10 +52,12 @@ export function Sidebar() {
       </nav>
 
       <div className="p-4 border-t border-border space-y-2 border-white/15">
-         <Button variant="ghost" className="w-full justify-start gap-3 h-12 text-base text-white cursor-pointer">
-            <Settings className="h-5 w-5" />
-            Настройки
-         </Button>
+         <Link to="/settings">
+           <Button variant="ghost" className="w-full justify-start gap-3 h-12 text-base text-white cursor-pointer">
+              <Settings className="h-5 w-5" />
+              Настройки
+           </Button>
+         </Link>
          {showLogout && (
            <Button
              variant="ghost"

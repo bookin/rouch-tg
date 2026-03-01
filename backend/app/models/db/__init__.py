@@ -8,6 +8,7 @@ from app.models.db.karma_plan import KarmaPlanDB, KarmaPlanPartnerDB
 from app.models.db.daily import DailyPlanDB, DailyTaskDB
 from app.models.db.coffee import CoffeeMeditationSessionDB, CoffeeMeditationRejoicedSeedDB
 from app.models.db.message_log import MessageLogDB
+from app.models.db.account_link import AccountLinkTokenDB
 from app.models.db.langgraph import LangGraphCheckpointDB, LangGraphCheckpointBlobDB, LangGraphCheckpointWriteDB
 
 __all__ = [
@@ -20,5 +21,6 @@ __all__ = [
     "DailyPlanDB", "DailyTaskDB",
     "CoffeeMeditationSessionDB", "CoffeeMeditationRejoicedSeedDB",
     "MessageLogDB",
+    "AccountLinkTokenDB",
     "LangGraphCheckpointDB", "LangGraphCheckpointBlobDB", "LangGraphCheckpointWriteDB",
 ]
