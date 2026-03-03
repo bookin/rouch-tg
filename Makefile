@@ -63,8 +63,13 @@ lint:
 lint-fix:
 	docker-compose exec backend uv run ruff check --fix app/
 
-typecheck:
+mypy:
 	docker-compose exec backend uv run mypy app/ --ignore-missing-imports
+
+mypy-stats:
+	@docker-compose exec backend uv run mypy app/ --ignore-missing-imports --show-error-codes --no-color-output \
+	| awk '/error:/{total++; if (match($$0, /\[[^]]+\][[:space:]]*$$/)) { code=substr($$0, RSTART+1, RLENGTH-2); sub(/[[:space:]]*$$/, "", code); c[code]++ }} END{ printf "TOTAL: %d\n", total; for (k in c) printf "%d %s\n", c[k], k }' \
+	| (IFS= read -r header; total=$${header#TOTAL: }; printf '\033[1;31m%s\033[0m\n' "$$header"; sort -nr | awk -v total="$$total" 'BEGIN{red=sprintf("%c[31m",27); yellow=sprintf("%c[33m",27); green=sprintf("%c[32m",27); reset=sprintf("%c[0m",27)} {n=$$1; pct=(total>0?100*n/total:0); color=(n>=50?red:(n>=15?yellow:green)); printf "%s%4d%s %-14s %5.1f%%\n", color, n, reset, $$2, pct }')
 
 test:
 	docker-compose exec backend uv run pytest tests/ -v --tb=short
