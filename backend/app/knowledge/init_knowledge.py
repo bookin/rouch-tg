@@ -2,6 +2,7 @@
 Initialize knowledge base in Qdrant
 Run: python -m app.knowledge.init_knowledge
 """
+import argparse
 import asyncio
 from pathlib import Path
 from app.knowledge.loader import KnowledgeLoader
@@ -11,6 +12,16 @@ from app.config import get_settings
 
 async def main():
     """Load knowledge base and index in Qdrant"""
+    parser = argparse.ArgumentParser(description="Initialize knowledge base")
+    parser.add_argument("--db-only", action="store_true", help="Only update the local database (practices)")
+    parser.add_argument("--qdrant-only", action="store_true", help="Only update Qdrant collections")
+    args = parser.parse_args()
+
+    # If neither flag is set, do both
+    do_both = not args.db_only and not args.qdrant_only
+    update_db = args.db_only or do_both
+    update_qdrant = args.qdrant_only or do_both
+
     settings = get_settings()
     
     print("🔄 Loading knowledge base from terms/...")
@@ -42,35 +53,40 @@ async def main():
         "rules": types.get("rule", 0),
     }
 
-    print("\n"); print("Collections to index in Qdrant:")
-    for collection_name, count in collection_counts.items():
-        if count:
-            print(f"   - {collection_name}: {count} points")
-        else:
-            print(f"   - {collection_name}: 0 (will be recreated empty if collection exists)")
+    if update_qdrant:
+        print("\n"); print("Collections to index in Qdrant:")
+        for collection_name, count in collection_counts.items():
+            if count:
+                print(f"   - {collection_name}: {count} points")
+            else:
+                print(f"   - {collection_name}: 0 (will be recreated empty if collection exists)")
     
     # 2. Upsert practices into PracticeDB (canonical source)
-    practice_items = [i for i in items if i.type == "practice"]
-    if practice_items:
-        print(f"\n🔄 Upserting {len(practice_items)} practices into PracticeDB...")
-        await _upsert_practices_to_db(practice_items)
-        print("✅ PracticeDB synced")
+    if update_db:
+        practice_items = [i for i in items if i.type == "practice"]
+        if practice_items:
+            print(f"\n🔄 Upserting {len(practice_items)} practices into PracticeDB...")
+            await _upsert_practices_to_db(practice_items)
+            print("✅ PracticeDB synced")
+        else:
+            print("\n⚠️ No practice items found to upsert into PracticeDB")
 
     # 3. Create collections in Qdrant
-    print("\n🔄 Indexing in Qdrant...")
-    qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
-    await qdrant.index_knowledge(items)
-    print("✅ Indexed in Qdrant")
-    
-    # 3. Test search
-    print("\n🔄 Testing search...")
-    test_results = await qdrant.search_correlation("нестабильные доходы", limit=1)
-    if test_results:
-        print(f"✅ Test search successful:")
-        print(f"   Problem: {test_results[0].get('problem', 'N/A')}")
-        print(f"   Solution: {test_results[0].get('solution', 'N/A')[:50]}...")
-    else:
-        print("⚠️  Test search returned no results")
+    if update_qdrant:
+        print("\n🔄 Indexing in Qdrant...")
+        qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
+        await qdrant.index_knowledge(items)
+        print("✅ Indexed in Qdrant")
+        
+        # 3. Test search
+        print("\n🔄 Testing search...")
+        test_results = await qdrant.search_correlation("нестабильные доходы", limit=1)
+        if test_results:
+            print(f"✅ Test search successful:")
+            print(f"   Problem: {test_results[0].get('problem', 'N/A')}")
+            print(f"   Solution: {test_results[0].get('solution', 'N/A')[:50]}...")
+        else:
+            print("⚠️  Test search returned no results")
     
     print("\n🎉 Knowledge base initialization completed!")
 

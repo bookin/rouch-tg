@@ -36,6 +36,13 @@ docker compose up -d
 После первого запуска нужно загрузить базу знаний из `terms/` в Qdrant:
 
 ```bash
+# Обновить только БД
+docker compose exec backend python -m app.knowledge.init_knowledge --db-only
+ 
+# Обновить только Qdrant
+docker compose exec backend python -m app.knowledge.init_knowledge --qdrant-only
+ 
+# Обновить оба (по умолчанию)
 docker compose exec backend python -m app.knowledge.init_knowledge
 ```
 
