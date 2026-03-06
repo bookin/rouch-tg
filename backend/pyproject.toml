@@ -8,7 +8,7 @@ dependencies = [
     "uvicorn[standard]==0.41.0",
     "pydantic==2.12.5",
     "pydantic-settings==2.13.1",
-    "pydantic-ai==1.63.0",
+    "pydantic-ai==1.66.0",
     "langgraph==1.0.9",
     "sqlalchemy==2.0.47",
     "alembic==1.18.4",
