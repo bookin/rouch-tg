@@ -15,6 +15,7 @@
 FROM python:3.13-slim
 
 RUN pip install uv
+RUN uv pip install --system --index-url https://download.pytorch.org/whl/cpu torch
 
 # COPY . .
 
