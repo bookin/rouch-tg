@@ -93,6 +93,7 @@ async def send_welcome_email(email: str, first_name: str) -> bool:
         template_body={
             "first_name": first_name,
             "app_name": settings.APP_NAME,
+            "url": settings.WEBAPP_URL,
         },
     )
 
