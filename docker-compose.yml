@@ -38,12 +38,6 @@ services:
       dockerfile: Dockerfile.prod
     container_name: rouch_backend
     env_file: .env
-    environment:
-        HF_HOME: /app/.cache/hf
-        TRANSFORMERS_CACHE: /app/.cache/hf/transformers
-        SENTENCE_TRANSFORMERS_HOME: /app/.cache/hf/sentence_transformers
-        HF_HUB_OFFLINE: 1
-        TRANSFORMERS_OFFLINE: 1
 #      - WATCHFILES_FORCE_POLLING=true
 
     # environment:
