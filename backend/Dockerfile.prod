@@ -20,7 +20,6 @@ COPY pyproject.toml uv.lock* /app/
 
 # Если torch нужен CPU-only, ставим его отдельно из CPU-репозитория
 RUN uv venv /opt/venv && \
-    uv pip install --python /opt/venv/bin/python --index-url https://download.pytorch.org/whl/cpu torch && \
     uv sync --frozen
 
 # Теперь код приложения
