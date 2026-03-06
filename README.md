@@ -28,7 +28,7 @@ cp .env.example .env
 ### 2. Запуск проекта
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 ### 3. Инициализация базы знаний
@@ -36,7 +36,7 @@ docker-compose up -d
 После первого запуска нужно загрузить базу знаний из `terms/` в Qdrant:
 
 ```bash
-docker-compose exec backend python -m app.knowledge.init_knowledge
+docker compose exec backend python -m app.knowledge.init_knowledge
 ```
 
 Это загрузит и проиндексирует:
@@ -279,4 +279,4 @@ MIT
 
 ## Scripts
 
-`docker-compose exec backend python -m scripts.regenerate_solution --history-id <ID>`
+`docker compose exec backend python -m scripts.regenerate_solution --history-id <ID>`
