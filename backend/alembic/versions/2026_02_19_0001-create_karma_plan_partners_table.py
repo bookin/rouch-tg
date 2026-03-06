@@ -25,8 +25,8 @@ def upgrade() -> None:
         sa.Column('plan_id', sa.String(), nullable=False),
         sa.Column('partner_id', sa.String(), nullable=False),
         sa.Column('category', sa.String(), nullable=False),
-        sa.ForeignKeyConstraint(['partner_id'], ['partners.id'], ondelete='CASCADE'),
-        sa.ForeignKeyConstraint(['plan_id'], ['karma_plans.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['partner_id'], ['partners.id'], name=op.f('fk_karma_plan_partners_partner_id_partners'), ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['plan_id'], ['karma_plans.id'], name=op.f('fk_karma_plan_partners_plan_id_karma_plans'), ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('plan_id', 'partner_id', 'category')
     )
 

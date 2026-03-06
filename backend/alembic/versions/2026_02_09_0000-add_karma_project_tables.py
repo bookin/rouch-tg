@@ -30,8 +30,8 @@ def upgrade() -> None:
     sa.Column('duration_days', sa.Integer(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
-    sa.ForeignKeyConstraint(['problem_history_id'], ['problem_history.id'], ),
-    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['problem_history_id'], ['problem_history.id'], name=op.f('fk_karma_plans_problem_history_id_problem_history')),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], name=op.f('fk_karma_plans_user_id_users'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_karma_plans_status'), 'karma_plans', ['status'], unique=False)
@@ -48,7 +48,7 @@ def upgrade() -> None:
     sa.Column('completion_notes', sa.Text(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
-    sa.ForeignKeyConstraint(['karma_plan_id'], ['karma_plans.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['karma_plan_id'], ['karma_plans.id'], name=op.f('fk_daily_plans_karma_plan_id_karma_plans'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_daily_plans_karma_plan_id'), 'daily_plans', ['karma_plan_id'], unique=False)

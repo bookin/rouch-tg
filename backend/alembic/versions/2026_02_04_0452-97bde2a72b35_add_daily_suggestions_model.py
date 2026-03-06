@@ -29,8 +29,8 @@ def upgrade() -> None:
     sa.Column('completed', sa.Boolean(), nullable=True),
     sa.Column('date', sa.DateTime(), nullable=True),
     sa.Column('seed_id', sa.String(), nullable=True),
-    sa.ForeignKeyConstraint(['seed_id'], ['seeds.id'], ondelete='SET NULL'),
-    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['seed_id'], ['seeds.id'], name=op.f('fk_daily_suggestions_seed_id_seeds'), ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], name=op.f('fk_daily_suggestions_user_id_users'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_daily_suggestions_completed'), 'daily_suggestions', ['completed'], unique=False)

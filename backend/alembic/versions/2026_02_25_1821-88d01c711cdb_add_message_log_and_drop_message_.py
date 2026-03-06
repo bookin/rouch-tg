@@ -31,9 +31,9 @@ def upgrade() -> None:
     sa.Column('sent_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
-    sa.ForeignKeyConstraint(['daily_plan_id'], ['daily_plans.id'], ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['karma_plan_id'], ['karma_plans.id'], ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['daily_plan_id'], ['daily_plans.id'], name=op.f('fk_message_logs_daily_plan_id_daily_plans'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['karma_plan_id'], ['karma_plans.id'], name=op.f('fk_message_logs_karma_plan_id_karma_plans'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], name=op.f('fk_message_logs_user_id_users'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_message_logs_daily_plan_id'), 'message_logs', ['daily_plan_id'], unique=False)

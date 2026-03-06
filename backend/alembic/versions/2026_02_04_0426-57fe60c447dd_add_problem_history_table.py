@@ -27,7 +27,7 @@ def upgrade() -> None:
     sa.Column('solution_json', sa.JSON(), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=True),
-    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], name=op.f('fk_problem_history_user_id_users'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_problem_history_created_at'), 'problem_history', ['created_at'], unique=False)

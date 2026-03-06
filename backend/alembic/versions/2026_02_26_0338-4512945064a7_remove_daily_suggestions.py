@@ -38,8 +38,8 @@ def downgrade() -> None:
     sa.Column('completed', sa.BOOLEAN(), autoincrement=False, nullable=True),
     sa.Column('date', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('now()'), autoincrement=False, nullable=True),
     sa.Column('seed_id', sa.VARCHAR(), autoincrement=False, nullable=True),
-    sa.ForeignKeyConstraint(['seed_id'], ['seeds.id'], name=op.f('daily_suggestions_seed_id_fkey'), ondelete='SET NULL'),
-    sa.ForeignKeyConstraint(['user_id'], ['users.id'], name=op.f('daily_suggestions_user_id_fkey'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['seed_id'], ['seeds.id'], name=op.f('fk_daily_suggestions_seed_id_seeds'), ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], name=op.f('fk_daily_suggestions_user_id_users'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('daily_suggestions_pkey'))
     )
     op.create_index(op.f('ix_daily_suggestions_user_id'), 'daily_suggestions', ['user_id'], unique=False)
