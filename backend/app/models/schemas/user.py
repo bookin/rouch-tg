@@ -8,7 +8,7 @@ class UserRead(schemas.BaseUser[int]):
     telegram_id: Optional[int] = None
     first_name: str = ""
     username: Optional[str] = None
-    occupation: str = "employee"
+    occupation: Optional[str] = None
     timezone: str = "UTC"
     streak_days: int = 0
     total_seeds: int = 0
