@@ -98,6 +98,7 @@ services:
       - /app/node_modules
     networks:
       - rouch_network
+      - web
     labels:
       - traefik.enable=true
       - traefik.http.routers.rouch.rule=Host(`${DOMAIN_NAME}`)
@@ -115,3 +116,5 @@ volumes:
 networks:
   rouch_network:
     driver: bridge
+  web:
+    external: true
