@@ -41,7 +41,10 @@ api.interceptors.response.use(
         // Don't redirect if on login or public pages that handle auth themselves
         const noRedirect = ['/login', '/register', '/verify-email', '/merge']
         if (!noRedirect.some(p => window.location.pathname.startsWith(p))) {
-          window.location.href = '/login'
+				const next = `${window.location.pathname}${window.location.search}`
+				sessionStorage.setItem('auth_next', next)
+				localStorage.setItem('auth_next', next)
+          window.location.href = `/login?next=${encodeURIComponent(next)}`
         }
       }
     }
@@ -253,6 +256,11 @@ export interface PartnerCreatePayload {
 export const createPartner = async (payload: PartnerCreatePayload) => {
   const response = await api.post('/api/partners', payload)
   return response.data
+}
+
+export const deletePartner = async (partnerId: string): Promise<boolean> => {
+  const response = await api.delete(`/api/partners/${partnerId}`)
+  return !!response.data.success
 }
 
 export const getPractices = async () => {
@@ -476,6 +484,7 @@ export interface UserProfile {
   evening_enabled: boolean
   current_focus: string | null
   link_prompt_dismissed: boolean
+  link_prompt_snoozed_until?: string | null
   is_verified: boolean
 }
 

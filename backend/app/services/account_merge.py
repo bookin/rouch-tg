@@ -102,14 +102,22 @@ class AccountMergeService:
         # 1. Handle active project conflicts
         await self._resolve_project_conflict(db, target_user_id, source_user_id, keep_project_from)
 
+        source_telegram_id = source.telegram_id
+        source_email = source.email
+        source_is_verified = source.is_verified
+
+        source.telegram_id = None
+        source.email = None
+        await db.flush()
+
         # 2. Transfer telegram_id if target doesn't have one
-        if not target.telegram_id and source.telegram_id:
-            target.telegram_id = source.telegram_id
+        if not target.telegram_id and source_telegram_id:
+            target.telegram_id = source_telegram_id
 
         # 3. Transfer email if target doesn't have one
-        if not target.email and source.email:
-            target.email = source.email
-            target.is_verified = source.is_verified
+        if not target.email and source_email:
+            target.email = source_email
+            target.is_verified = source_is_verified
 
         # 4. Transfer password if target doesn't have one
         if (not target.hashed_password or target.hashed_password == "!telegram-no-password") and source.hashed_password and source.hashed_password != "!telegram-no-password":
@@ -127,12 +135,10 @@ class AccountMergeService:
         target.updated_at = datetime.now(UTC)
 
         # 8. Clear source's unique fields before deletion to avoid constraint issues
-        source.telegram_id = None
-        source.email = None
         await db.flush()
 
         # 9. Delete source user (cascades will handle remaining FKs)
-        await db.delete(source)
+        await db.execute(delete(UserDB).where(UserDB.id == source_user_id))
         await db.flush()
 
         logger.info(f"Merge complete: user {source_user_id} merged into {target_user_id}")

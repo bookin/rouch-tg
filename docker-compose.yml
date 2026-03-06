@@ -114,6 +114,13 @@ services:
       - /app/node_modules
     networks:
       - rouch_network
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.rouch.rule=Host(`${DOMAIN_NAME}`)
+      - traefik.http.routers.rouch.entrypoints=websecure
+      - traefik.http.routers.rouch.tls=true
+      - traefik.http.routers.rouch.tls.certresolver=mytlschallenge
+      - traefik.http.services.rouch.loadbalancer.server.port=5180
 
 volumes:
   postgres_data:

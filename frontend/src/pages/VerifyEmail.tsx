@@ -12,6 +12,7 @@ export default function VerifyEmail() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const token = searchParams.get('token')
+	const next = searchParams.get('next') || sessionStorage.getItem('auth_next') || localStorage.getItem('auth_next')
 
   const [step, setStep] = useState<Step>('verifying')
   const [error, setError] = useState<string | null>(null)
@@ -101,7 +102,14 @@ export default function VerifyEmail() {
             <p className="text-sm text-muted-foreground">
               {email && `${email} успешно привязан.`} Теперь можешь входить через браузер.
             </p>
-            <Button onClick={() => navigate('/')} className="w-full">
+            <Button
+					onClick={() => {
+						sessionStorage.removeItem('auth_next')
+						localStorage.removeItem('auth_next')
+						navigate(next || '/')
+					}}
+					className="w-full"
+				>
               Перейти в приложение
             </Button>
           </div>
@@ -171,7 +179,7 @@ export default function VerifyEmail() {
               Можешь объединить их — все данные сольются в одно место.
             </p>
             <Button
-              onClick={() => navigate(`/merge?source=${mergeSourceId}`)}
+              onClick={() => navigate(`/merge?source=${mergeSourceId}${next ? `&next=${encodeURIComponent(next)}` : ''}`)}
               className="w-full"
             >
               Посмотреть и объединить
@@ -179,7 +187,11 @@ export default function VerifyEmail() {
             <button
               type="button"
               className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-              onClick={() => navigate('/')}
+              onClick={() => {
+					sessionStorage.removeItem('auth_next')
+					localStorage.removeItem('auth_next')
+					navigate(next || '/')
+				}}
             >
               Пропустить — решу позже
             </button>

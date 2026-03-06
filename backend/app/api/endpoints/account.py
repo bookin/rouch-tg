@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db_session
 from app.config import get_settings
 from app.models.db.user import UserDB
-from app.services.account_link import AccountLinkService
+from app.services.account_link import AccountLinkService, LINK_PROMPT_SNOOZE_DAYS
 from app.services.account_merge import AccountMergeService
 
 logger = logging.getLogger(__name__)
@@ -94,6 +94,7 @@ class ProfileResponse(BaseModel):
     evening_enabled: bool = True
     current_focus: Optional[str] = None
     link_prompt_dismissed: bool = False
+    link_prompt_snoozed_until: Optional[datetime] = None
     is_verified: bool = False
 
 
@@ -102,8 +103,20 @@ class ProfileResponse(BaseModel):
 @router.get("/profile", response_model=ProfileResponse)
 async def get_profile(
     user: UserDB = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
 ):
     """Get current user profile with linking status."""
+    now = datetime.now(UTC)
+    effective_snoozed_until = user.link_prompt_snoozed_until
+    if user.link_prompt_dismissed and not effective_snoozed_until:
+        effective_snoozed_until = now + timedelta(days=LINK_PROMPT_SNOOZE_DAYS)
+        try:
+            await _link_svc.snooze_link_prompt(db, user.id, days=LINK_PROMPT_SNOOZE_DAYS)
+            await db.commit()
+        except Exception:
+            pass
+
+    snoozed = bool(effective_snoozed_until and effective_snoozed_until > now)
     return ProfileResponse(
         id=user.id,
         first_name=user.first_name,
@@ -122,7 +135,8 @@ async def get_profile(
         morning_enabled=bool(user.morning_enabled),
         evening_enabled=bool(user.evening_enabled),
         current_focus=user.current_focus,
-        link_prompt_dismissed=bool(user.link_prompt_dismissed),
+        link_prompt_dismissed=snoozed,
+        link_prompt_snoozed_until=effective_snoozed_until,
         is_verified=bool(user.is_verified),
     )
 

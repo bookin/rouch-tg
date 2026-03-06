@@ -4,6 +4,7 @@ import {
   getProfile,
   updateProfile,
   requestEmailLink,
+  setPassword,
   changePassword,
   generateTelegramLink,
   isTelegramContext,
@@ -44,6 +45,11 @@ export default function Settings() {
   const [curPw, setCurPw] = useState('')
   const [newPw, setNewPw] = useState('')
   const [pwSaving, setPwSaving] = useState(false)
+
+	// Create password (when email exists but no password)
+	const [createPw1, setCreatePw1] = useState('')
+	const [createPw2, setCreatePw2] = useState('')
+	const [createPwSaving, setCreatePwSaving] = useState(false)
 
   // Telegram linking
   const [tgLink, setTgLink] = useState<TelegramLinkResponse | null>(null)
@@ -101,8 +107,37 @@ export default function Settings() {
     }
   }
 
+	const handleCreatePassword = async (e: React.FormEvent) => {
+		e.preventDefault()
+		if (createPw1.length < 6) {
+			setError('Минимум 6 символов')
+			return
+		}
+		if (createPw1 !== createPw2) {
+			setError('Пароли не совпадают')
+			return
+		}
+		setCreatePwSaving(true)
+		setError(null)
+		try {
+			await setPassword(createPw1)
+			setMsg('Пароль создан ✅')
+			setCreatePw1('')
+			setCreatePw2('')
+			const p = await getProfile()
+			setProfile(p)
+		} catch (err: any) {
+			setError(err?.response?.data?.detail || 'Не удалось создать пароль')
+		} finally {
+			setCreatePwSaving(false)
+		}
+	}
+
   const handleEmailLink = async () => {
     if (!emailInput.includes('@')) return
+		const next = `${window.location.pathname}${window.location.search}`
+		if (!sessionStorage.getItem('auth_next')) sessionStorage.setItem('auth_next', next)
+		if (!localStorage.getItem('auth_next')) localStorage.setItem('auth_next', next)
     setEmailSending(true)
     setError(null)
     try {
@@ -269,36 +304,72 @@ export default function Settings() {
       </section>
 
       {/* Password */}
-      {profile.has_password && (
-        <section className="space-y-3 rounded-xl bg-card/50 p-4">
-          <h2 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-            <Lock className="w-4 h-4" /> Пароль
-          </h2>
+      {profile.email && (
+			<section className="space-y-3 rounded-xl bg-card/50 p-4">
+				<h2 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+					<Lock className="w-4 h-4" /> Пароль
+				</h2>
 
-          {showPasswordForm ? (
-            <form onSubmit={handleChangePassword} className="space-y-3">
-              <Input type="password" placeholder="Текущий пароль" value={curPw}
-                onChange={(e) => setCurPw(e.target.value)} />
-              <Input type="password" placeholder="Новый пароль (мин. 6)" value={newPw}
-                onChange={(e) => setNewPw(e.target.value)} />
-              <div className="flex gap-2">
-                <Button type="submit" size="sm" disabled={pwSaving}>
-                  {pwSaving && <Loader2 className="w-4 h-4 animate-spin mr-1" />}
-                  Сменить
-                </Button>
-                <Button type="button" variant="ghost" size="sm"
-                  onClick={() => setShowPasswordForm(false)}>
-                  Отмена
-                </Button>
-              </div>
-            </form>
-          ) : (
-            <Button variant="outline" size="sm" onClick={() => setShowPasswordForm(true)}>
-              <KeyRound className="w-4 h-4 mr-2" /> Сменить пароль
-            </Button>
-          )}
-        </section>
-      )}
+				{profile.has_password ? (
+					showPasswordForm ? (
+						<form onSubmit={handleChangePassword} className="space-y-3">
+							<Input
+								type="password"
+								placeholder="Текущий пароль"
+								value={curPw}
+								onChange={(e) => setCurPw(e.target.value)}
+							/>
+							<Input
+								type="password"
+								placeholder="Новый пароль (мин. 6)"
+								value={newPw}
+								onChange={(e) => setNewPw(e.target.value)}
+							/>
+							<div className="flex gap-2">
+								<Button type="submit" size="sm" disabled={pwSaving}>
+									{pwSaving && <Loader2 className="w-4 h-4 animate-spin mr-1" />}
+									Сменить
+								</Button>
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									onClick={() => setShowPasswordForm(false)}
+								>
+									Отмена
+								</Button>
+							</div>
+						</form>
+					) : (
+						<Button variant="outline" size="sm" onClick={() => setShowPasswordForm(true)}>
+							<KeyRound className="w-4 h-4 mr-2" /> Сменить пароль
+						</Button>
+					)
+				) : (
+					<form onSubmit={handleCreatePassword} className="space-y-3">
+						<p className="text-sm text-muted-foreground">
+							Чтобы спокойно входить через браузер, давай зададим пароль.
+						</p>
+						<Input
+							type="password"
+							placeholder="Пароль (мин. 6)"
+							value={createPw1}
+							onChange={(e) => setCreatePw1(e.target.value)}
+						/>
+						<Input
+							type="password"
+							placeholder="Повтори пароль"
+							value={createPw2}
+							onChange={(e) => setCreatePw2(e.target.value)}
+						/>
+						<Button type="submit" className="w-full" disabled={createPwSaving}>
+							{createPwSaving && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+							Создать пароль
+						</Button>
+					</form>
+				)}
+			</section>
+		)}
 
       {/* Telegram linking (web only) */}
       {!isTg && !profile.telegram_id && (

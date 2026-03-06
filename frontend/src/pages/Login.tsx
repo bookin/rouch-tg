@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { loginUser } from '../api/client'
 import { Loader2, LogIn, ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 
 export default function Login() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -24,7 +25,12 @@ export default function Login() {
     setError(null)
     try {
       await loginUser({ username: email, password })
-      navigate('/')
+			const nextFromQuery = searchParams.get('next')
+			const nextFromStorage = sessionStorage.getItem('auth_next') || localStorage.getItem('auth_next')
+			const next = nextFromQuery || nextFromStorage
+			sessionStorage.removeItem('auth_next')
+			localStorage.removeItem('auth_next')
+			navigate(next || '/')
     } catch (err: any) {
       const detail = err?.response?.data?.detail
       if (detail === 'LOGIN_BAD_CREDENTIALS') {
@@ -102,7 +108,12 @@ export default function Login() {
           <button
             type="button"
             className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-            onClick={() => navigate('/register')}
+            onClick={() => {
+					const nextFromQuery = searchParams.get('next')
+					const nextFromStorage = sessionStorage.getItem('auth_next') || localStorage.getItem('auth_next')
+					const next = nextFromQuery || nextFromStorage
+					navigate(`/register${next ? `?next=${encodeURIComponent(next)}` : ''}`)
+				}}
           >
             Нет аккаунта? Зарегистрируйся
           </button>

@@ -2,6 +2,7 @@ import {ReactNode} from 'react'
 import {useLocation} from 'react-router-dom'
 import {Sidebar} from './Sidebar'
 import {BottomNav} from './BottomNav'
+import AccountLinkGate from './AccountLinkGate'
 
 interface LayoutProps {
 	children: ReactNode
@@ -9,14 +10,26 @@ interface LayoutProps {
 
 export default function Layout({children}: LayoutProps) {
 	const location = useLocation()
+	const hideGate =
+		location.pathname.startsWith('/login') ||
+		location.pathname.startsWith('/register') ||
+		location.pathname.startsWith('/verify-email') ||
+		location.pathname.startsWith('/merge') ||
+		location.pathname.startsWith('/onboarding')
 	const isPlainPage =
 		location.pathname === '/onboarding' ||
 		location.pathname === '/meditation' ||
-		location.pathname === '/coffee'
+		location.pathname === '/coffee' ||
+		location.pathname === '/cofee'
 
 
 	if (isPlainPage) {
-		return <main className="min-h-screen relative z-10">{children}</main>
+		return (
+			<main className="min-h-screen relative z-10">
+				{children}
+				{!hideGate && <AccountLinkGate/>}
+			</main>
+		)
 	}
 
 	return (
@@ -33,6 +46,7 @@ export default function Layout({children}: LayoutProps) {
 
 			{/* Mobile Bottom Navigation */}
 			<BottomNav/>
+			{!hideGate && <AccountLinkGate/>}
 		</div>
 	)
 }

@@ -27,7 +27,7 @@ class PartnerGroupDB(Base):
     description: Mapped[str] = mapped_column(Text)
     universal_category: Mapped[str | None] = mapped_column(String, default="world")
     is_default: Mapped[bool] = mapped_column(default=False)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -37,8 +37,8 @@ class PartnerDB(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String)
-    group_id: Mapped[str] = mapped_column(ForeignKey("partner_groups.id"))
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    group_id: Mapped[str] = mapped_column(ForeignKey("partner_groups.id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
 
     preferences: Mapped[list | None] = mapped_column(JSON, default=list)
     important_dates: Mapped[list | None] = mapped_column(JSON, default=list)

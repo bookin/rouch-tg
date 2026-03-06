@@ -87,3 +87,18 @@ async def create_partner_endpoint(
     partner_db = await partner_svc.create_partner(db, partner)
 
     return PartnerCreateResponse(success=True, partner_id=partner_db.id).model_dump()
+
+
+@router.delete("/partners/{partner_id}")
+async def delete_practice_endpoint(
+    partner_id: str,
+    db: AsyncSession = Depends(get_db_session),
+    partner_svc: PartnerService = Depends(get_partner_service),
+):
+    """Удалить практику и все связанные семена"""
+    try:
+        result = await partner_svc.delete_partner(db, partner_id)
+        return {"success": result}
+    except Exception as e:
+        logger.error(f"Error deleting practice: {e}", exc_info=True)
+        return {"error": "Failed to delete practice"}

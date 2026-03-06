@@ -1,6 +1,6 @@
 import {FormEvent, useEffect, useMemo, useState} from 'react'
-import {createPartner, getPartners, PartnerCreatePayload} from '../api/client'
-import {Users, UserPlus, NotebookPen, Loader2, Home, Globe} from 'lucide-react'
+import {createPartner, deletePartner, getPartners, PartnerCreatePayload} from '../api/client'
+import {Users, UserPlus, NotebookPen, Loader2, Home, Globe, Trash} from 'lucide-react'
 import {cn} from '@/lib/utils'
 import {Card, CardContent, CardHeader, CardTitle, CardDescription} from '@/components/ui/card'
 import {Button} from '@/components/ui/button'
@@ -133,6 +133,18 @@ export default function Partners() {
 		}
 	}
 
+	const onDeletePartner = async (partnerId: string) => {
+		try{
+			setError(null)
+			let result = await deletePartner(partnerId)
+			if (result) {
+				setPartners(partners.filter(g => g.id !== partnerId))
+			}
+		} catch (err: any) {
+			setError(err?.message || 'Failed to delete partner')
+		}
+	}
+
 	if (loading && groups.length === 0) {
 		return (
 			<div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
@@ -200,7 +212,17 @@ export default function Partners() {
 												{p.contact_type === 'online' ? <Globe className="h-4 w-4"/> : <Home className="h-4 w-4"/>}
 												<span className="font-medium text-white">{p.name}</span>
 											</div>
-
+											<Button
+												className=""
+												variant="ghost_destructive"
+												onClick={() => onDeletePartner(p.id)}
+												// onClick={(e) => {
+												// 	e.stopPropagation()
+												// 	setActiveNoteId(activeNoteId === p.id ? null : p.id)
+												// }}
+											>
+												<Trash className="h-4 w-4"/>
+											</Button>
 											{p.notes && (
 												<Popover>
 													<PopoverTrigger asChild>

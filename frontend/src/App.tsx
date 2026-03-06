@@ -40,7 +40,10 @@ function AppContent() {
     // In web context, check if we have a token
     if (!inTelegram && !isAuthenticated()) {
       setChecking(false)
-      navigate('/login')
+			const next = `${location.pathname}${location.search}`
+			sessionStorage.setItem('auth_next', next)
+			localStorage.setItem('auth_next', next)
+			navigate(`/login?next=${encodeURIComponent(next)}`)
       return
     }
 
@@ -55,7 +58,10 @@ function AppContent() {
         console.error('Failed to check user status:', error)
         // In web context, redirect to login on auth failure
         if (!inTelegram) {
-          navigate('/login')
+				const next = `${location.pathname}${location.search}`
+				sessionStorage.setItem('auth_next', next)
+				localStorage.setItem('auth_next', next)
+				navigate(`/login?next=${encodeURIComponent(next)}`)
         }
       } finally {
         setChecking(false)
@@ -63,7 +69,7 @@ function AppContent() {
     }
 
     checkUser()
-  }, [isReady, navigate, location.pathname])
+  }, [isReady, navigate, location.pathname, location.search])
 
   if (checking) {
     return (

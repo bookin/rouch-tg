@@ -100,3 +100,6 @@ class PartnerRepository(BaseRepository[PartnerDB]):
     async def delete_by_user(self, db: AsyncSession, user_id: int) -> None:
         await db.execute(delete(PartnerDB).where(PartnerDB.user_id == user_id))
         await db.flush()
+
+    async def delete_by_id(self, db: AsyncSession, partner_id: str) -> bool:
+        return await self.delete(db, partner_id)

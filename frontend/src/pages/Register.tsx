@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { registerUser, loginUser } from '../api/client'
 import { Loader2, UserPlus, ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 
 export default function Register() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -38,7 +39,12 @@ export default function Register() {
       await registerUser({ email, password, first_name: firstName })
       // Auto-login after registration
       await loginUser({ username: email, password })
-      navigate('/onboarding')
+      const nextFromQuery = searchParams.get('next')
+      const nextFromStorage = sessionStorage.getItem('auth_next') || localStorage.getItem('auth_next')
+      const next = nextFromQuery || nextFromStorage
+      sessionStorage.removeItem('auth_next')
+      localStorage.removeItem('auth_next')
+      navigate(next || '/onboarding')
     } catch (err: any) {
       const detail = err?.response?.data?.detail
       if (detail === 'REGISTER_USER_ALREADY_EXISTS') {
@@ -139,7 +145,12 @@ export default function Register() {
           <button
             type="button"
             className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-            onClick={() => navigate('/login')}
+            onClick={() => {
+					const nextFromQuery = searchParams.get('next')
+					const nextFromStorage = sessionStorage.getItem('auth_next') || localStorage.getItem('auth_next')
+					const next = nextFromQuery || nextFromStorage
+					navigate(`/login${next ? `?next=${encodeURIComponent(next)}` : ''}`)
+				}}
           >
             Уже есть аккаунт? Войди
           </button>

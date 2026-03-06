@@ -1,5 +1,6 @@
 """Telegram Bot handlers"""
 import asyncio
+from datetime import UTC, datetime, timedelta
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.types import (
@@ -13,9 +14,7 @@ from aiogram.exceptions import TelegramAPIError
 import logging
 from app.config import get_settings
 from app.workflows.onboarding import (
-    ONBOARDING_STEPS, 
     OnboardingSteps, 
-    get_next_step, 
     get_step_data,
     save_onboarding_progress
 )
@@ -117,6 +116,402 @@ STEP_STATE_MAP = {
 }
 
 
+async def show_main_menu(message: Message) -> None:
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text="📱 Открыть приложение",
+                    web_app=WebAppInfo(url=settings.WEBAPP_URL),
+                )
+            ],
+        ],
+        resize_keyboard=True,
+    )
+
+    await message.answer(
+        "Я рядом. Когда захочешь — продолжим.\n\n"
+        "Команды: /coffee /settings",
+        reply_markup=keyboard,
+    )
+
+
+async def _start_onboarding(message: Message, state: FSMContext) -> None:
+    await _send_onboarding_step(message, state, OnboardingSteps.OCCUPATION)
+
+
+async def _send_onboarding_step(message: Message, state: FSMContext, step: str) -> None:
+    step_data = get_step_data(step)
+    input_type = step_data.get("input_type")
+    options = step_data.get("options") or []
+
+    fsm_state = STEP_STATE_MAP.get(step)
+    if fsm_state:
+        await state.set_state(fsm_state)
+    await state.update_data(onb_step=step)
+
+    if input_type in {"single_choice", "confirm"}:
+        kb = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text=opt["label"])] for opt in options],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        )
+        await message.answer(step_data["message"], reply_markup=kb)
+        return
+
+    if input_type == "multi_choice":
+        kb = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text=opt["label"])] for opt in options]
+            + [[KeyboardButton(text="Готово")]],
+            resize_keyboard=True,
+            one_time_keyboard=False,
+        )
+        await state.update_data(onb_multi_selected=[])
+        await message.answer(
+            step_data["message"] + "\n\nВыбирай пункты и потом нажми «Готово».",
+            reply_markup=kb,
+        )
+        return
+
+    if input_type == "text_optional":
+        kb = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="➡️ Пропустить")]],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        )
+        await message.answer(step_data["message"], reply_markup=kb)
+        return
+
+    await message.answer(step_data["message"], reply_markup=ReplyKeyboardRemove())
+
+
+def _option_id_by_label(step: str, label: str) -> str | None:
+    step_data = get_step_data(step)
+    for opt in step_data.get("options") or []:
+        if opt.get("label") == label:
+            return str(opt.get("id"))
+    return None
+
+
+def _selected_labels(step: str, ids_or_custom: list[str]) -> str:
+    step_data = get_step_data(step)
+    label_by_id = {str(opt.get("id")): str(opt.get("label")) for opt in (step_data.get("options") or [])}
+    parts: list[str] = []
+    for v in ids_or_custom:
+        parts.append(label_by_id.get(v, v))
+    return ", ".join(parts)
+
+
+@router.message(F.text == "🚀 Начать знакомство")
+async def start_onboarding(message: Message, state: FSMContext):
+    await _start_onboarding(message, state)
+
+
+@router.message(OnboardingState.occupation)
+async def onb_occupation(message: Message, state: FSMContext):
+    text = (message.text or "").strip()
+    data = await state.get_data()
+    if data.get("onb_expect_custom"):
+        await state.update_data(onb_expect_custom=False)
+        await save_onboarding_progress(message.from_user.id, OnboardingSteps.OCCUPATION, text, by_telegram_id=True)
+        await _send_onboarding_step(message, state, OnboardingSteps.SCHEDULE)
+        return
+
+    opt_id = _option_id_by_label(OnboardingSteps.OCCUPATION, text)
+    if not opt_id:
+        await message.answer("Выбери вариант кнопкой — так будет проще.")
+        return
+
+    if opt_id == "other":
+        await state.update_data(onb_expect_custom=True)
+        await message.answer("Напиши, пожалуйста, одним коротким словом: ", reply_markup=ReplyKeyboardRemove())
+        return
+
+    await save_onboarding_progress(message.from_user.id, OnboardingSteps.OCCUPATION, opt_id, by_telegram_id=True)
+    await _send_onboarding_step(message, state, OnboardingSteps.SCHEDULE)
+
+
+@router.message(OnboardingState.schedule)
+async def onb_schedule(message: Message, state: FSMContext):
+    text = (message.text or "").strip()
+    data = await state.get_data()
+    selected: list[str] = list(data.get("onb_multi_selected") or [])
+
+    if data.get("onb_expect_custom"):
+        await state.update_data(onb_expect_custom=False)
+        if text:
+            selected.append(text)
+            await state.update_data(onb_multi_selected=selected)
+        await message.answer(f"Сейчас выбрано: { _selected_labels(OnboardingSteps.SCHEDULE, selected) or '—' }\nНажми «Готово», когда будешь готов(а).")
+        return
+
+    if text == "Готово":
+        if not selected:
+            await message.answer("Выбери хотя бы один вариант — и нажми «Готово».")
+            return
+        await save_onboarding_progress(message.from_user.id, OnboardingSteps.SCHEDULE, selected, by_telegram_id=True)
+        await _send_onboarding_step(message, state, OnboardingSteps.DURATION)
+        return
+
+    opt_id = _option_id_by_label(OnboardingSteps.SCHEDULE, text)
+    if not opt_id:
+        await message.answer("Выбирай пункты кнопками и потом нажми «Готово».")
+        return
+
+    if opt_id == "other":
+        await state.update_data(onb_expect_custom=True)
+        await message.answer("Напиши свой вариант одним текстом:", reply_markup=ReplyKeyboardRemove())
+        return
+
+    if opt_id == "none":
+        selected = ["none"]
+        await save_onboarding_progress(message.from_user.id, OnboardingSteps.SCHEDULE, selected, by_telegram_id=True)
+        await _send_onboarding_step(message, state, OnboardingSteps.DURATION)
+        return
+
+    if opt_id in selected:
+        selected = [v for v in selected if v != opt_id]
+    else:
+        selected.append(opt_id)
+        selected = [v for v in selected if v != "none"]
+
+    await state.update_data(onb_multi_selected=selected)
+    await message.answer(f"Сейчас выбрано: { _selected_labels(OnboardingSteps.SCHEDULE, selected) or '—' }\nНажми «Готово», когда будешь готов(а).")
+
+
+@router.message(OnboardingState.duration)
+async def onb_duration(message: Message, state: FSMContext):
+    text = (message.text or "").strip()
+    opt_id = _option_id_by_label(OnboardingSteps.DURATION, text)
+    if not opt_id:
+        await message.answer("Выбери вариант кнопкой — так будет проще.")
+        return
+
+    await save_onboarding_progress(message.from_user.id, OnboardingSteps.DURATION, opt_id, by_telegram_id=True)
+    await _send_onboarding_step(message, state, OnboardingSteps.HABITS)
+
+
+@router.message(OnboardingState.habits)
+async def onb_habits(message: Message, state: FSMContext):
+    text = (message.text or "").strip()
+    data = await state.get_data()
+    selected: list[str] = list(data.get("onb_multi_selected") or [])
+
+    if data.get("onb_expect_custom"):
+        await state.update_data(onb_expect_custom=False)
+        if text:
+            selected.append(text)
+            await state.update_data(onb_multi_selected=selected)
+        await message.answer(f"Сейчас выбрано: { _selected_labels(OnboardingSteps.HABITS, selected) or '—' }\nНажми «Готово», когда будешь готов(а).")
+        return
+
+    if text == "Готово":
+        if not selected:
+            await message.answer("Выбери хотя бы один вариант — и нажми «Готово».")
+            return
+        await save_onboarding_progress(message.from_user.id, OnboardingSteps.HABITS, selected, by_telegram_id=True)
+        await _send_onboarding_step(message, state, OnboardingSteps.RESTRICTIONS)
+        return
+
+    opt_id = _option_id_by_label(OnboardingSteps.HABITS, text)
+    if not opt_id:
+        await message.answer("Выбирай пункты кнопками и потом нажми «Готово».")
+        return
+
+    if opt_id == "other":
+        await state.update_data(onb_expect_custom=True)
+        await message.answer("Напиши свой вариант одним текстом:", reply_markup=ReplyKeyboardRemove())
+        return
+
+    if opt_id == "none":
+        selected = ["none"]
+        await save_onboarding_progress(message.from_user.id, OnboardingSteps.HABITS, selected, by_telegram_id=True)
+        await _send_onboarding_step(message, state, OnboardingSteps.RESTRICTIONS)
+        return
+
+    if opt_id in selected:
+        selected = [v for v in selected if v != opt_id]
+    else:
+        selected.append(opt_id)
+        selected = [v for v in selected if v != "none"]
+
+    await state.update_data(onb_multi_selected=selected)
+    await message.answer(f"Сейчас выбрано: { _selected_labels(OnboardingSteps.HABITS, selected) or '—' }\nНажми «Готово», когда будешь готов(а).")
+
+
+@router.message(OnboardingState.restrictions)
+async def onb_restrictions(message: Message, state: FSMContext):
+    text = (message.text or "").strip()
+    answer = "skip" if text == "➡️ Пропустить" else text
+    await save_onboarding_progress(message.from_user.id, OnboardingSteps.RESTRICTIONS, answer, by_telegram_id=True)
+    await _send_onboarding_step(message, state, OnboardingSteps.PARTNERS)
+
+
+@router.message(OnboardingState.partners)
+async def onb_partners(message: Message, state: FSMContext):
+    text = (message.text or "").strip()
+    opt_id = _option_id_by_label(OnboardingSteps.PARTNERS, text)
+    if not opt_id:
+        await message.answer("Нажми кнопку, чтобы продолжить.")
+        return
+
+    await save_onboarding_progress(message.from_user.id, OnboardingSteps.PARTNERS, opt_id, by_telegram_id=True)
+    complete = get_step_data(OnboardingSteps.COMPLETE)
+    await message.answer(complete["message"], reply_markup=ReplyKeyboardRemove())
+    await state.clear()
+    await show_main_menu(message)
+
+
+@router.message(Command("settings"))
+async def cmd_settings(message: Message, state: FSMContext):
+    from app.database import AsyncSessionLocal
+    from app.repositories.user import UserRepository
+
+    await state.clear()
+
+    try:
+        async with AsyncSessionLocal() as db:
+            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
+            email = user_db.email if user_db else None
+
+        buttons = []
+        if email:
+            buttons.append([InlineKeyboardButton(text=f"📧 Email: {email}", callback_data="noop")])
+        else:
+            buttons.append([InlineKeyboardButton(text="📧 Привязать email", callback_data="settings_email")])
+        buttons.append([InlineKeyboardButton(text="🔙 Закрыть", callback_data="settings_close")])
+
+        await message.answer(
+            "⚙️ Настройки\n\nЧто хочешь сделать?",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        )
+    except Exception as e:
+        logger.error(f"cmd_settings error: {e}", exc_info=True)
+        await message.answer("Не получилось открыть настройки. Попробуй чуть позже.")
+
+
+@router.callback_query(F.data == "settings_close")
+async def cb_settings_close(callback: CallbackQuery):
+    await callback.message.edit_text("Настройки закрыты ✅")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "noop")
+async def cb_noop(callback: CallbackQuery):
+    await callback.answer()
+
+
+@router.callback_query(F.data == "skip_email_prompt")
+async def cb_skip_email_prompt(callback: CallbackQuery, state: FSMContext):
+    from app.database import AsyncSessionLocal
+    from app.repositories.user import UserRepository
+    from app.services.account_link import AccountLinkService
+
+    try:
+        async with AsyncSessionLocal() as db:
+            user_db = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
+            if user_db:
+                await AccountLinkService().dismiss_link_prompt(db, user_db.id)
+                await db.commit()
+    except Exception as e:
+        logger.error(f"cb_skip_email_prompt error: {e}", exc_info=True)
+
+    await callback.answer()
+    await callback.message.answer("Хорошо. Я отложил это на позже.", reply_markup=ReplyKeyboardRemove())
+
+    try:
+        async with AsyncSessionLocal() as db:
+            user_db = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
+            needs_onboarding = bool(user_db and not user_db.last_onboarding_update)
+    except Exception:
+        needs_onboarding = False
+
+    if needs_onboarding:
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="🚀 Начать знакомство")]],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        )
+        await callback.message.answer(
+            "Давай познакомимся, чтобы я мог собрать тебе персональный план.",
+            reply_markup=keyboard,
+        )
+        return
+
+    await show_main_menu(callback.message)
+
+
+@router.callback_query(F.data == "settings_email")
+async def cb_settings_email(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(SettingsState.waiting_for_email)
+    await callback.answer()
+    await callback.message.answer(
+        "📧 Напиши свой email. Я отправлю письмо с подтверждением.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+
+
+@router.message(SettingsState.waiting_for_email)
+async def process_settings_email(message: Message, state: FSMContext):
+    import re
+    from app.database import AsyncSessionLocal
+    from app.repositories.user import UserRepository
+    from app.services.account_link import AccountLinkService
+    from app.email.service import send_verification_email
+
+    email = (message.text or "").strip().lower()
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        await message.answer("Это не похоже на email. Попробуй ещё раз:")
+        return
+
+    try:
+        async with AsyncSessionLocal() as db:
+            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
+            if not user_db:
+                await message.answer("Пользователь не найден. Нажми /start")
+                await state.clear()
+                return
+
+            needs_onboarding = not user_db.last_onboarding_update
+
+            link_svc = AccountLinkService()
+            token = await link_svc.create_email_verify_token(db, user_db.id, email)
+            sent = await send_verification_email(email, user_db.first_name or "друг", token)
+            await link_svc.dismiss_link_prompt(db, user_db.id)
+            await db.commit()
+
+        await state.clear()
+
+        if sent:
+            await message.answer(
+                f"📬 Письмо отправлено на {email}\n\nОткрой почту и нажми на ссылку.",
+                reply_markup=ReplyKeyboardRemove(),
+            )
+        else:
+            await message.answer(
+                f"Я сохранил email {email}, но письмо сейчас не отправилось. Попробуй позже через /settings.",
+                reply_markup=ReplyKeyboardRemove(),
+            )
+
+        if needs_onboarding:
+            keyboard = ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="🚀 Начать знакомство")]],
+                resize_keyboard=True,
+                one_time_keyboard=True,
+            )
+            await message.answer(
+                "Если хочешь — можем продолжить знакомство и собрать персональный план.",
+                reply_markup=keyboard,
+            )
+            return
+
+        await show_main_menu(message)
+    except Exception as e:
+        logger.error(f"process_settings_email error: {e}", exc_info=True)
+        await message.answer("Не получилось отправить письмо. Попробуй чуть позже.")
+        await state.clear()
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
     """Handle /start command, including deep link payloads for account linking."""
@@ -156,25 +551,82 @@ async def cmd_start(message: Message, state: FSMContext):
                         "Попробуй создать новую в настройках приложения."
                     )
                 elif tg_conflict:
+                    from app.services.account_merge import AccountMergeService
+
                     # Merge needed — store in state for confirmation
                     await state.update_data(
                         merge_target_id=web_user.id,
                         merge_source_id=tg_conflict.id,
                     )
-                    kb = InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="✅ Объединить аккаунты", callback_data="merge_confirm")],
-                        [InlineKeyboardButton(text="❌ Отмена", callback_data="merge_cancel")],
-                    ])
-                    await message.answer(
-                        "🔗 Обнаружены два аккаунта\n\n"
-                        "У тебя уже есть аккаунт в Telegram и отдельный аккаунт в приложении. "
-                        "Хочешь объединить их? Все данные сольются в один аккаунт.",
-                        reply_markup=kb,
+
+                    preview = await AccountMergeService().preview_merge(
+                        db, target_user_id=web_user.id, source_user_id=tg_conflict.id
                     )
+                    has_conflict = bool(preview.get("has_project_conflict"))
+
+                    if has_conflict:
+                        await state.update_data(merge_has_project_conflict=True)
+                        kb = InlineKeyboardMarkup(inline_keyboard=[
+                            [
+                                InlineKeyboardButton(
+                                    text="Оставить активный проект из приложения",
+                                    callback_data="merge_keep_target",
+                                )
+                            ],
+                            [
+                                InlineKeyboardButton(
+                                    text="Оставить активный проект из Telegram",
+                                    callback_data="merge_keep_source",
+                                )
+                            ],
+                            [InlineKeyboardButton(text="❌ Отмена", callback_data="merge_cancel")],
+                        ])
+
+                        target_problem = preview.get("target", {}).get("active_project_problem")
+                        source_problem = preview.get("source", {}).get("active_project_problem")
+                        text = (
+                            "🔗 Обнаружены два аккаунта\n\n"
+                            "И у каждого сейчас есть активный проект.\n"
+                            "Давай выберем, какой проект оставить активным после объединения.\n\n"
+                            f"В приложении: {target_problem or '—'}\n"
+                            f"В Telegram: {source_problem or '—'}"
+                        )
+                        await message.answer(text, reply_markup=kb)
+                    else:
+                        kb = InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="✅ Объединить аккаунты", callback_data="merge_confirm")],
+                            [InlineKeyboardButton(text="❌ Отмена", callback_data="merge_cancel")],
+                        ])
+                        await message.answer(
+                            "🔗 Обнаружены два аккаунта\n\n"
+                            "У тебя уже есть аккаунт в Telegram и отдельный аккаунт в приложении. "
+                            "Хочешь объединить их? Все данные сольются в один аккаунт.",
+                            reply_markup=kb,
+                        )
                     await db.commit()
                     return
                 else:
                     await db.commit()
+
+                    if web_user.telegram_id and web_user.telegram_id != user.id:
+                        await message.answer(
+                            "Похоже, этот аккаунт в приложении уже привязан к другому Telegram.\n\n"
+                            "Если хочешь — мы можем аккуратно объединить аккаунты: "
+                            "открой приложение → Настройки → «Привязать Telegram» и создай новый код, "
+                            "а потом снова перейди по новой ссылке."
+                        )
+                        await show_main_menu(message)
+                        return
+
+                    if not web_user.telegram_id:
+                        await message.answer(
+                            "Я попробовал привязать Telegram, но сейчас что-то мешает.\n\n"
+                            "Открой приложение → Настройки → «Привязать Telegram» и создай новый код, "
+                            "а потом снова перейди по новой ссылке."
+                        )
+                        await show_main_menu(message)
+                        return
+
                     await message.answer(
                         "✅ Telegram успешно привязан к твоему аккаунту!\n\n"
                         "Теперь ты можешь пользоваться и ботом, и приложением — всё синхронизировано."
@@ -184,6 +636,32 @@ async def cmd_start(message: Message, state: FSMContext):
 
             # ── Onboarding check ──
             needs_onboarding = not user_db.last_onboarding_update
+            if user_db.link_prompt_dismissed and not user_db.link_prompt_snoozed_until:
+                try:
+                    await AccountLinkService().snooze_link_prompt(db, user_db.id, days=7)
+                    await db.commit()
+                    user_db.link_prompt_dismissed = False
+                    user_db.link_prompt_snoozed_until = datetime.now(UTC) + timedelta(days=7)
+                except Exception as e:
+                    logger.error(f"Failed to convert legacy link_prompt_dismissed: {e}", exc_info=True)
+
+            snoozed = bool(
+                user_db.link_prompt_snoozed_until
+                and user_db.link_prompt_snoozed_until > datetime.now(UTC)
+            )
+
+            # ── Email prompt (before onboarding) ──
+            if not user_db.email and not snoozed:
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📧 Указать email", callback_data="settings_email")],
+                    [InlineKeyboardButton(text="Позже (7 дней)", callback_data="skip_email_prompt")],
+                ])
+                await message.answer(
+                    "Чтобы твой путь не потерялся — можно привязать email.\n\n"
+                    "Это поможет входить через браузер и переносить практики между устройствами.",
+                    reply_markup=kb,
+                )
+                return
 
             if needs_onboarding:
                 keyboard = ReplyKeyboardMarkup(
@@ -201,20 +679,6 @@ async def cmd_start(message: Message, state: FSMContext):
                 await message.answer(welcome_text, reply_markup=keyboard)
                 return
 
-            # ── Email prompt (after onboarding, if no email and not dismissed) ──
-            if not user_db.email and not user_db.link_prompt_dismissed:
-                kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="📧 Указать email", callback_data="settings_email")],
-                    [InlineKeyboardButton(text="Позже", callback_data="skip_email_prompt")],
-                ])
-                await message.answer(
-                    "С возвращением! 🧘\n\n"
-                    "Если хочешь — привяжи email, чтобы использовать приложение "
-                    "через браузер и не потерять данные.",
-                    reply_markup=kb,
-                )
-                return
-
     except Exception as e:
         logger.error(f"Error in cmd_start: {e}", exc_info=True)
 
@@ -222,2117 +686,33 @@ async def cmd_start(message: Message, state: FSMContext):
     await show_main_menu(message)
 
 
-@router.message(Command("coffee"))
-async def cmd_coffee(message: Message):
-    from app.database import AsyncSessionLocal
-    from app.repositories.user import UserRepository
-    from app.repositories.karma_plan import KarmaPlanRepository
-
-    try:
-        settings = get_settings()
-
-        async with AsyncSessionLocal() as db:
-            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
-            if not user_db:
-                await message.answer("Сначала начни с команды /start")
-                return
-
-            plan = await KarmaPlanRepository().get_active(db, user_db.id)
-            if not plan:
-                await _send_need_project(message)
-                return
-
-        kb = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="☕️ Начать прямо здесь", callback_data="cf_start")],
-                [
-                    InlineKeyboardButton(
-                        text="📱 Открыть в приложении",
-                        web_app=WebAppInfo(url=f"{settings.WEBAPP_URL}/coffee"),
-                    )
-                ],
-            ]
-        )
-
-        await message.answer(
-            "☕️ Кофе‑медитация\n\n"
-            "Мягкий ритуал, чтобы усилить посаженные семена "
-            "и наполнить день теплом.\n\n"
-            "Как тебе удобнее?",
-            reply_markup=kb,
-        )
-    except Exception as e:
-        logger.error(f"Error in cmd_coffee: {e}", exc_info=True)
-        await message.answer("Не получилось открыть кофе‑медитацию. Попробуй чуть позже.")
-
-
-async def show_main_menu(message: Message):
-    """Show main menu with app button"""
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[[
-            KeyboardButton(
-                text="📱 Открыть приложение",
-                web_app=WebAppInfo(url=settings.WEBAPP_URL)
-            )
-        ]],
-        resize_keyboard=True
-    )
-    
-    text = (
-        "С возвращением! 🧘\n\n"
-        "Твой план и практики ждут тебя в приложении."
-    )
-    
-    await message.answer(text, reply_markup=keyboard)
-
-
-async def _send_need_project(message: Message):
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🗣 Разобрать задачу здесь", callback_data="start_problem_flow")],
-            [
-                InlineKeyboardButton(
-                    text="📱 Открыть «Проблема»",
-                    web_app=WebAppInfo(url=f"{settings.WEBAPP_URL}/problem"),
-                )
-            ],
-        ]
-    )
-
-    await message.answer(
-        "Сейчас у тебя нет активного проекта. Давай сначала спокойно соберём его — и дальше всё будет работать стабильно.",
-        reply_markup=kb,
-    )
-
-
-# =============================================================================
-# Onboarding Handlers
-# =============================================================================
-
-@router.message(F.text == "🚀 Начать знакомство")
-async def start_onboarding_flow(message: Message, state: FSMContext):
-    """Start onboarding process"""
-    current_step = OnboardingSteps.OCCUPATION
-    await state.set_state(STEP_STATE_MAP[current_step])
-    
-    step_data = get_step_data(current_step)
-    
-    kb = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=opt["label"])] for opt in step_data["options"]],
-        resize_keyboard=True
-    )
-    
-    await message.answer(step_data["message"], reply_markup=kb)
-
-
-@router.message(OnboardingState.occupation)
-async def process_occupation(message: Message, state: FSMContext):
-    """Process occupation answer"""
-    current_step = OnboardingSteps.OCCUPATION
-    step_data = get_step_data(current_step)
-    
-    # Check if text matches any label, otherwise treat as custom text
-    selected_id = next((opt["id"] for opt in step_data["options"] if opt["label"] == message.text), None)
-    if not selected_id:
-        selected_id = message.text  # Use raw text if not a predefined label
-    
-    # Save using shared logic
-    await save_onboarding_progress(message.from_user.id, current_step, selected_id, by_telegram_id=True)
-    await state.update_data(occupation=selected_id)
-    
-    # Move to next step
-    next_step_name = get_next_step(current_step)
-    next_step_data = get_step_data(next_step_name)
-    
-    await state.set_state(STEP_STATE_MAP[next_step_name])
-    
-    # For multi-choice using inline keyboard to allow multiple selections
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=opt["label"], callback_data=f"sched_{opt['id']}")]
-        for opt in next_step_data["options"]
-    ] + [[InlineKeyboardButton(text="✅ Готово", callback_data="sched_done")]])
-    
-    await message.answer(next_step_data["message"], reply_markup=kb)
-
-
-@router.callback_query(F.data.startswith("sched_"))
-async def process_schedule_selection(callback: CallbackQuery, state: FSMContext):
-    """Handle schedule selection (multi-choice)"""
-    action = callback.data.split("_")[1]
-    
+@router.callback_query(F.data.in_({"merge_keep_target", "merge_keep_source"}))
+async def cb_merge_keep_project(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    current_selection = data.get("available_times", [])
-    
-    if action == "done":
-        if not current_selection:
-            await callback.answer("Выбери хотя бы один вариант", show_alert=True)
-            return
-        
-        # Save using shared logic
-        await save_onboarding_progress(callback.from_user.id, OnboardingSteps.SCHEDULE, current_selection, by_telegram_id=True)
-        
-        await callback.message.delete()
-        
-        next_step_name = get_next_step(OnboardingSteps.SCHEDULE)
-        next_step_data = get_step_data(next_step_name)
-        
-        await state.set_state(STEP_STATE_MAP[next_step_name])
-        
-        kb = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text=opt["label"])] for opt in next_step_data["options"]],
-            resize_keyboard=True
-        )
-        await callback.message.answer(next_step_data["message"], reply_markup=kb)
-        return
-
-    # Toggle selection
-    if action in current_selection:
-        current_selection.remove(action)
-    else:
-        current_selection.append(action)
-    
-    await state.update_data(available_times=current_selection)
-    
-    # Update keyboard visualization
-    step_data = get_step_data(OnboardingSteps.SCHEDULE)
-    new_kb = []
-    for opt in step_data["options"]:
-        label = opt["label"]
-        if opt["id"] in current_selection:
-            label = "✅ " + label
-        new_kb.append([InlineKeyboardButton(text=label, callback_data=f"sched_{opt['id']}")])
-    
-    new_kb.append([InlineKeyboardButton(text="✅ Готово", callback_data="sched_done")])
-    
-    await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=new_kb))
-    await callback.answer()
-
-
-@router.message(OnboardingState.duration)
-async def process_duration(message: Message, state: FSMContext):
-    """Process duration answer"""
-    current_step = OnboardingSteps.DURATION
-    step_data = get_step_data(current_step)
-    
-    selected_id = next((opt["id"] for opt in step_data["options"] if opt["label"] == message.text), "30")
-    
-    # Save using shared logic
-    await save_onboarding_progress(message.from_user.id, current_step, int(selected_id), by_telegram_id=True)
-    await state.update_data(daily_minutes=int(selected_id))
-    
-    next_step_name = get_next_step(current_step)
-    next_step_data = get_step_data(next_step_name)
-    
-    await state.set_state(STEP_STATE_MAP[next_step_name])
-    
-    # Multi-choice for habits
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=opt["label"], callback_data=f"habit_{opt['id']}")]
-        for opt in next_step_data["options"]
-    ] + [[InlineKeyboardButton(text="✅ Готово", callback_data="habit_done")]])
-    
-    await message.answer(next_step_data["message"], reply_markup=kb)
-
-
-@router.callback_query(F.data.startswith("habit_"))
-async def process_habit_selection(callback: CallbackQuery, state: FSMContext):
-    """Handle habits selection"""
-    action = callback.data.split("_")[1]
-    
-    data = await state.get_data()
-    current_selection = data.get("current_habits", [])
-    
-    if action == "done":
-        # Save using shared logic
-        await save_onboarding_progress(callback.from_user.id, OnboardingSteps.HABITS, current_selection, by_telegram_id=True)
-        
-        await callback.message.delete()
-        
-        next_step_name = get_next_step(OnboardingSteps.HABITS)
-        next_step_data = get_step_data(next_step_name)
-        
-        await state.set_state(STEP_STATE_MAP[next_step_name])
-        
-        kb = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text=opt["label"])] for opt in next_step_data["options"]],
-            resize_keyboard=True
-        )
-        await callback.message.answer(next_step_data["message"], reply_markup=kb)
-        return
-
-    # Toggle selection
-    if action in current_selection:
-        current_selection.remove(action)
-    else:
-        # Handle "none" exclusive selection
-        if action == "none":
-            current_selection = ["none"]
-        elif "none" in current_selection:
-            current_selection.remove("none")
-            current_selection.append(action)
-        else:
-            current_selection.append(action)
-    
-    await state.update_data(current_habits=current_selection)
-    
-    # Update keyboard
-    step_data = get_step_data(OnboardingSteps.HABITS)
-    new_kb = []
-    for opt in step_data["options"]:
-        label = opt["label"]
-        if opt["id"] in current_selection:
-            label = "✅ " + label
-        new_kb.append([InlineKeyboardButton(text=label, callback_data=f"habit_{opt['id']}")])
-    
-    new_kb.append([InlineKeyboardButton(text="✅ Готово", callback_data="habit_done")])
-    
-    await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=new_kb))
-    await callback.answer()
-
-
-@router.message(OnboardingState.restrictions)
-async def process_restrictions(message: Message, state: FSMContext):
-    """Process restrictions answer"""
-    current_step = OnboardingSteps.RESTRICTIONS
-    
-    text = message.text
-    value = None if text == "➡️ Пропустить" else text
-    
-    # Save using shared logic
-    await save_onboarding_progress(message.from_user.id, current_step, value, by_telegram_id=True)
-    await state.update_data(physical_restrictions=value)
-    
-    next_step_name = get_next_step(current_step)
-    next_step_data = get_step_data(next_step_name)
-    
-    await state.set_state(STEP_STATE_MAP[next_step_name])
-    
-    kb = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=opt["label"])] for opt in next_step_data["options"]],
-        resize_keyboard=True
-    )
-    
-    await message.answer(next_step_data["message"], reply_markup=kb)
-
-
-@router.message(OnboardingState.partners)
-async def process_partners_confirm(message: Message, state: FSMContext):
-    """Finalize onboarding"""
-    # Save partner step (mark as complete)
-    await save_onboarding_progress(message.from_user.id, OnboardingSteps.PARTNERS, "continue", by_telegram_id=True)
-    
-    await state.clear()
-    
-    # Show completion message
-    step_data = get_step_data(OnboardingSteps.COMPLETE)
-    
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🗣 Рассказать о проблеме", callback_data="start_problem_flow")],
-        [InlineKeyboardButton(text="📱 Открыть приложение", web_app=WebAppInfo(url=settings.WEBAPP_URL))]
-    ])
-    
-    await message.answer(step_data["message"], reply_markup=kb)
-
-
-# =============================================================================
-# Project Setup Helpers
-# =============================================================================
-
-async def _ask_partner_category(message: Message, state: FSMContext, category: str):
-    """Ask user for a partner in a specific category"""
-    from app.database import AsyncSessionLocal
-    from app.repositories.user import UserRepository
-    from app.services.partner_service import PartnerService
-    from app.models.db.partner import PartnerDB
-    from sqlalchemy import select
-    
-    data = await state.get_data()
-    solution = data.get("pending_solution", {})
-    guide_list = solution.get("partner_selection_guide", [])
-    project_partners = data.get("project_partners", {})
-    selected_in_cat = project_partners.get(category, [])
-    
-    isolation_settings = data.get("isolation_settings", {})
-    is_isolated = isolation_settings.get(category, {}).get("is_isolated", False)
-    
-    # Find guide item for this category
-    guide_item = next((g for g in guide_list if g.get("category") == category), None)
-    
-    # Fallback texts
-    fallbacks = {
-        "source": ("🙌 Источник", "Кто дает тебе ресурсы и основу? (Родители, учителя)", "Если нет источника: Используй ментальные семена. Посвящай практики учителям прошлого."),
-        "ally": ("🤝 Соратник", "Кто помогает тебе в делах? (Коллеги, партнеры)", "Если нет соратника: Стань соратником для других. Помогай бескорыстно."),
-        "protege": ("🌱 Подопечный", "Кто зависит от тебя? (Клиенты, подчиненные)", "Если нет подопечного: Найди того, кому нужна помощь, даже в малом."),
-        "world": ("🌍 Внешний мир", "Кто-то далекий или конкурент.", "Если изоляция от мира: Делай тайные добрые дела (уборка мусора, пожертвования).")
-    }
-    
-    title = guide_item["title"] if guide_item else fallbacks[category][0]
-    desc = guide_item["description"] if guide_item else fallbacks[category][1]
-    fallback_advice = guide_item.get("fallback_advice") if guide_item else fallbacks[category][2]
-    examples = guide_item.get("examples", []) if guide_item else []
-    
-    text = f"**{title}**\n\n{desc}\n"
-    if examples:
-        text += f"\n💡 Пример: {', '.join(examples)}"
-    
-    # Show isolation status or selected partners
-    if is_isolated:
-        text += f"\n\n🧘 **Выбрана изоляция / Никого нет**\n_{fallback_advice}_"
-    elif selected_in_cat:
-        async with AsyncSessionLocal() as db:
-            # Fetch names for display
-            res = await db.execute(select(PartnerDB.name).where(PartnerDB.id.in_(selected_in_cat)))
-            names = res.scalars().all()
-            if names:
-                text += f"\n\n✅ **Выбрано:** {', '.join(names)}"
-
-    # Check if user has existing partners in this category
-    has_existing = False
-    async with AsyncSessionLocal() as db:
-        user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id if isinstance(message, Message) else message.from_user.id)
-        if user_db:
-            existing = await PartnerService().get_partners_by_category(db, user_db.id, category)
-            if existing:
-                has_existing = True
-    
-    # Build Keyboard
-    kb_rows = []
-    
-    if is_isolated:
-        kb_rows.append([InlineKeyboardButton(text="↩️ Отменить изоляцию", callback_data=f"no_iso_p_{category}")])
-        kb_rows.append([InlineKeyboardButton(text="➡️ Дальше", callback_data=f"next_p_{category}")])
-    else:
-        # Main actions
-        if has_existing:
-            kb_rows.append([InlineKeyboardButton(text="📂 Выбрать из списка", callback_data=f"list_p_{category}")])
-            
-        kb_rows.append([InlineKeyboardButton(text="➕ Добавить нового", callback_data=f"add_p_{category}")])
-        
-        # Navigation
-        if selected_in_cat:
-            kb_rows.append([InlineKeyboardButton(text="➡️ Дальше", callback_data=f"next_p_{category}")])
-        else:
-            kb_rows.append([InlineKeyboardButton(text="🧘 Никого нет / Изоляция", callback_data=f"iso_p_{category}")])
-            kb_rows.append([InlineKeyboardButton(text="🤷‍♂️ Пропустить", callback_data=f"skip_p_{category}")])
-        
-    markup = InlineKeyboardMarkup(inline_keyboard=kb_rows)
-    
-    # Update state
-    state_map = {
-        "source": ProjectSetupState.waiting_for_source,
-        "ally": ProjectSetupState.waiting_for_ally,
-        "protege": ProjectSetupState.waiting_for_protege,
-        "world": ProjectSetupState.waiting_for_world
-    }
-    await state.set_state(state_map[category])
-    
-    if isinstance(message, CallbackQuery):
-        await message.message.edit_text(text, parse_mode="Markdown", reply_markup=markup)
-    else:
-        await message.answer(text, parse_mode="Markdown", reply_markup=markup)
-
-
-@router.callback_query(F.data.startswith("iso_p_"))
-async def set_isolation(callback: CallbackQuery, state: FSMContext):
-    """Set isolation for category"""
-    _, _, category = callback.data.split("_")
-    
-    data = await state.get_data()
-    
-    # Update isolation settings
-    isolation_settings = data.get("isolation_settings", {})
-    isolation_settings[category] = {"is_isolated": True}
-    
-    # Clear selected partners for this category
-    project_partners = data.get("project_partners", {})
-    project_partners[category] = []
-    
-    await state.update_data(isolation_settings=isolation_settings, project_partners=project_partners)
-    
-    await _ask_partner_category(callback, state, category)
-    await callback.answer("Режим изоляции выбран")
-
-
-@router.callback_query(F.data.startswith("no_iso_p_"))
-async def unset_isolation(callback: CallbackQuery, state: FSMContext):
-    """Unset isolation for category"""
-    _, _, _, category = callback.data.split("_")
-    
-    data = await state.get_data()
-    
-    # Update isolation settings
-    isolation_settings = data.get("isolation_settings", {})
-    isolation_settings[category] = {"is_isolated": False}
-    
-    await state.update_data(isolation_settings=isolation_settings)
-    
-    await _ask_partner_category(callback, state, category)
-    await callback.answer("Режим изоляции отключен")
-
-
-@router.callback_query(F.data.startswith("list_p_"))
-async def show_existing_partners(callback: CallbackQuery, state: FSMContext):
-    """Show list of existing partners to select"""
-    _, _, category = callback.data.split("_")
-    
-    from app.database import AsyncSessionLocal
-    from app.repositories.user import UserRepository
-    from app.services.partner_service import PartnerService
-    
-    data = await state.get_data()
-    project_partners = data.get("project_partners", {})
-    selected_in_cat = project_partners.get(category, [])
-    
-    async with AsyncSessionLocal() as db:
-        user_db = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
-        if not user_db:
-            await callback.answer("Ошибка пользователя")
-            return
-        partners = await PartnerService().get_partners_by_category(db, user_db.id, category)
-        
-    kb_rows = []
-    for p in partners:
-        label = f"✅ {p.name}" if p.id in selected_in_cat else p.name
-        kb_rows.append([InlineKeyboardButton(text=label, callback_data=f"sel_p_{category}_{p.id}")])
-        
-    kb_rows.append([InlineKeyboardButton(text="🔙 Назад", callback_data=f"back_p_{category}")])
-    
-    markup = InlineKeyboardMarkup(inline_keyboard=kb_rows)
-    await callback.message.edit_text(f"Выберите партнеров для категории **{category.upper()}**:", parse_mode="Markdown", reply_markup=markup)
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("back_p_"))
-async def back_to_category_menu(callback: CallbackQuery, state: FSMContext):
-    """Go back to category main menu"""
-    _, _, category = callback.data.split("_")
-    await _ask_partner_category(callback, state, category)
-
-
-@router.callback_query(F.data.startswith("sel_p_"))
-async def toggle_partner_selection(callback: CallbackQuery, state: FSMContext):
-    """Toggle partner selection from list"""
-    parts = callback.data.split("_")
-    # format: sel_p_category_id - id might contain dashes/underscores, need to be careful
-    # But UUID usually doesn't conflict if we split carefully. 
-    # Actually split("_") with partner_id being uuid might be risky if uuid has underscores? UUIDs use hyphens.
-    # So split("_") is fine for 4 parts: sel, p, category, id.
-    
-    category = parts[2]
-    partner_id = "_".join(parts[3:]) # Rejoin in case id had underscores (unlikely for uuid but safe)
-    
-    data = await state.get_data()
-    project_partners = data.get("project_partners", {})
-    
-    current_list = project_partners.get(category, [])
-    if partner_id in current_list:
-        current_list.remove(partner_id)
-    else:
-        current_list.append(partner_id)
-        
-    project_partners[category] = current_list
-    await state.update_data(project_partners=project_partners)
-    
-    # Stay in list view
-    await show_existing_partners(callback, state)
-
-
-@router.callback_query(F.data.startswith("add_p_"))
-async def start_add_partner(callback: CallbackQuery, state: FSMContext):
-    """Ask for new partner name"""
-    _, _, category = callback.data.split("_")
-    await state.update_data(adding_category=category)
-    
-    # We keep the state as is (waiting_for_X), but send a prompt
-    await callback.message.answer(
-        "Напиши имя нового партнера (одним сообщением):", 
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Отмена", callback_data=f"cancel_add_{category}")]
-        ])
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("cancel_add_"))
-async def cancel_add_partner(callback: CallbackQuery, state: FSMContext):
-    """Cancel adding new partner"""
-    _, _, category = callback.data.split("_")
-    await state.update_data(adding_category=None)
-    await callback.message.delete()
-    # No need to refresh main view, it's still there
-    await callback.answer("Отменено")
-
-
-@router.callback_query(F.data.startswith("next_p_"))
-async def next_partner_step(callback: CallbackQuery, state: FSMContext):
-    """Go to next category"""
-    _, _, category = callback.data.split("_")
-    
-    next_map = {
-        "source": "ally",
-        "ally": "protege",
-        "protege": "world",
-        "world": "finish"
-    }
-    
-    next_cat = next_map.get(category)
-    if next_cat == "finish":
-        await _finish_project_setup(callback.message, state)
-    else:
-        await _ask_partner_category(callback, state, next_cat)
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("skip_p_"))
-async def skip_partner_step(callback: CallbackQuery, state: FSMContext):
-    """Skip category (empty list)"""
-    # Just proceed to next
-    await next_partner_step(callback, state)
-
-
-@router.callback_query(F.data.startswith("ctype_"))
-async def process_contact_type(callback: CallbackQuery, state: FSMContext):
-    """Handle contact type selection and create partner"""
-    ctype = callback.data.split("_")[1] # physical/online
-    
-    data = await state.get_data()
-    name = data.get("temp_partner_name")
-    category = data.get("adding_category")
-    
-    if not name or not category:
-        await callback.answer("Данные устарели, попробуй снова")
-        await callback.message.delete()
-        return
-
-    from app.database import AsyncSessionLocal
-    from app.repositories.user import UserRepository
-    from app.services.partner_service import PartnerService
-    from app.models.partner import Partner
-    from uuid import uuid4
-
-    partner_svc = PartnerService()
-    async with AsyncSessionLocal() as db:
-        user_db = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
-        if not user_db:
-            await callback.answer("Пользователь не найден")
-            return
-            
-        group = await partner_svc.get_default_group_by_category(db, user_db.id, category)
-        if not group:
-            await callback.answer("Группа не найдена")
-            return
-            
-        p = Partner(
-            id=str(uuid4()),
-            name=name,
-            group_id=group.id,
-            user_id=user_db.id,
-            contact_type=ctype
-        )
-        created = await partner_svc.create_partner(db, p)
-        await db.commit()
-        
-        # Add to selection
-        project_partners = data.get("project_partners", {})
-        current_list = project_partners.get(category, [])
-        current_list.append(created.id)
-        project_partners[category] = current_list
-        
-        await state.update_data(project_partners=project_partners, adding_category=None, temp_partner_name=None)
-        
-        await callback.message.edit_text(f"✅ Добавлен и выбран: {name} ({'🏠' if ctype=='physical' else '🌐'})")
-        
-        # Refresh wizard
-        await _ask_partner_category(callback, state, category)
-
-
-async def _process_partner_input(message: Message, state: FSMContext, current_cat: str, next_cat: str):
-    """Process NEW partner name input"""
-    
-    data = await state.get_data()
-    adding_cat = data.get("adding_category")
-    
-    # Only process text if we are adding a partner for this category
-    if adding_cat != current_cat:
-        # Ignore random text or show hint
-        return
-
-    name = message.text.strip()
-    if not name:
-        return
-
-    # Save temp name
-    await state.update_data(temp_partner_name=name)
-    
-    # Ask contact type
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🏠 Лично", callback_data="ctype_physical"),
-            InlineKeyboardButton(text="🌐 Онлайн", callback_data="ctype_online")
-        ],
-        [InlineKeyboardButton(text="🔙 Отмена", callback_data=f"cancel_add_{current_cat}")]
-    ])
-    
-    await message.answer(
-        f"Как ты будешь контактировать с **{name}**?", 
-        reply_markup=kb,
-        parse_mode="Markdown"
-    )
-
-
-async def _finish_project_setup(message: Message, state: FSMContext):
-    """Finish setup and activate project"""
-    from app.database import AsyncSessionLocal
-    from app.repositories.karma_plan import KarmaPlanRepository
-    from app.repositories.user import UserRepository
-    from app.repositories.problem import ProblemHistoryRepository
-    from app.knowledge.qdrant import QdrantKnowledgeBase
-    
-    data = await state.get_data()
-    solution = data.get("pending_solution")
-    problem_text = data.get("problem_text")
-    history_id = data.get("history_id")
-    project_partners = data.get("project_partners")
-    isolation_settings = data.get("isolation_settings")
-    
-    if not solution or not problem_text:
-        await message.answer("Данные устарели. Начни заново: /solver")
-        return
-        
-    try:
-        async with AsyncSessionLocal() as db:
-            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
-            if user_db:
-                # 1. Ensure we have a history record for this solution
-                if not history_id:
-                    history = await ProblemHistoryRepository().save(db, user_db.id, problem_text, solution)
-                    history_id = history.id
-                
-                # Extract strategy
-                strategy_snapshot = {
-                    "root_cause": solution.get("root_cause"),
-                    "stop_action": solution.get("stop_action"),
-                    "start_action": solution.get("start_action"),
-                    "grow_action": solution.get("grow_action"),
-                    "success_tip": solution.get("success_tip"),
-                    "practice_steps": solution.get("practice_steps", []),
-                    "problem_text": problem_text
-                }
-
-                # 2. Create Plan with Partners
-                await KarmaPlanRepository().create_plan(
-                    db,
-                    user_db.id,
-                    history_id,
-                    strategy_snapshot,
-                    duration_days=30,
-                    project_partners=project_partners,
-                    isolation_settings=isolation_settings,
-                )
-                
-                await db.commit()
-                
-                # Format success message
-                partners_text = ""
-                # Could format this nicely
-                
-                await message.answer(
-                    f"🎯 **Цель активирована:** {problem_text}\n\n"
-                    "✅ Команда кармических партнеров собрана!\n"
-                    "Теперь твой план на день будет настроен на решение этой задачи.",
-                    parse_mode="Markdown"
-                )
-                
-                # Get Daily Quote
-                qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
-                quote = await qdrant.get_daily_quote(problem_text)
-                
-                quote_text = (
-                    f"📜 **Мудрость дня:**\n\n"
-                    f"_{quote['text']}_\n\n"
-                    f"Открой приложение, чтобы увидеть свои 4 действия на сегодня! 👇"
-                )
-                
-                kb = ReplyKeyboardMarkup(
-                    keyboard=[[
-                        KeyboardButton(
-                            text="📱 Открыть приложение",
-                            web_app=WebAppInfo(url=settings.WEBAPP_URL)
-                        )
-                    ]],
-                    resize_keyboard=True
-                )
-                
-                await message.answer(quote_text, parse_mode="Markdown", reply_markup=kb)
-                await state.clear()
-                
-    except Exception as e:
-        logger.error(f"Error setting goal: {e}", exc_info=True)
-        await message.answer("Ошибка при сохранении цели.")
-
-
-# =============================================================================
-# Problem Solving Flow
-# =============================================================================
-
-@router.message(Command("solver"))
-async def cmd_solver(message: Message, state: FSMContext):
-    """Start problem solving dialog"""
-    try:
-        await state.set_state(ProblemState.waiting_for_description)
-
-        await message.answer(
-            "Опиши свою текущую проблему или ситуацию, которую хочешь разрешить.\n\n"
-            "Например: 'Мало денег, долги', 'Конфликты с партнером', 'Нет энергии'..."
-        )
-        logger.info(f"User {message.from_user.id} started resolving action")
-    except Exception as e:
-        logger.error(f"Error in cmd_done: {e}", exc_info=True)
-        await message.answer("Произошла ошибка. Попробуй еще раз.")
-
-@router.callback_query(F.data == "start_problem_flow")
-async def start_problem_flow(callback: CallbackQuery, state: FSMContext):
-    """Start problem solving dialog"""
-    await state.set_state(ProblemState.waiting_for_description)
-    
-    await callback.message.answer(
-        "Опиши свою текущую проблему или ситуацию, которую хочешь разрешить.\n\n"
-        "Например: 'Мало денег, долги', 'Конфликты с партнером', 'Нет энергии'..."
-    )
-    await callback.answer()
-
-
-@router.message(ProblemState.waiting_for_description)
-async def process_problem_description(message: Message, state: FSMContext):
-    """Start intelligent diagnostic dialog"""
-    from app.knowledge.qdrant import QdrantKnowledgeBase
-    from app.agents.problem_solver import ProblemSolverAgent
-    from app.database import AsyncSessionLocal
-    from app.repositories.user import UserRepository
-    
-    problem_text = message.text
-    
-    # Show typing status
-    await bot.send_chat_action(chat_id=message.chat.id, action="typing")
-    
-    try:
-        # Initialize Agent
-        qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
-        agent = ProblemSolverAgent(qdrant)
-        
-        async with AsyncSessionLocal() as db:
-            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
-            if not user_db:
-                await message.answer("Пользователь не найден.")
-                return
-                
-            # Convert DB model to Pydantic for Agent
-            from app.models.user import UserProfile
-            user_profile = UserProfile.model_validate(user_db)
-            
-            # Generate unique session ID for this diagnostic
-            import uuid
-            session_id = f"tg_{message.from_user.id}_{uuid.uuid4().hex[:8]}"
-            
-            # Start intelligent diagnostic (multi-step mode)
-            solution = await agent.analyze_problem(
-                user_profile,
-                problem_text,
-                session_id=session_id,
-            )
-            
-            # Check if diagnostic needs more questions
-            if solution.get("needs_clarification") and solution.get("clarifying_questions"):
-                # Save diagnostic state
-                await state.update_data(
-                    session_id=session_id,
-                    original_problem=problem_text,
-                    diagnostic_summary=solution.get("diagnostic_summary", ""),
-                    confidence_score=solution.get("confidence_score", 0.0)
-                )
-                await state.set_state(ProblemState.waiting_for_diagnostic_answer)
-                
-                # Show the first diagnostic question
-                question = solution["clarifying_questions"][0]
-                
-                text = (
-                    f"🔍 **Карма-диагностика**\n\n"
-                    f"{solution.get('diagnostic_summary', '')}\n\n"
-                    f"❓ **Вопрос:**\n{question}\n\n"
-                    f"Отвечай просто: 'да', 'нет' или приведи пример."
-                )
-                
-                await message.answer(text, parse_mode="Markdown")
-                return
-            
-            # If diagnostic is complete, show solution immediately
-            await _show_complete_solution(message, state, problem_text, solution, user_db)
-            
-    except Exception as e:
-        logger.error(f"Error in diagnostic: {e}", exc_info=True)
-        await message.answer("Не удалось начать диагностику. Попробуй позже.")
-        await state.clear()
-
-
-@router.callback_query(F.data == "start_partner_setup")
-async def start_partner_setup(callback: CallbackQuery, state: FSMContext):
-    """Start partner selection wizard"""
-    await callback.answer()
-    await callback.message.answer(
-        "🧘 **Кармические партнеры**\n\n"
-        "Чтобы достичь цели со 100% вероятностью, нам нужно посадить семена. "
-        "Семена сажаются в почву — это другие люди.\n\n"
-        "Давай выберем 4 группы партнеров для этого проекта."
-    )
-    await _ask_partner_category(callback.message, state, "source")
-
-
-@router.message(ProjectSetupState.waiting_for_source)
-async def process_source_partner(message: Message, state: FSMContext):
-    """Process source partner"""
-    await _process_partner_input(message, state, "source", "ally")
-
-
-@router.message(ProjectSetupState.waiting_for_ally)
-async def process_ally_partner(message: Message, state: FSMContext):
-    """Process ally partner"""
-    await _process_partner_input(message, state, "ally", "protege")
-
-
-@router.message(ProjectSetupState.waiting_for_protege)
-async def process_protege_partner(message: Message, state: FSMContext):
-    """Process protege partner"""
-    await _process_partner_input(message, state, "protege", "world")
-
-
-@router.message(ProjectSetupState.waiting_for_world)
-async def process_world_partner(message: Message, state: FSMContext):
-    """Process world partner"""
-    await _process_partner_input(message, state, "world", "finish")
-    from app.knowledge.qdrant import QdrantKnowledgeBase
-    from app.agents.problem_solver import ProblemSolverAgent
-    from app.database import AsyncSessionLocal
-    from app.repositories.user import UserRepository
-    from app.repositories.problem import ProblemHistoryRepository
-    
-    user_answer = message.text.strip()
-    data = await state.get_data()
-    
-    session_id = data.get("session_id")
-    original_problem = data.get("original_problem")
-    
-    if not session_id or not original_problem:
-        await message.answer("Сессия диагностики утеряна. Начни заново: /solver")
-        await state.clear()
-        return
-    
-    # Show typing status
-    await bot.send_chat_action(chat_id=message.chat.id, action="typing")
-    
-    try:
-        qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
-        agent = ProblemSolverAgent(qdrant)
-        
-        async with AsyncSessionLocal() as db:
-            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
-            if not user_db:
-                await message.answer("Пользователь не найден.")
-                await state.clear()
-                return
-            
-            from app.models.user import UserProfile
-            user_profile = UserProfile.model_validate(user_db)
-            
-            # Continue diagnostic with user's answer (structured, без текстовых маркеров)
-            solution = await agent.analyze_problem(
-                user_profile,
-                original_problem,
-                session_id=session_id,
-                diagnostic_answer=user_answer,
-            )
-            
-            # Check if diagnostic needs more questions
-            if solution.get("needs_clarification") and solution.get("clarifying_questions"):
-                # Continue with next question
-                question = solution["clarifying_questions"][0]
-                confidence = solution.get("confidence_score", 0.0)
-                
-                text = (
-                    f"🔍 **Карма-диагностика** (уверенность: {confidence:.1%})\n\n"
-                    f"❓ **Следующий вопрос:**\n{question}\n\n"
-                    f"Отвечай просто: 'да', 'нет' или приведи пример."
-                )
-                
-                await message.answer(text, parse_mode="Markdown")
-                return
-            
-            # Diagnostic complete - show full solution
-            await _show_complete_solution(message, state, original_problem, solution, user_db)
-            
-    except Exception as e:
-        logger.error(f"Error in diagnostic continuation: {e}", exc_info=True)
-        await message.answer("Ошибка в процессе диагностики. Попробуй позже.")
-        await state.clear()
-
-
-async def _show_complete_solution(message: Message, state: FSMContext, problem_text: str, solution: dict, user_db):
-    """Show complete solution and save to database"""
-    from app.database import AsyncSessionLocal
-    from app.repositories.problem import ProblemHistoryRepository
-    
-    try:
-        async with AsyncSessionLocal() as db:
-            # Save to database (no special active flag on history)
-            history = await ProblemHistoryRepository().save(
-                db, 
-                user_db.id, 
-                problem_text, 
-                solution,
-            )
-            await db.commit()
-            
-            # Update state
-            await state.update_data(
-                pending_solution=solution,
-                problem_text=problem_text,
-                history_id=history.id
-            )
-            
-            # Format response
-            confidence = solution.get("confidence_score", 0.0)
-            diagnostic_summary = solution.get("diagnostic_summary", "")
-            
-            response_text = (
-                f"🎯 **Карма-диагностика завершена**\n"
-                f"Уверенность: {confidence:.1%}\n\n"
-            )
-            
-            if diagnostic_summary:
-                response_text += f"📋 **Анализ:** {diagnostic_summary}\n\n"
-            
-            response_text += (
-                f"🧐 **Корень проблемы:** {solution.get('root_cause')}\n\n"
-                f"🌱 **Как это работает:**\n{solution.get('imprint_logic')}\n\n"
-                f"🛑 **Что прекратить:** {solution.get('stop_action')}\n"
-                f"🚀 **Что начать:** {solution.get('start_action')}\n"
-            )
-            
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🎯 Выбрать целью", callback_data="confirm_goal")],
-                [InlineKeyboardButton(text="📱 Открыть приложение", web_app=WebAppInfo(url=settings.WEBAPP_URL))]
-            ])
-            
-            await message.answer(response_text, parse_mode="Markdown", reply_markup=kb)
-            
-    except Exception as e:
-        logger.error(f"Error showing solution: {e}", exc_info=True)
-        await message.answer("Ошибка при сохранении решения. Попробуй позже.")
-
-
-@router.message(Command("today"))
-async def cmd_today(message: Message):
-    """Quick text list for today"""
-    from app.database import AsyncSessionLocal
-    from app.repositories.user import UserRepository
-    from app.agents.daily_manager import DailyManagerAgent
-    from app.knowledge.qdrant import QdrantKnowledgeBase
-    from app.config import get_settings
-    from datetime import datetime
-    
-    try:
-        settings = get_settings()
-        
-        async with AsyncSessionLocal() as db:
-            # Get or create user
-            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
-            
-            if not user_db:
-                await message.answer(
-                    "Привет! Сначала нажми /start чтобы начать работу с ботом 🙏"
-                )
-                return
-            
-            # Generate daily actions using agent
-            from app.models.user import UserProfile
-            user_profile = UserProfile(
-                id=user_db.id,
-                telegram_id=user_db.telegram_id,
-                first_name=user_db.first_name,
-                username=user_db.username,
-                occupation=user_db.occupation or "employee",
-                available_times=user_db.available_times or [],
-                daily_minutes=user_db.daily_minutes or 30,
-                streak_days=user_db.streak_days,
-            )
-            
-            # Use agent to generate actions only (без полного сообщения)
-            qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
-            agent = DailyManagerAgent(qdrant)
-            
-            actions = await agent.get_daily_actions(
-                user_id=user_profile.id,
-                first_name=user_profile.first_name,
-                streak_days=user_profile.streak_days,
-                total_seeds=user_profile.total_seeds
-            )
-
-            if actions:
-                text = " Твои действия на сегодня:\n\n"
-                for i, action in enumerate(actions[:4], 1):
-                    partner_name = action.get("partner_name", "Партнёр")
-                    description = action.get("description", "")
-                    why = action.get("why")
-                    if why:
-                        text += f"{i}. {partner_name}: {description} — {why}\n"
-                    else:
-                        text += f"{i}. {partner_name}: {description}\n"
-
-                await message.answer(text)
-            else:
-                text = (
-                    "🌱 На сегодня:\n\n"
-                    "Пока у тебя ещё нет активного кармического проекта, поэтому я не могу честно предложить конкретные шаги.\n\n"
-                    "Давай сначала аккуратно разберёмся с главной задачей, а потом я соберу для тебя точный план на день."
-                )
-
-                kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🧠 Разобрать задачу здесь", callback_data="start_problem_flow")],
-                    [InlineKeyboardButton(text="📱 Открыть приложение", web_app=WebAppInfo(url=f"{settings.WEBAPP_URL}/problem"))],
-                ])
-
-                await message.answer(text, reply_markup=kb)
-            logger.info(f"User {message.from_user.id} requested today's actions")
-            
-    except Exception as e:
-        logger.error(f"Error in cmd_today: {e}", exc_info=True)
-        await message.answer("Произошла ошибка при загрузке действий. Попробуй позже.")
-
-
-@router.message(Command("done"))
-async def cmd_done(message: Message, state: FSMContext):
-    """Quick mark action as done"""
-
-    try:
-        from app.repositories.user import UserRepository
-        from app.repositories.karma_plan import KarmaPlanRepository
-        from app.database import AsyncSessionLocal
-
-        async with AsyncSessionLocal() as db:
-            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
-            if not user_db:
-                await message.answer("Сначала начни с команды /start")
-                return
-
-            plan = await KarmaPlanRepository().get_active(db, user_db.id)
-            if not plan:
-                await _send_need_project(message)
-                return
-
-        await state.set_state(ActionState.waiting_for_action_id)
-        await message.answer("Что сделал(а)? Отправь номер действия (1-4).")
-        logger.info(f"User {message.from_user.id} started marking action as done")
-    except Exception as e:
-        logger.error(f"Error in cmd_done: {e}", exc_info=True)
-        await message.answer("Произошла ошибка. Попробуй еще раз.")
-
-async def process_action_done(message: Message, state: FSMContext):
-    """Process completed action"""
-    from app.database import AsyncSessionLocal
-    from app.repositories.user import UserRepository
-    from app.repositories.karma_plan import KarmaPlanRepository
-    from app.services.daily_service import DailyService
-    from app.agents.daily_manager import DailyManagerAgent
-    from app.knowledge.qdrant import QdrantKnowledgeBase
-    
-    text = message.text.strip()
-    
-    try:
-        settings = get_settings()
-        
-        async with AsyncSessionLocal() as db:
-            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
-            
-            if not user_db:
-                await message.answer("Ошибка: пользователь не найден. Нажми /start")
-                return
-
-            plan = await KarmaPlanRepository().get_active(db, user_db.id)
-            if not plan:
-                await _send_need_project(message)
-                return
-
-            # Check if user sent a number corresponding to a daily task
-            if text.isdigit() and text in {"1", "2", "3", "4"}:
-                idx = int(text) - 1 # 0-indexed
-                
-                # Fetch actions to get the ID
-                # We need to reconstruct the agent to get the same actions
-                # This is a bit heavy but ensures we get the right IDs
-                qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
-                agent = DailyManagerAgent(qdrant)
-                
-                actions = await agent.get_daily_actions(
-                    user_id=user_db.id,
-                    first_name=user_db.first_name,
-                    streak_days=user_db.streak_days,
-                    total_seeds=user_db.total_seeds
-                )
-                
-                if 0 <= idx < len(actions):
-                    target_action = actions[idx]
-                    action_id = target_action["id"]
-                    description = target_action["description"]
-                    
-                    if action_id.isdigit():
-                        # Project Mode: DailyTaskDB
-                        await DailyService().toggle_task_completion(
-                            db,
-                            user_id=user_db.id,
-                            task_id=int(action_id),
-                            completed=True
-                        )
-                        # toggle_daily_task_completion handles seed creation internally
-                    
-                    await db.commit()
-
-                    await message.answer(
-                        f"✅ Выполнено: {description}\n\n"
-                        f"🌱 Семя посажено!\n"
-                        "Продолжай в том же духе!"
-                    )
-                    await state.clear()
-                    return
-
-                await message.answer(
-                    "Похоже, сегодня нет списка действий, который можно отметить здесь. Открой приложение — там всё будет аккуратно и наглядно.",
-                    reply_markup=InlineKeyboardMarkup(
-                        inline_keyboard=[
-                            [
-                                InlineKeyboardButton(
-                                    text="📱 Открыть приложение",
-                                    web_app=WebAppInfo(url=settings.WEBAPP_URL),
-                                )
-                            ]
-                        ]
-                    ),
-                )
-                return
-
-            await message.answer(
-                "Чтобы отметить действие, пришли номер 1-4. А если хочешь просто записать доброе дело — используй команду /seed.",
-                reply_markup=InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [
-                            InlineKeyboardButton(
-                                text="📱 Открыть приложение",
-                                web_app=WebAppInfo(url=settings.WEBAPP_URL),
-                            )
-                        ]
-                    ]
-                ),
-            )
-                
-    except Exception as e:
-        logger.error(f"Error saving action: {e}", exc_info=True)
-        await message.answer(
-            f"✅ Отлично! Записал: {text}\n\n"
-            "Продолжай в том же духе! 🌱"
-        )
-    
-    await state.clear()
-
-
-@router.message(Command("seed"))
-async def cmd_seed(message: Message, state: FSMContext):
-    """Quick seed logging"""
-    
-    try:
-        from app.repositories.user import UserRepository
-        from app.repositories.karma_plan import KarmaPlanRepository
-        from app.database import AsyncSessionLocal
-
-        async with AsyncSessionLocal() as db:
-            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
-            if not user_db:
-                await message.answer("Сначала начни с команды /start")
-                return
-
-            plan = await KarmaPlanRepository().get_active(db, user_db.id)
-            if not plan:
-                await _send_need_project(message)
-                return
-
-        await state.set_state(SeedState.waiting_for_description)
-        await message.answer(
-            "Опиши что посеял (одна строка):\n\n"
-            "Например: Помог коллеге с проектом"
-        )
-        logger.info(f"User {message.from_user.id} started seed recording")
-    except Exception as e:
-        logger.error(f"Error in cmd_seed: {e}", exc_info=True)
-        await message.answer("Произошла ошибка. Попробуй еще раз.")
-
-
-@router.message(SeedState.waiting_for_description)
-async def process_seed(message: Message, state: FSMContext):
-    """Process seed description"""
-    from app.database import AsyncSessionLocal
-    from app.repositories.user import UserRepository
-    from app.repositories.karma_plan import KarmaPlanRepository
-    from app.services.seed_service import SeedService
-    from app.models.seed import Seed
-    from datetime import datetime, UTC, timedelta
-    from zoneinfo import ZoneInfo
-    import uuid
-    
-    description = message.text.strip()
-    
-    try:
-        seed_svc = SeedService()
-        async with AsyncSessionLocal() as db:
-            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
-            
-            if user_db:
-                plan = await KarmaPlanRepository().get_active(db, user_db.id)
-                if not plan:
-                    await _send_need_project(message)
-                    return
-
-                # Create seed
-                now_utc = datetime.now(UTC)
-                seed = Seed(
-                    id=str(uuid.uuid4()),
-                    user_id=user_db.id,
-                    timestamp=now_utc,
-                    action_type="kindness",
-                    description=description,
-                    partner_group="world",
-                    intention_score=7,
-                    emotion_level=7,
-                    understanding=True,
-                    estimated_maturation_days=21,
-                    strength_multiplier=1.5,
-                    karma_plan_id=plan.id,
-                )
-                
-                await seed_svc.create_seed(db, seed)
-                await seed_svc.user_repo.increment_seeds_count(db, user_db.id)
-                await db.commit()
-
-                logger.info(f"User {message.from_user.id} planted seed: {description}")
-
-                # Calculate maturation date in user's local timezone for display
-                user_tz = ZoneInfo(user_db.timezone or "UTC")
-                maturation_utc = now_utc + timedelta(days=21)
-                maturation_date = maturation_utc.astimezone(user_tz)
-
-                await message.answer(
-                    f"🌱 Семя посеяно!\n\n"
-                    f"📝 {description}\n\n"
-                    f"📅 Ожидаемое созревание: {maturation_date.strftime('%d.%m.%Y')}\n"
-                    f"💪 Сила: {seed.strength_multiplier}x\n\n"
-                    f"Всего семян: {user_db.total_seeds}\n\n"
-                    "Чем сильнее намерение и эмоция - тем быстрее созреет! 💎"
-                )
-            else:
-                await message.answer("Ошибка: пользователь не найден. Нажми /start")
-                
-    except Exception as e:
-        logger.error(f"Error saving seed: {e}", exc_info=True)
-        await message.answer(
-            f"🌱 Семя посеяно!\n\n"
-            f"Описание: {description}\n\n"
-            "Ожидай результата через 14-30 дней. "
-            "Чем сильнее намерение и эмоция - тем быстрее созреет!"
-        )
-    
-    await state.clear()
-
-
-@router.message(Command("practice"))
-async def cmd_practice(message: Message):
-    """Show practice progress"""
-    from app.database import AsyncSessionLocal
-    from app.repositories.user import UserRepository
-    from app.services.practice_service import PracticeService
-    
-    try:
-        async with AsyncSessionLocal() as db:
-            user = await UserRepository().get_by_telegram_id(db, message.from_user.id)
-            if not user:
-                await message.answer("Сначала начни с команды /start")
-                return
-            
-            progress_list = await PracticeService().get_user_progress(db, user.id)
-            
-            # Filter visible
-            visible = [p for p in progress_list if not p.is_hidden] if progress_list else []
-            habit_practices = [p for p in visible if p.is_habit]
-            active_practices = [p for p in visible if not p.is_habit and p.is_active]
-            paused_practices = [p for p in visible if not p.is_active]
-            
-            is_empty = len(habit_practices) == 0 and len(active_practices) == 0
-            
-            # === Empty state: show recommendations ===
-            if is_empty:
-                from app.knowledge.qdrant import QdrantKnowledgeBase
-                from app.repositories.karma_plan import KarmaPlanRepository
-                
-                plan = await KarmaPlanRepository().get_active(db, user.id)
-                strategy = plan.strategy_snapshot if plan else None
-                need = _build_recommend_query(strategy)
-                
-                qdrant = QdrantKnowledgeBase()
-                recs = await qdrant.search_practice(need=need, limit=3, restrictions=user.physical_restrictions)
-                
-                if recs:
-                    text = "🧘 *Твои практики*\n\n"
-                    text += "Пока нет активных практик. Вот что подходит тебе:\n\n"
-                    
-                    buttons = []
-                    for r in recs:
-                        name = r.get("name", "Практика")
-                        pid = r.get("id", "")
-                        dur = r.get("duration", "")
-                        text += f"✨ *{name}* — {dur} мин\n"
-                        if pid:
-                            buttons.append([InlineKeyboardButton(
-                                text=f"▶️ Начать: {name}",
-                                callback_data=f"practice_start:{pid}"
-                            )])
-                    
-                    buttons.append([InlineKeyboardButton(
-                        text="📱 Все практики",
-                        web_app=WebAppInfo(url=f"{settings.WEBAPP_URL}/practices")
-                    )])
-                    
-                    await message.answer(text, parse_mode="Markdown",
-                        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
-                else:
-                    await message.answer(
-                        "🧘 *Твои практики*\n\n"
-                        "Пока нет активных практик.\n"
-                        "Зайди в приложение, чтобы выбрать первую практику!",
-                        parse_mode="Markdown",
-                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                            [InlineKeyboardButton(text="📱 Открыть практики", web_app=WebAppInfo(url=f"{settings.WEBAPP_URL}/practices"))]
-                        ])
-                    )
-                return
-            
-            # === Non-empty: show progress ===
-            text = "🧘 *Твои практики:*\n\n"
-            
-            if habit_practices:
-                text += "✅ *Сформированные привычки:*\n"
-                for p in habit_practices[:5]:
-                    name = p.practice.name if p.practice else "Unknown"
-                    text += f"🌿 {name}\n"
-                text += "\n"
-            
-            if active_practices:
-                text += "🔄 *В процессе:*\n"
-                for p in active_practices[:5]:
-                    name = p.practice.name if p.practice else "Unknown"
-                    pid = p.practice_id
-                    status = "🔥" if p.streak_days > 0 else "⏳"
-                    progress_str = f" · {p.habit_score}%" if p.habit_score > 0 else ""
-                    text += f"{status} {name}{progress_str}\n"
-                text += "\n"
-            
-            if paused_practices:
-                text += "⏸ *На паузе:*\n"
-                for p in paused_practices[:3]:
-                    name = p.practice.name if p.practice else "Unknown"
-                    text += f"  {name}\n"
-            
-            total = len(habit_practices) + len(active_practices) + len(paused_practices)
-            shown = min(len(habit_practices), 5) + min(len(active_practices), 5) + min(len(paused_practices), 3)
-            if total > shown:
-                text += f"\n_И ещё {total - shown}_"
-            
-            # Build inline keyboard: complete active practices + manage + recommend
-            buttons = []
-            
-            # Quick-complete buttons for active (non-habit) practices
-            for p in active_practices[:3]:
-                name = p.practice.name if p.practice else p.practice_id
-                buttons.append([InlineKeyboardButton(
-                    text=f"✅ Выполнить: {name}",
-                    callback_data=f"practice_complete:{p.practice_id}"
-                )])
-            
-            # Manage button (opens webapp)
-            buttons.append([
-                InlineKeyboardButton(text="✨ Подобрать практики", callback_data="practice_recommend"),
-                InlineKeyboardButton(text="📱 Все практики", web_app=WebAppInfo(url=f"{settings.WEBAPP_URL}/practices"))
-            ])
-            
-            await message.answer(text, parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
-            
-    except Exception as e:
-        logger.error(f"Error in cmd_practice: {e}", exc_info=True)
-        await message.answer("Произошла ошибка при загрузке практик. Попробуй позже.")
-
-
-def _build_recommend_query(strategy: dict | None) -> str:
-    """Build Qdrant search query from active plan strategy or default"""
-    if strategy:
-        need = f"{strategy.get('problem_text', '')} {strategy.get('stop_action', '')} {strategy.get('start_action', '')} {strategy.get('grow_action', '')}".strip()
-        if need:
-            return need
-    return "общее развитие, осознанность, кармические практики"
-
-
-# --- Practice callback handlers ---
-
-@router.callback_query(F.data.startswith("practice_start:"))
-async def cb_practice_start(callback: CallbackQuery):
-    """Start tracking a practice from bot recommendation"""
-    from app.database import AsyncSessionLocal
-    from app.repositories.user import UserRepository
-    from app.repositories.karma_plan import KarmaPlanRepository
-    from app.services.practice_service import PracticeService
-    
-    practice_id = callback.data.split(":", 1)[1]
-    
-    try:
-        async with AsyncSessionLocal() as db:
-            user = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
-            if not user:
-                await callback.answer("Сначала /start", show_alert=True)
-                return
-            
-            plan = await KarmaPlanRepository().get_active(db, user.id)
-            karma_plan_id = plan.id if plan else None
-            
-            await PracticeService().practice_repo.get_or_create(db, user.id, practice_id, karma_plan_id=karma_plan_id)
-            await db.commit()
-        
-        await callback.answer("✅ Практика добавлена!")
-        await callback.message.edit_text(
-            callback.message.text + "\n\n_Практика добавлена! Выполняй её каждый день._",
-            parse_mode="Markdown"
-        )
-    except Exception as e:
-        logger.error(f"Error in cb_practice_start: {e}", exc_info=True)
-        await callback.answer("Ошибка, попробуй позже", show_alert=True)
-
-
-@router.callback_query(F.data.startswith("practice_complete:"))
-async def cb_practice_complete(callback: CallbackQuery):
-    """Complete a practice from bot"""
-    from app.database import AsyncSessionLocal
-    from app.repositories.user import UserRepository
-    from app.repositories.karma_plan import KarmaPlanRepository
-    from app.services.practice_service import PracticeService
-    
-    practice_id = callback.data.split(":", 1)[1]
-    
-    try:
-        async with AsyncSessionLocal() as db:
-            user = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
-            if not user:
-                await callback.answer("Сначала /start", show_alert=True)
-                return
-
-            plan = await KarmaPlanRepository().get_active(db, user.id)
-            karma_plan_id = plan.id if plan else None
-            
-            result = await PracticeService().complete_and_create_seed(
-                db,
-                user_id=user.id,
-                practice_id=practice_id,
-                karma_plan_id=karma_plan_id,
-            )
-            await db.commit()
-
-            if not result:
-                await callback.answer("Практика не найдена", show_alert=True)
-                return
-
-            if result.get("actually_updated"):
-                if result.get("seed") is not None:
-                    await callback.answer("🌱 Готово! Семя посажено!")
-                else:
-                    await callback.answer("✅ Готово!")
-            else:
-                await callback.answer("✅ Уже отмечено сегодня")
-        
-        # Refresh the message
-        fake_message = callback.message
-        fake_message.from_user = callback.from_user
-        await cmd_practice(fake_message)
-        
-    except Exception as e:
-        logger.error(f"Error in cb_practice_complete: {e}", exc_info=True)
-        await callback.answer("Ошибка, попробуй позже", show_alert=True)
-
-
-@router.callback_query(F.data == "practice_recommend")
-async def cb_practice_recommend(callback: CallbackQuery):
-    """Show practice recommendations from bot"""
-    from app.database import AsyncSessionLocal
-    from app.repositories.user import UserRepository
-    from app.repositories.karma_plan import KarmaPlanRepository
-    from app.services.practice_service import PracticeService
-    from app.knowledge.qdrant import QdrantKnowledgeBase
-    
-    try:
-        practice_svc = PracticeService()
-        async with AsyncSessionLocal() as db:
-            user = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
-            if not user:
-                await callback.answer("Сначала /start", show_alert=True)
-                return
-            
-            plan = await KarmaPlanRepository().get_active(db, user.id)
-            strategy = plan.strategy_snapshot if plan else None
-            need = _build_recommend_query(strategy)
-            
-            # Get existing practice IDs to filter
-            progress_list = await practice_svc.get_user_progress(db, user.id)
-            existing_ids = {p.practice_id for p in progress_list} if progress_list else set()
-            
-            qdrant = QdrantKnowledgeBase()
-            recs = await qdrant.search_practice(need=need, limit=6, restrictions=user.physical_restrictions)
-            recs = [r for r in recs if str(r.get("id", "")) not in existing_ids][:3]
-        
-        if not recs:
-            await callback.answer("Все практики уже добавлены!", show_alert=True)
-            return
-        
-        text = "✨ *Подобрали для тебя:*\n\n"
-        buttons = []
-        for r in recs:
-            name = r.get("name", "Практика")
-            pid = r.get("id", "")
-            dur = r.get("duration", "")
-            text += f"🧘 *{name}* — {dur} мин\n"
-            if pid:
-                buttons.append([InlineKeyboardButton(
-                    text=f"▶️ Начать: {name}",
-                    callback_data=f"practice_start:{pid}"
-                )])
-        
-        await callback.message.answer(text, parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    target_id = data.get("merge_target_id")
+    source_id = data.get("merge_source_id")
+
+    if not target_id or not source_id:
+        await callback.message.edit_text("Данные для объединения устарели. Попробуй привязать аккаунт заново.")
         await callback.answer()
-        
-    except Exception as e:
-        logger.error(f"Error in cb_practice_recommend: {e}", exc_info=True)
-        await callback.answer("Ошибка, попробуй позже", show_alert=True)
-
-
-@router.callback_query(F.data.startswith("practice_manage:"))
-async def cb_practice_manage(callback: CallbackQuery):
-    """Show management options for a practice"""
-    practice_id = callback.data.split(":", 1)[1]
-    
-    buttons = [
-        [InlineKeyboardButton(text="⏸ Приостановить", callback_data=f"practice_action:pause:{practice_id}")],
-        [InlineKeyboardButton(text="👁 Скрыть", callback_data=f"practice_action:hide:{practice_id}")],
-        [InlineKeyboardButton(text="🔄 Сбросить прогресс", callback_data=f"practice_action:reset:{practice_id}")],
-        [InlineKeyboardButton(text="🗑 Удалить всё", callback_data=f"practice_action:delete:{practice_id}")],
-        [InlineKeyboardButton(text="↩️ Назад", callback_data="practice_back")],
-    ]
-    
-    await callback.message.edit_text(
-        f"⚙️ *Управление практикой*\nВыбери действие:",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("practice_action:"))
-async def cb_practice_action(callback: CallbackQuery):
-    """Execute a practice management action"""
-    from app.database import AsyncSessionLocal
-    from app.repositories.user import UserRepository
-    from app.services.practice_service import PracticeService
-    
-    parts = callback.data.split(":")
-    action = parts[1]
-    practice_id = parts[2]
-    
-    action_labels = {
-        "pause": "⏸ Практика приостановлена",
-        "resume": "▶️ Практика возобновлена",
-        "hide": "👁 Практика скрыта",
-        "reset": "🔄 Прогресс сброшен",
-        "delete": "🗑 Практика и семена удалены",
-    }
-    
-    if action not in action_labels:
-        await callback.answer("Неизвестное действие", show_alert=True)
+        await state.clear()
         return
-    
-    label = action_labels[action]
-    
-    try:
-        practice_svc = PracticeService()
-        # Map callback action names to service method names
-        method_map = {"delete": "delete_all"}
-        method_name = method_map.get(action, action)
-        async with AsyncSessionLocal() as db:
-            user = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
-            if not user:
-                await callback.answer("Сначала /start", show_alert=True)
-                return
-            
-            svc_method = getattr(practice_svc, method_name)
-            await svc_method(db, user.id, practice_id)
-            await db.commit()
-        
-        await callback.answer(label)
-        # Refresh the practice list
-        await callback.message.delete()
-        # Send updated practice list
-        fake_message = callback.message
-        fake_message.from_user = callback.from_user
-        await cmd_practice(fake_message)
-        
-    except Exception as e:
-        logger.error(f"Error in cb_practice_action: {e}", exc_info=True)
-        await callback.answer("Ошибка, попробуй позже", show_alert=True)
 
+    keep_from = target_id if callback.data == "merge_keep_target" else source_id
+    await state.update_data(keep_project_from=keep_from)
 
-@router.callback_query(F.data == "practice_back")
-async def cb_practice_back(callback: CallbackQuery):
-    """Go back to practice list"""
-    await callback.message.delete()
-    fake_message = callback.message
-    fake_message.from_user = callback.from_user
-    await cmd_practice(fake_message)
-    await callback.answer()
-
-
-@router.message(Command("app"))
-async def cmd_app(message: Message):
-    """Open Mini App"""
-    
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[[
-            KeyboardButton(
-                text="📱 Открыть приложение",
-                web_app=WebAppInfo(url=settings.WEBAPP_URL)
-            )
-        ]],
-        resize_keyboard=True
-    )
-    
-    await message.answer("Открывай:", reply_markup=keyboard)
-
-
-@router.message(Command("reset"))
-async def cmd_reset(message: Message):
-    """Reset user progress with confirmation"""
-    
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Да, стереть всё", callback_data="reset_confirm"),
-            InlineKeyboardButton(text="❌ Нет, оставить", callback_data="reset_cancel")
-        ]
+        [InlineKeyboardButton(text="✅ Объединить аккаунты", callback_data="merge_confirm")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="merge_cancel")],
     ])
-    
-    await message.answer(
-        "🗑 **Сброс всех данных**\n\n"
-        "Ты действительно хочешь удалить весь свой прогресс, историю посаженных семян и настройки? "
-        "Это вернет тебя к самому началу пути, как чистый лист.\n\n"
-        "Как в «Кармическом менеджменте»: иногда, чтобы создать что-то новое, нужно полностью очистить пространство от старого. "
-        "Но помни, что все накопленные заслуги (семена) в системе тоже исчезнут (хотя в карме они останутся навсегда 😉).\n\n"
-        "Уверен?",
+
+    await callback.message.edit_text(
+        "Отлично. Я запомнил выбор активного проекта.\n\n"
+        "Теперь подтверди объединение аккаунтов — и я аккуратно всё сведу в одно место.",
         reply_markup=kb,
-        parse_mode="Markdown"
-    )
-
-
-@router.callback_query(F.data == "reset_cancel")
-async def reset_cancel(callback: CallbackQuery):
-    """Cancel reset"""
-    await callback.message.edit_text("Фух! Всё осталось на своих местах. Продолжаем сеять разумное, доброе, вечное! 🌱")
-    await callback.answer()
-
-
-@router.callback_query(F.data == "reset_confirm")
-async def reset_confirm(callback: CallbackQuery, state: FSMContext):
-    """Confirm reset"""
-    from app.database import AsyncSessionLocal
-    from app.repositories.user import UserRepository
-    from app.services.user_service import UserService
-    
-    try:
-        async with AsyncSessionLocal() as db:
-            user_db = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
-            
-            if user_db:
-                await UserService().reset_progress(db, user_db.id)
-                await db.commit()
-                
-                # Clear state
-                await state.clear()
-                
-                await callback.message.edit_text(
-                    "✨ **Полная перезагрузка**\n\n"
-                    "Все данные очищены. Ты снова в начале пути, но теперь с опытом!\n"
-                    "Чтобы начать заново, нажми /start",
-                    parse_mode="Markdown"
-                )
-            else:
-                await callback.message.edit_text("Пользователь не найден. Нажми /start")
-                
-    except Exception as e:
-        logger.error(f"Error resetting user: {e}", exc_info=True)
-        await callback.message.edit_text("Произошла ошибка при сбросе данных. Попробуй позже.")
-        
-    await callback.answer()
-
-
-# =============================================================================
-# Settings & Account Linking Handlers
-# =============================================================================
-
-@router.message(Command("settings"))
-async def cmd_settings(message: Message, state: FSMContext):
-    """Show settings menu with inline buttons."""
-    from app.database import AsyncSessionLocal
-    from app.repositories.user import UserRepository
-
-    await state.clear()
-
-    try:
-        async with AsyncSessionLocal() as db:
-            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
-            if not user_db:
-                await message.answer("Сначала начни с /start")
-                return
-
-        buttons = [
-            [InlineKeyboardButton(text=f"👤 Имя: {user_db.first_name or '—'}", callback_data="settings_name")],
-            [InlineKeyboardButton(text=f"💼 Занятие: {user_db.occupation or '—'}", callback_data="settings_occupation")],
-            [InlineKeyboardButton(text=f"🌍 Часовой пояс: {user_db.timezone or 'UTC'}", callback_data="settings_tz")],
-            [InlineKeyboardButton(
-                text=f"🌅 Утренние: {'✅' if user_db.morning_enabled else '❌'}",
-                callback_data="settings_toggle_morning",
-            )],
-            [InlineKeyboardButton(
-                text=f"🌙 Вечерние: {'✅' if user_db.evening_enabled else '❌'}",
-                callback_data="settings_toggle_evening",
-            )],
-        ]
-
-        if user_db.email:
-            buttons.append([InlineKeyboardButton(text=f"📧 Email: {user_db.email}", callback_data="noop")])
-        else:
-            buttons.append([InlineKeyboardButton(text="📧 Привязать email", callback_data="settings_email")])
-
-        buttons.append([InlineKeyboardButton(text="🔙 Закрыть", callback_data="settings_close")])
-
-        await message.answer(
-            "⚙️ *Настройки*\n\nЧто хочешь изменить?",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
-            parse_mode="Markdown",
-        )
-    except Exception as e:
-        logger.error(f"Error in cmd_settings: {e}", exc_info=True)
-        await message.answer("Не удалось открыть настройки. Попробуй позже.")
-
-
-@router.callback_query(F.data == "settings_close")
-async def cb_settings_close(callback: CallbackQuery):
-    await callback.message.edit_text("Настройки закрыты ✅")
-    await callback.answer()
-
-
-@router.callback_query(F.data == "noop")
-async def cb_noop(callback: CallbackQuery):
-    await callback.answer()
-
-
-@router.callback_query(F.data == "skip_email_prompt")
-async def cb_skip_email_prompt(callback: CallbackQuery):
-    """Skip email prompt from /start — persist dismissal so it won't show again."""
-    from app.database import AsyncSessionLocal
-    from app.services.account_link import AccountLinkService
-    from app.repositories.user import UserRepository
-
-    try:
-        async with AsyncSessionLocal() as db:
-            user_db = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
-            if user_db:
-                await AccountLinkService().dismiss_link_prompt(db, user_db.id)
-                await db.commit()
-    except Exception as e:
-        logger.error(f"Error dismissing link prompt: {e}", exc_info=True)
-
-    await callback.message.edit_text("Хорошо! Привязать email можно в любое время через /settings")
-    await callback.answer()
-    await show_main_menu(callback.message)
-
-
-# ── Settings: Name ──
-
-@router.callback_query(F.data == "settings_name")
-async def cb_settings_name(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(SettingsState.waiting_for_name)
-    await callback.message.edit_text("Как тебя зовут? Напиши новое имя:")
-    await callback.answer()
-
-
-@router.message(SettingsState.waiting_for_name)
-async def process_settings_name(message: Message, state: FSMContext):
-    from app.database import AsyncSessionLocal
-    from app.services.account_link import AccountLinkService
-
-    name = message.text.strip()
-    if not name or len(name) > 100:
-        await message.answer("Имя должно быть от 1 до 100 символов. Попробуй ещё:")
-        return
-
-    try:
-        async with AsyncSessionLocal() as db:
-            from app.repositories.user import UserRepository
-            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
-            if user_db:
-                await AccountLinkService().update_profile(db, user_db.id, first_name=name)
-                await db.commit()
-        await state.clear()
-        await message.answer(f"Имя обновлено: *{name}* ✅\n\n/settings — вернуться в настройки", parse_mode="Markdown")
-    except Exception as e:
-        logger.error(f"Error updating name: {e}", exc_info=True)
-        await message.answer("Не получилось обновить имя. Попробуй позже.")
-        await state.clear()
-
-
-# ── Settings: Occupation ──
-
-@router.callback_query(F.data == "settings_occupation")
-async def cb_settings_occupation(callback: CallbackQuery, state: FSMContext):
-    step_data = get_step_data(OnboardingSteps.OCCUPATION)
-    kb = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=opt["label"])] for opt in step_data["options"]],
-        resize_keyboard=True,
-        one_time_keyboard=True,
-    )
-    await state.set_state(SettingsState.waiting_for_occupation)
-    await callback.message.answer("Чем ты занимаешься? Выбери или напиши:", reply_markup=kb)
-    await callback.answer()
-
-
-@router.message(SettingsState.waiting_for_occupation)
-async def process_settings_occupation(message: Message, state: FSMContext):
-    from app.database import AsyncSessionLocal
-    from app.services.account_link import AccountLinkService
-
-    step_data = get_step_data(OnboardingSteps.OCCUPATION)
-    selected = next((opt["id"] for opt in step_data["options"] if opt["label"] == message.text), None)
-    occupation = selected or message.text.strip()
-
-    try:
-        async with AsyncSessionLocal() as db:
-            from app.repositories.user import UserRepository
-            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
-            if user_db:
-                await AccountLinkService().update_profile(db, user_db.id, occupation=occupation)
-                await db.commit()
-        await state.clear()
-        await message.answer(
-            f"Занятие обновлено ✅\n\n/settings — вернуться в настройки",
-            reply_markup=ReplyKeyboardRemove(),
-        )
-    except Exception as e:
-        logger.error(f"Error updating occupation: {e}", exc_info=True)
-        await message.answer("Не получилось обновить. Попробуй позже.")
-        await state.clear()
-
-
-# ── Settings: Timezone ──
-
-@router.callback_query(F.data == "settings_tz")
-async def cb_settings_tz(callback: CallbackQuery, state: FSMContext):
-    common_tz = [
-        ("🇷🇺 Москва (UTC+3)", "Europe/Moscow"),
-        ("🇷🇺 Екатеринбург (UTC+5)", "Asia/Yekaterinburg"),
-        ("🇷🇺 Новосибирск (UTC+7)", "Asia/Novosibirsk"),
-        ("🇺🇦 Киев (UTC+2)", "Europe/Kiev"),
-        ("🇰🇿 Алматы (UTC+6)", "Asia/Almaty"),
-        ("🇺🇸 Нью-Йорк (UTC-5)", "America/New_York"),
-        ("🇬🇧 Лондон (UTC+0)", "Europe/London"),
-    ]
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=label, callback_data=f"set_tz:{tz}")]
-        for label, tz in common_tz
-    ] + [[InlineKeyboardButton(text="✏️ Ввести вручную", callback_data="set_tz_custom")]])
-    await callback.message.edit_text("Выбери свой часовой пояс:", reply_markup=kb)
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("set_tz:"))
-async def cb_set_tz(callback: CallbackQuery):
-    from app.database import AsyncSessionLocal
-    from app.services.account_link import AccountLinkService
-
-    tz = callback.data.split(":", 1)[1]
-    try:
-        async with AsyncSessionLocal() as db:
-            from app.repositories.user import UserRepository
-            user_db = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
-            if user_db:
-                await AccountLinkService().update_profile(db, user_db.id, timezone=tz)
-                await db.commit()
-        await callback.message.edit_text(f"Часовой пояс: *{tz}* ✅\n\n/settings — настройки", parse_mode="Markdown")
-    except Exception as e:
-        logger.error(f"Error setting tz: {e}", exc_info=True)
-        await callback.message.edit_text("Ошибка. Попробуй позже.")
-    await callback.answer()
-
-
-@router.callback_query(F.data == "set_tz_custom")
-async def cb_set_tz_custom(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(SettingsState.waiting_for_timezone)
-    await callback.message.edit_text(
-        "Введи название часового пояса (например: `Europe/Moscow`, `Asia/Tokyo`):",
-        parse_mode="Markdown",
     )
     await callback.answer()
 
-
-@router.message(SettingsState.waiting_for_timezone)
-async def process_settings_tz(message: Message, state: FSMContext):
-    from app.database import AsyncSessionLocal
-    from app.services.account_link import AccountLinkService
-    from zoneinfo import ZoneInfo
-
-    tz_name = message.text.strip()
-    try:
-        ZoneInfo(tz_name)  # validate
-    except (KeyError, ValueError):
-        await message.answer("Не удалось распознать часовой пояс. Попробуй ещё (например `Europe/Moscow`):")
-        return
-
-    try:
-        async with AsyncSessionLocal() as db:
-            from app.repositories.user import UserRepository
-            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
-            if user_db:
-                await AccountLinkService().update_profile(db, user_db.id, timezone=tz_name)
-                await db.commit()
-        await state.clear()
-        await message.answer(f"Часовой пояс: *{tz_name}* ✅\n\n/settings — настройки", parse_mode="Markdown")
-    except Exception as e:
-        logger.error(f"Error setting tz: {e}", exc_info=True)
-        await message.answer("Ошибка. Попробуй позже.")
-        await state.clear()
-
-
-# ── Settings: Toggle morning/evening ──
-
-@router.callback_query(F.data == "settings_toggle_morning")
-async def cb_toggle_morning(callback: CallbackQuery):
-    from app.database import AsyncSessionLocal
-    from app.services.account_link import AccountLinkService
-
-    try:
-        async with AsyncSessionLocal() as db:
-            from app.repositories.user import UserRepository
-            user_db = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
-            if user_db:
-                new_val = not user_db.morning_enabled
-                await AccountLinkService().update_profile(db, user_db.id, morning_enabled=new_val)
-                await db.commit()
-                status = "включены ✅" if new_val else "выключены ❌"
-                await callback.message.edit_text(
-                    f"Утренние сообщения {status}\n\n/settings — настройки"
-                )
-    except Exception as e:
-        logger.error(f"Error toggling morning: {e}", exc_info=True)
-        await callback.message.edit_text("Ошибка. Попробуй позже.")
-    await callback.answer()
-
-
-@router.callback_query(F.data == "settings_toggle_evening")
-async def cb_toggle_evening(callback: CallbackQuery):
-    from app.database import AsyncSessionLocal
-    from app.services.account_link import AccountLinkService
-
-    try:
-        async with AsyncSessionLocal() as db:
-            from app.repositories.user import UserRepository
-            user_db = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
-            if user_db:
-                new_val = not user_db.evening_enabled
-                await AccountLinkService().update_profile(db, user_db.id, evening_enabled=new_val)
-                await db.commit()
-                status = "включены ✅" if new_val else "выключены ❌"
-                await callback.message.edit_text(
-                    f"Вечерние сообщения {status}\n\n/settings — настройки"
-                )
-    except Exception as e:
-        logger.error(f"Error toggling evening: {e}", exc_info=True)
-        await callback.message.edit_text("Ошибка. Попробуй позже.")
-    await callback.answer()
-
-
-# ── Settings: Email linking ──
-
-@router.callback_query(F.data == "settings_email")
-async def cb_settings_email(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(SettingsState.waiting_for_email)
-    await callback.message.edit_text(
-        "📧 Введи свой email:\n\n"
-        "Мы отправим письмо с подтверждением, чтобы привязать аккаунт."
-    )
-    await callback.answer()
-
-
-@router.message(SettingsState.waiting_for_email)
-async def process_settings_email(message: Message, state: FSMContext):
-    import re
-    from app.database import AsyncSessionLocal
-    from app.services.account_link import AccountLinkService
-    from app.email.service import send_verification_email
-
-    email = message.text.strip().lower()
-    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
-        await message.answer("Это не похоже на email. Попробуй ещё:")
-        return
-
-    try:
-        async with AsyncSessionLocal() as db:
-            from app.repositories.user import UserRepository
-            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
-            if not user_db:
-                await message.answer("Пользователь не найден. Нажми /start")
-                await state.clear()
-                return
-
-            link_svc = AccountLinkService()
-            token = await link_svc.create_email_verify_token(db, user_db.id, email)
-            sent = await send_verification_email(email, user_db.first_name or "друг", token)
-            await db.commit()
-
-        await state.clear()
-        if sent:
-            await message.answer(
-                f"📬 Письмо отправлено на *{email}*\n\n"
-                "Открой почту и нажми на ссылку для подтверждения.",
-                parse_mode="Markdown",
-            )
-        else:
-            await message.answer(
-                f"Email *{email}* сохранён, но отправка письма временно недоступна.\n"
-                "Попробуй позже через /settings",
-                parse_mode="Markdown",
-            )
-    except Exception as e:
-        logger.error(f"Error in email linking: {e}", exc_info=True)
-        await message.answer("Произошла ошибка. Попробуй позже.")
-        await state.clear()
-
-
-# ── Merge callbacks (from /start deep link) ──
 
 @router.callback_query(F.data == "merge_confirm")
 async def cb_merge_confirm(callback: CallbackQuery, state: FSMContext):
@@ -2342,16 +722,23 @@ async def cb_merge_confirm(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     target_id = data.get("merge_target_id")
     source_id = data.get("merge_source_id")
+    keep_project_from = data.get("keep_project_from")
 
     if not target_id or not source_id:
         await callback.message.edit_text("Данные для объединения устарели. Попробуй привязать аккаунт заново.")
         await callback.answer()
+        await state.clear()
         return
 
     try:
         async with AsyncSessionLocal() as db:
             merge_svc = AccountMergeService()
-            ok = await merge_svc.execute_merge(db, target_id, source_id)
+            ok = await merge_svc.execute_merge(
+                db,
+                target_user_id=target_id,
+                source_user_id=source_id,
+                keep_project_from=keep_project_from,
+            )
             await db.commit()
 
         await state.clear()

@@ -19,6 +19,8 @@ const buttonVariants = cva(
 				secondary:
 					"bg-secondary/50 text-secondary-foreground shadow-sm hover:bg-secondary/80 backdrop-blur-main border border-white/20",
 				ghost: "hover:bg-accent/30 hover:text-white",
+				ghost_destructive:
+					"text-destructive hover:bg-destructive/90 hover:text-white",
 				link: "text-primary underline-offset-4 hover:underline",
 				glass: "bg-white/20 hover:bg-white/40 border border-white/30 text-white backdrop-blur-md shadow-sm",
 				option: "w-full whitespace-normal justify-start p-4 rounded-xl border text-left h-auto bg-white/5 border-white/10 text-white/80 hover:bg-white/10 hover:border-white/30",

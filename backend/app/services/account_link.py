@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db.account_link import AccountLinkTokenDB
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 EMAIL_VERIFY_TOKEN_EXPIRY_HOURS = 24
 TELEGRAM_LINK_TOKEN_EXPIRY_HOURS = 1
+LINK_PROMPT_SNOOZE_DAYS = 7
 
 
 class AccountLinkService:
@@ -170,9 +172,21 @@ class AccountLinkService:
         if not token_obj:
             return None, None
 
-        web_user = await db.get(UserDB, token_obj.user_id)
+        token_user_id = token_obj.user_id
+
+        web_user = await db.get(UserDB, token_user_id)
         if not web_user:
             return None, None
+
+        if web_user.telegram_id == telegram_id:
+            await self.mark_token_used(db, token_obj)
+            await db.flush()
+            return web_user, None
+
+        if web_user.telegram_id and web_user.telegram_id != telegram_id:
+            await self.mark_token_used(db, token_obj)
+            await db.flush()
+            return web_user, None
 
         # Check if telegram_id already belongs to another user
         result = await db.execute(
@@ -184,17 +198,82 @@ class AccountLinkService:
         existing_tg_user = result.scalar_one_or_none()
 
         if existing_tg_user:
-            # Telegram account exists on different user — need merge
             await self.mark_token_used(db, token_obj)
+            await db.flush()
             return web_user, existing_tg_user
 
-        # No conflict — link telegram to web user
-        web_user.telegram_id = telegram_id
-        web_user.updated_at = datetime.now(UTC)
-        await self.mark_token_used(db, token_obj)
-        await db.flush()
+        conflict_exists = (
+            select(UserDB.id)
+            .where(
+                UserDB.telegram_id == telegram_id,
+                UserDB.id != web_user.id,
+            )
+            .exists()
+        )
 
-        return web_user, None
+        try:
+            res = await db.execute(
+                update(UserDB)
+                .where(UserDB.id == web_user.id)
+                .where(~conflict_exists)
+                .values(
+                    telegram_id=telegram_id,
+                    updated_at=datetime.now(UTC),
+                )
+            )
+            await self.mark_token_used(db, token_obj)
+            await db.flush()
+
+            if not res.rowcount:
+                web_user = await db.get(UserDB, token_user_id)
+                if not web_user:
+                    return None, None
+
+                if web_user.telegram_id == telegram_id:
+                    return web_user, None
+
+                result = await db.execute(
+                    select(UserDB).where(
+                        UserDB.telegram_id == telegram_id,
+                        UserDB.id != web_user.id,
+                    )
+                )
+                tg_conflict = result.scalar_one_or_none()
+                if tg_conflict:
+                    return web_user, tg_conflict
+                return web_user, None
+
+            await db.refresh(web_user)
+            return web_user, None
+        except IntegrityError:
+            await db.rollback()
+
+            result = await db.execute(
+                select(UserDB).where(
+                    UserDB.telegram_id == telegram_id,
+                    UserDB.id != web_user.id,
+                )
+            )
+            tg_conflict = result.scalar_one_or_none()
+
+            token_stmt = (
+                update(AccountLinkTokenDB)
+                .where(
+                    AccountLinkTokenDB.token == token,
+                    AccountLinkTokenDB.token_type == "telegram_link",
+                    AccountLinkTokenDB.used_at.is_(None),
+                )
+                .values(used_at=datetime.now(UTC))
+            )
+            await db.execute(token_stmt)
+            await db.flush()
+
+            web_user = await db.get(UserDB, token_user_id)
+            if not web_user:
+                return None, None
+            if web_user.telegram_id == telegram_id:
+                return web_user, None
+            return web_user, tg_conflict
 
     # ── Profile updates ─────────────────────────────────────────────
 
@@ -231,10 +310,17 @@ class AccountLinkService:
 
     async def dismiss_link_prompt(self, db: AsyncSession, user_id: int) -> None:
         """Dismiss the miniapp account link prompt so it won't show again."""
+        await self.snooze_link_prompt(db, user_id, days=LINK_PROMPT_SNOOZE_DAYS)
+
+    async def snooze_link_prompt(self, db: AsyncSession, user_id: int, days: int = 7) -> None:
         await db.execute(
             update(UserDB)
             .where(UserDB.id == user_id)
-            .values(link_prompt_dismissed=True, updated_at=datetime.now(UTC))
+            .values(
+                link_prompt_snoozed_until=datetime.now(UTC) + timedelta(days=days),
+                link_prompt_dismissed=False,
+                updated_at=datetime.now(UTC),
+            )
         )
         await db.flush()
 

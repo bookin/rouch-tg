@@ -39,9 +39,9 @@ class UserDB(SQLAlchemyBaseUserTable[int], Base):
     username: Mapped[str | None] = mapped_column(String)
 
     # Onboarding
-    occupation: Mapped[str | None] = mapped_column(String, default="employee")
+    occupation: Mapped[str | None] = mapped_column(String)
     available_times: Mapped[list | None] = mapped_column(JSON, default=list)
-    daily_minutes: Mapped[int | None] = mapped_column(default=30)
+    daily_minutes: Mapped[int | None] = mapped_column()
     current_habits: Mapped[list | None] = mapped_column(JSON, default=list)
     physical_restrictions: Mapped[str | None] = mapped_column(String)
 
@@ -52,6 +52,9 @@ class UserDB(SQLAlchemyBaseUserTable[int], Base):
 
     # Settings
     link_prompt_dismissed: Mapped[bool] = mapped_column(default=False)
+    link_prompt_snoozed_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     timezone: Mapped[str] = mapped_column(String, default="UTC")
     morning_enabled: Mapped[bool] = mapped_column(default=True)
     evening_enabled: Mapped[bool] = mapped_column(default=True)

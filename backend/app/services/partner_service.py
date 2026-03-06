@@ -70,3 +70,6 @@ class PartnerService:
         await db.flush()
         await db.refresh(partner_db)
         return partner_db
+
+    async def delete_partner(self, db: AsyncSession, partner_id: str) -> bool:
+        return await self.partner_repo.delete_by_id(db, partner_id)
