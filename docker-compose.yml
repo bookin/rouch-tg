@@ -101,6 +101,7 @@ services:
       - web
     labels:
       - traefik.enable=true
+      - traefik.docker.network=web
       - traefik.http.routers.rouch.rule=Host(`${DOMAIN_NAME}`)
       - traefik.http.routers.rouch.entrypoints=websecure
       - traefik.http.routers.rouch.tls=true
