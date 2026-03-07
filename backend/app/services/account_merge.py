@@ -208,10 +208,33 @@ class AccountMergeService:
         await db.execute(
             update(SeedDB).where(SeedDB.user_id == source_id).values(user_id=target_id)
         )
+        
         # Partners & groups
-        await db.execute(
-            update(PartnerGroupDB).where(PartnerGroupDB.user_id == source_id).values(user_id=target_id)
-        )
+        # 1. Получаем группы обоих пользователей
+        target_groups_result = await db.execute(select(PartnerGroupDB).where(PartnerGroupDB.user_id == target_id))
+        target_groups = target_groups_result.scalars().all()
+        target_groups_by_cat = {g.universal_category: g.id for g in target_groups if g.universal_category}
+
+        source_groups_result = await db.execute(select(PartnerGroupDB).where(PartnerGroupDB.user_id == source_id))
+        source_groups = source_groups_result.scalars().all()
+
+        # 2. Переносим партнеров в целевые группы и удаляем дублирующиеся исходные группы
+        for sg in source_groups:
+            if sg.universal_category and sg.universal_category in target_groups_by_cat:
+                target_group_id = target_groups_by_cat[sg.universal_category]
+                # Переносим партнеров в группу target
+                await db.execute(
+                    update(PartnerDB)
+                    .where(PartnerDB.group_id == sg.id)
+                    .values(user_id=target_id, group_id=target_group_id)
+                )
+                # Удаляем исходную группу
+                await db.delete(sg)
+            else:
+                # Если категории нет или она уникальна, просто переносим группу
+                sg.user_id = target_id
+
+        # Оставшихся партнеров (без группы или из неслитых групп) переносим
         await db.execute(
             update(PartnerDB).where(PartnerDB.user_id == source_id).values(user_id=target_id)
         )

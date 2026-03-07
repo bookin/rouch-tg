@@ -457,7 +457,7 @@ async def process_settings_email(message: Message, state: FSMContext):
     from app.database import AsyncSessionLocal
     from app.repositories.user import UserRepository
     from app.services.account_link import AccountLinkService
-    from app.email.service import send_verification_email
+    from app.email.service import send_link_account_email
 
     email = (message.text or "").strip().lower()
     if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
@@ -476,7 +476,7 @@ async def process_settings_email(message: Message, state: FSMContext):
 
             link_svc = AccountLinkService()
             token = await link_svc.create_email_verify_token(db, user_db.id, email)
-            sent = await send_verification_email(email, user_db.first_name or "друг", token)
+            sent = await send_link_account_email(email, user_db.first_name or "друг", token)
             await link_svc.dismiss_link_prompt(db, user_db.id)
             await db.commit()
 

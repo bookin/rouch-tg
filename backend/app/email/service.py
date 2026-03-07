@@ -126,3 +126,18 @@ async def send_verification_email(email: str, first_name: str, token: str) -> bo
             "app_name": settings.APP_NAME,
         },
     )
+
+
+async def send_link_account_email(email: str, first_name: str, token: str) -> bool:
+    """Send email for linking existing account."""
+    verify_url = f"{settings.WEBAPP_URL}/verify-email?token={token}"
+    return await send_email(
+        recipients=[email],
+        subject="Привязка аккаунта в Rouch 🔗",
+        template_name="link_account.html",
+        template_body={
+            "first_name": first_name,
+            "verify_url": verify_url,
+            "app_name": settings.APP_NAME,
+        },
+    )

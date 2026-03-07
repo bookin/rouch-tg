@@ -176,8 +176,8 @@ async def request_email_link(
     token = await _link_svc.create_email_verify_token(db, user.id, email)
 
     # Send verification email
-    from app.email.service import send_verification_email
-    sent = await send_verification_email(email, user.first_name or "друг", token)
+    from app.email.service import send_link_account_email
+    sent = await send_link_account_email(email, user.first_name or "друг", token)
 
     await db.commit()
 
