@@ -1,6 +1,7 @@
 """Telegram Bot handlers"""
 import asyncio
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.types import (
@@ -19,6 +20,8 @@ from app.workflows.onboarding import (
     save_onboarding_progress
 )
 from app.api.middleware.typing_middleware import TypingMiddleware
+from sqlalchemy import select
+from app.models.db.practice import PracticeDB
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -36,6 +39,7 @@ MENU_DONE = "✅ Отметить выполнение"
 MENU_SETTINGS = "⚙️ Настройки"
 MENU_PARTNERS = "🤝 Партнёры"
 MENU_PROJECTS = "🎯 Проекты"
+MENU_PRACTICES = "🧘 Практики"
 MENU_RESET = "🔄 Сброс прогресса"
 
 if settings.TELEGRAM_ENABLED:
@@ -144,6 +148,7 @@ def get_main_menu() -> ReplyKeyboardMarkup:
         [KeyboardButton(text=MENU_SEED), KeyboardButton(text=MENU_COFFEE)],
         [KeyboardButton(text=MENU_DONE), KeyboardButton(text=MENU_SETTINGS)],
         [KeyboardButton(text=MENU_PARTNERS), KeyboardButton(text=MENU_PROJECTS)],
+        [KeyboardButton(text=MENU_PRACTICES)],
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
@@ -242,6 +247,280 @@ def _build_share_progress_text(tasks: list[dict]) -> str:
 
     lines.append("\nПродолжаю путь к цели. Пусть будет мягко и честно.")
     return "\n".join(lines)
+
+
+def _format_practice_steps(steps: list[str] | None) -> str:
+    items = [s.strip() for s in (steps or []) if s and s.strip()]
+    if not items:
+        return "1. Сделай практику мягко и осознанно, без спешки."
+    return "\n".join([f"{idx + 1}. {step}" for idx, step in enumerate(items)])
+
+
+async def _load_practice_by_id(db: Any, practice_id: str) -> PracticeDB | None:
+    result = await db.execute(
+        select(PracticeDB).where(PracticeDB.id == practice_id).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def _load_user_by_telegram(db: Any, telegram_id: int):
+    from app.repositories.user import UserRepository
+
+    return await UserRepository().get_by_telegram_id(db, telegram_id)
+
+
+async def _load_active_practices(db: Any, user_id: int):
+    from app.services.practice_service import PracticeService
+
+    progress_list = await PracticeService().get_user_progress(db, user_id)
+    return [p for p in progress_list if p.is_active and not p.is_hidden]
+
+
+def _build_practice_need(strategy: dict | None) -> str:
+    if strategy:
+        need = (
+            f"{strategy.get('problem_text', '')} {strategy.get('stop_action', '')} "
+            f"{strategy.get('start_action', '')} {strategy.get('grow_action', '')}"
+        ).strip()
+        if need:
+            return need
+    return "общее развитие, осознанность, кармические практики"
+
+
+async def _load_practice_recommendations(
+    db: Any,
+    user_db: Any,
+    offset: int = 0,
+    limit: int = 5,
+):
+    from app.knowledge.qdrant import QdrantKnowledgeBase
+    from app.repositories.karma_plan import KarmaPlanRepository
+    from app.services.practice_service import PracticeService
+
+    practice_svc = PracticeService()
+    existing_progress = await practice_svc.get_user_progress(db, user_db.id)
+    existing_ids = {str(p.practice_id) for p in existing_progress}
+
+    plan = await KarmaPlanRepository().get_active(db, user_db.id)
+    strategy = plan.strategy_snapshot if plan else None
+    need = _build_practice_need(strategy)
+
+    qdrant = QdrantKnowledgeBase(get_settings().QDRANT_URL)
+    fetched = await qdrant.search_practice(
+        need=need,
+        restrictions=user_db.physical_restrictions.split(",") if user_db.physical_restrictions else None,
+        limit=offset + limit,
+    )
+    filtered = [r for r in fetched if str(r.get("id", "")) not in existing_ids]
+    chunk = filtered[offset:offset + limit]
+    has_more = len(filtered) > offset + limit
+    return chunk, has_more
+
+
+def _build_practice_list_keyboard(practices: list[PracticeDB]) -> InlineKeyboardMarkup:
+    buttons: list[list[InlineKeyboardButton]] = []
+    for practice in practices:
+        title = practice.name
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"▶️ Начать {title}",
+                callback_data=f"practice_do_{practice.id}",
+            )
+        ])
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"ℹ️ Подробнее {title}",
+                callback_data=f"practice_view_{practice.id}",
+            )
+        ])
+    buttons.append([
+        InlineKeyboardButton(text="✨ Найти новые практики", callback_data="practices_rec_0")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def _build_practice_empty_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✨ Найти новые практики", callback_data="practices_rec_0")]
+        ]
+    )
+
+
+def _build_practice_rec_keyboard(recommendations: list[dict], offset: int, has_more: bool) -> InlineKeyboardMarkup:
+    buttons: list[list[InlineKeyboardButton]] = []
+    for rec in recommendations:
+        title = rec.get("name") or "Практика"
+        pid = str(rec.get("id"))
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"🌟 Активировать {title}",
+                callback_data=f"practice_activate_{pid}",
+            )
+        ])
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"ℹ️ Подробнее {title}",
+                callback_data=f"practice_view_{pid}",
+            )
+        ])
+    if has_more:
+        buttons.append([
+            InlineKeyboardButton(
+                text="Ещё практики",
+                callback_data=f"practices_rec_{offset + len(recommendations)}",
+            )
+        ])
+    buttons.append([
+        InlineKeyboardButton(text="⬅️ Назад к активным", callback_data="practices_active")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def _build_practice_execute_keyboard(practice_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Выполнено", callback_data=f"practice_done_{practice_id}")],
+            [InlineKeyboardButton(text="Отложить", callback_data="practice_defer")],
+            [InlineKeyboardButton(text="⬅️ Назад к практикам", callback_data="practices_active")],
+        ]
+    )
+
+
+def _build_practice_detail_keyboard(
+    practice_id: str,
+    can_activate: bool,
+    next_offset: int | None = None,
+) -> InlineKeyboardMarkup:
+    buttons = []
+    if can_activate:
+        buttons.append([
+            InlineKeyboardButton(text="🌟 Активировать", callback_data=f"practice_activate_{practice_id}")
+        ])
+    buttons.append([
+        InlineKeyboardButton(text="▶️ Начать", callback_data=f"practice_do_{practice_id}")
+    ])
+    if next_offset is not None:
+        buttons.append([
+            InlineKeyboardButton(text="✨ Ещё практики", callback_data=f"practices_rec_{next_offset}")
+        ])
+    buttons.append([
+        InlineKeyboardButton(text="⬅️ Назад к практикам", callback_data="practices_active")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def _build_practice_detail_text(practice: PracticeDB) -> str:
+    duration = f"{practice.duration_minutes} мин" if practice.duration_minutes else "—"
+    benefits = practice.benefits or "Пусть эта практика мягко поддержит тебя."
+    contraindications = (
+        ", ".join(practice.contraindications or []) if practice.contraindications else "нет"
+    )
+    steps_text = _format_practice_steps(practice.steps or [])
+    return (
+        f"🧘 {practice.name}\n"
+        f"Категория: {practice.category}\n"
+        f"Длительность: {duration}\n\n"
+        f"Польза: {benefits}\n\n"
+        f"Что делать:\n{steps_text}\n\n"
+        f"Если есть ограничения: {contraindications}"
+    )
+
+
+async def _send_practices_active(target: Message | CallbackQuery) -> None:
+    from app.database import AsyncSessionLocal
+
+    telegram_id = target.from_user.id if isinstance(target, (Message, CallbackQuery)) else None
+    if telegram_id is None:
+        return
+
+    async with AsyncSessionLocal() as db:
+        user_db = await _load_user_by_telegram(db, telegram_id)
+        if not user_db:
+            if isinstance(target, Message):
+                await target.answer("Я пока не вижу тебя в системе. Нажми /start — и начнём мягко заново.")
+            else:
+                await target.message.edit_text("Я пока не вижу тебя в системе. Нажми /start — и начнём мягко заново.")
+            return
+
+        active_practices = await _load_active_practices(db, user_db.id)
+        if not active_practices:
+            text = (
+                "🧘 Пока нет активных практик.\n\n"
+                "Хочешь, подберём новые? Я покажу несколько вариантов и шаги выполнения."
+            )
+            markup = _build_practice_empty_keyboard()
+        else:
+            lines = ["🧘 Твои активные практики", "Выбирай — и я покажу шаги."]
+            for idx, progress in enumerate(active_practices[:5], start=1):
+                practice = progress.practice
+                title = practice.name if practice else "Практика"
+                duration = f"{practice.duration_minutes} мин" if practice and practice.duration_minutes else "—"
+                lines.append(f"{idx}. {title} · {duration}")
+            text = "\n".join(lines)
+            markup = _build_practice_list_keyboard(
+                [p.practice for p in active_practices if p.practice][:5]
+            )
+
+    if isinstance(target, CallbackQuery):
+        await target.message.edit_text(text, reply_markup=markup)
+        await target.answer()
+    else:
+        await target.answer(text, reply_markup=markup)
+        await show_main_menu(target)
+
+
+async def _send_practices_recommendations(
+    target: CallbackQuery,
+    offset: int,
+    state: FSMContext | None = None,
+) -> None:
+    from app.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        user_db = await _load_user_by_telegram(db, target.from_user.id)
+        if not user_db:
+            await target.message.edit_text("Я пока не вижу тебя в системе. Нажми /start — и начнём мягко заново.")
+            await target.answer()
+            return
+
+        recommendations, has_more = await _load_practice_recommendations(db, user_db, offset=offset)
+        if not recommendations:
+            await target.message.edit_text(
+                "Пока не нашёл новых практик. Давай попробуем позже или вернёмся к активным.",
+                reply_markup=_build_practice_rec_keyboard([], offset, has_more=False),
+            )
+            await target.answer()
+            return
+
+        lines = ["✨ Вот практики, которые могут подойти", "Выбирай любую — покажу шаги."]
+        for idx, rec in enumerate(recommendations, start=1):
+            title = rec.get("name") or "Практика"
+            duration = rec.get("duration") or "—"
+            lines.append(f"{idx}. {title} · {duration} мин")
+
+        await target.message.edit_text(
+            "\n".join(lines),
+            reply_markup=_build_practice_rec_keyboard(recommendations, offset, has_more),
+        )
+        if state:
+            await state.update_data(practices_rec_offset=offset)
+        await target.answer()
+
+
+async def _activate_practice(db: Any, user_db: Any, practice_id: str) -> bool:
+    from app.services.practice_service import PracticeService
+    from app.repositories.karma_plan import KarmaPlanRepository
+
+    practice = await _load_practice_by_id(db, practice_id)
+    if not practice:
+        return False
+
+    active_plan = await KarmaPlanRepository().get_active(db, user_db.id)
+    await PracticeService().practice_repo.get_or_create(
+        db, user_db.id, practice_id, karma_plan_id=(active_plan.id if active_plan else None)
+    )
+    return True
 
 
 async def _send_coffee_intro(message: Message) -> None:
@@ -463,6 +742,11 @@ async def _handle_projects(message: Message, state: FSMContext) -> None:
     await show_main_menu(message)
 
 
+async def _handle_practices(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await _send_practices_active(message)
+
+
 async def _show_settings_menu(message: Message, state: FSMContext) -> None:
     from app.database import AsyncSessionLocal
     from app.repositories.user import UserRepository
@@ -536,6 +820,11 @@ async def menu_projects(message: Message, state: FSMContext) -> None:
     await _handle_projects(message, state)
 
 
+@router.message(StateFilter(None), F.text == MENU_PRACTICES)
+async def menu_practices(message: Message, state: FSMContext) -> None:
+    await _handle_practices(message, state)
+
+
 @router.message(StateFilter(None), F.text == MENU_RESET)
 async def menu_reset(message: Message, state: FSMContext) -> None:
     await _handle_reset(message, state)
@@ -576,6 +865,169 @@ async def cmd_done(message: Message, state: FSMContext) -> None:
 @router.message(Command("reset"))
 async def cmd_reset(message: Message, state: FSMContext) -> None:
     await _handle_reset(message, state)
+
+
+@router.message(Command("practices"))
+async def cmd_practices(message: Message, state: FSMContext) -> None:
+    await _handle_practices(message, state)
+
+
+@router.callback_query(F.data == "practices_active")
+async def cb_practices_active(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.update_data(practices_rec_offset=0)
+    await _send_practices_active(callback)
+
+
+@router.callback_query(F.data.startswith("practices_rec_"))
+async def cb_practices_rec(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    raw_offset = callback.data.replace("practices_rec_", "") if callback.data else "0"
+    offset = int(raw_offset) if raw_offset.isdigit() else 0
+    await _send_practices_recommendations(callback, offset, state)
+
+
+@router.callback_query(F.data.startswith("practice_view_"))
+async def cb_practice_view(callback: CallbackQuery, state: FSMContext) -> None:
+    from app.database import AsyncSessionLocal
+    from app.services.practice_service import PracticeService
+
+    practice_id = callback.data.replace("practice_view_", "") if callback.data else ""
+    if not practice_id:
+        await callback.answer("Не вижу практику. Попробуй ещё раз.")
+        return
+
+    async with AsyncSessionLocal() as db:
+        user_db = await _load_user_by_telegram(db, callback.from_user.id)
+        if not user_db:
+            await callback.message.edit_text("Я пока не вижу тебя в системе. Нажми /start — и начнём мягко заново.")
+            await callback.answer()
+            return
+
+        practice = await _load_practice_by_id(db, practice_id)
+        if not practice:
+            await callback.message.edit_text("Эту практику пока не удалось найти. Попробуй другую.")
+            await callback.answer()
+            return
+
+        progress = await PracticeService().practice_repo.get_by_user_and_practice(
+            db, user_db.id, practice_id
+        )
+        can_activate = not bool(progress and progress.is_active)
+        rec_data = await state.get_data()
+        offset = rec_data.get("practices_rec_offset")
+        next_offset = offset + 5 if isinstance(offset, int) else None
+        text = _build_practice_detail_text(practice)
+        await callback.message.edit_text(
+            text,
+            reply_markup=_build_practice_detail_keyboard(practice_id, can_activate, next_offset),
+        )
+        await callback.answer()
+
+
+@router.callback_query(F.data.startswith("practice_activate_"))
+async def cb_practice_activate(callback: CallbackQuery, state: FSMContext) -> None:
+    from app.database import AsyncSessionLocal
+
+    practice_id = callback.data.replace("practice_activate_", "") if callback.data else ""
+    if not practice_id:
+        await callback.answer("Не вижу практику. Попробуй ещё раз.")
+        return
+
+    async with AsyncSessionLocal() as db:
+        user_db = await _load_user_by_telegram(db, callback.from_user.id)
+        if not user_db:
+            await callback.message.edit_text("Я пока не вижу тебя в системе. Нажми /start — и начнём мягко заново.")
+            await callback.answer()
+            return
+
+        ok = await _activate_practice(db, user_db, practice_id)
+        await db.commit()
+
+    if ok:
+        await callback.message.answer("🌱 Практика добавлена. Хочешь начать прямо сейчас?")
+        await _send_practices_active(callback)
+    else:
+        await callback.message.edit_text("Не получилось активировать практику. Попробуй позже.")
+        await callback.answer()
+
+
+@router.callback_query(F.data.startswith("practice_do_"))
+async def cb_practice_do(callback: CallbackQuery, state: FSMContext) -> None:
+    from app.database import AsyncSessionLocal
+
+    practice_id = callback.data.replace("practice_do_", "") if callback.data else ""
+    if not practice_id:
+        await callback.answer("Не вижу практику. Попробуй ещё раз.")
+        return
+
+    async with AsyncSessionLocal() as db:
+        user_db = await _load_user_by_telegram(db, callback.from_user.id)
+        if not user_db:
+            await callback.message.edit_text("Я пока не вижу тебя в системе. Нажми /start — и начнём мягко заново.")
+            await callback.answer()
+            return
+
+        ok = await _activate_practice(db, user_db, practice_id)
+        practice = await _load_practice_by_id(db, practice_id)
+        await db.commit()
+
+        if not ok or not practice:
+            await callback.message.edit_text("Не удалось начать практику. Попробуй ещё раз.")
+            await callback.answer()
+            return
+
+        text = (
+            f"🧘 {practice.name}\n\n"
+            f"Что делать:\n{_format_practice_steps(practice.steps or [])}"
+        )
+        await callback.message.edit_text(
+            text,
+            reply_markup=_build_practice_execute_keyboard(practice_id),
+        )
+        await callback.answer()
+
+
+@router.callback_query(F.data.startswith("practice_done_"))
+async def cb_practice_done(callback: CallbackQuery, state: FSMContext) -> None:
+    from app.database import AsyncSessionLocal
+    from app.services.practice_service import PracticeService
+    from app.repositories.karma_plan import KarmaPlanRepository
+
+    practice_id = callback.data.replace("practice_done_", "") if callback.data else ""
+    if not practice_id:
+        await callback.answer("Не вижу практику. Попробуй ещё раз.")
+        return
+
+    async with AsyncSessionLocal() as db:
+        user_db = await _load_user_by_telegram(db, callback.from_user.id)
+        if not user_db:
+            await callback.message.edit_text("Я пока не вижу тебя в системе. Нажми /start — и начнём мягко заново.")
+            await callback.answer()
+            return
+
+        plan = await KarmaPlanRepository().get_active(db, user_db.id)
+        await PracticeService().complete_and_create_seed(
+            db,
+            user_id=user_db.id,
+            practice_id=practice_id,
+            karma_plan_id=(plan.id if plan else None),
+            emotion_score=5,
+        )
+        await db.commit()
+
+    await callback.message.edit_text(
+        "✅ Практика отмечена. Спасибо за тёплое усилие!",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад к практикам", callback_data="practices_active")]]
+        ),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "practice_defer")
+async def cb_practice_defer(callback: CallbackQuery) -> None:
+    await callback.answer()
+    await _send_practices_active(callback)
 
 
 @router.message(SeedState.waiting_for_description)
@@ -1762,6 +2214,7 @@ async def start_bot():
                     BotCommand(command="coffee", description="☕️ Кофе-медитация"),
                     BotCommand(command="seed", description="🌱 Записать семя"),
                     BotCommand(command="done", description="✅ Отметить выполнение"),
+                    BotCommand(command="practices", description="🧘 Практики"),
                     BotCommand(command="settings", description="⚙️ Настройки профиля"),
                     BotCommand(command="reset", description="🔄 Сброс прогресса"),
                 ]

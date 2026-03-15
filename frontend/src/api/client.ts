@@ -414,6 +414,19 @@ export interface Practice {
   tags: string[]
 }
 
+export interface PracticeRecommendation {
+  id: string
+  name: string
+  category: string
+  content?: string
+  duration: number
+  benefits?: string
+  tags?: string[]
+  steps?: string[]
+  contraindications?: string[]
+  description?: string
+}
+
 export interface PracticeCompleteRequest {
   emotion_score?: number
 }
@@ -435,7 +448,7 @@ export const getPracticesProgress = async (): Promise<{ progress: PracticeProgre
   return response.data
 }
 
-export const getPracticeRecommendations = async () => {
+export const getPracticeRecommendations = async (): Promise<{ recommendations: PracticeRecommendation[] }> => {
   const response = await api.get('/api/practices/recommend')
   return response.data
 }

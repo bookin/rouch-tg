@@ -1,11 +1,33 @@
 import {useEffect, useState} from 'react'
-import {getDailyQuote, getDailyActions, toggleDailyAction, getPracticesProgress, completePractice, getPracticeRecommendations, startPracticeTracking, PracticeProgress, getActiveProject} from '../api/client'
+import {
+	getDailyQuote,
+	getDailyActions,
+	toggleDailyAction,
+	getPracticesProgress,
+	completePractice,
+	getPracticeRecommendations,
+	startPracticeTracking,
+	getPractices,
+	PracticeProgress,
+	Practice,
+	PracticeRecommendation,
+	getActiveProject
+} from '../api/client'
 import {useTelegram} from '../hooks/useTelegram'
 import {Link} from 'react-router-dom'
-import {Quote, Coffee, Check, Target, Sparkles, Loader2, Flame, TrendingUp, Play, Plus, ArrowRight} from 'lucide-react'
+import {Quote, Coffee, Check, Target, Sparkles, Loader2, Flame, ArrowRight} from 'lucide-react'
 import {cn} from '@/lib/utils'
 import {Card, CardContent} from '@/components/ui/card'
 import {Button} from '@/components/ui/button'
+import PracticeModal, {PracticeModalMode} from '@/components/practices/PracticeModal'
+import PracticePreviewCard from '@/components/practices/PracticePreviewCard'
+import PracticeProgressCard from '@/components/practices/PracticeProgressCard'
+import {
+	buildPracticeCatalogMap,
+	practiceDetailsFromProgress,
+	practiceDetailsFromRecommendation,
+	PracticeDetails
+} from '@/components/practices/practiceUtils'
 
 interface DailyAction {
 	id: string
@@ -26,41 +48,77 @@ export default function Dashboard() {
 	const [quote, setQuote] = useState<QuoteData | null>(null)
 	const [actions, setActions] = useState<DailyAction[]>([])
 	const [practices, setPractices] = useState<PracticeProgress[]>([])
-	const [recommendations, setRecommendations] = useState<any[]>([])
+	const [recommendations, setRecommendations] = useState<PracticeRecommendation[]>([])
 	const [loading, setLoading] = useState(false)
-	const [practiceLoading, setPracticeLoading] = useState<string | null>(null)
 	const [initialLoading, setInitialLoading] = useState(true)
 	const [hasActiveProject, setHasActiveProject] = useState(false)
+	const [catalogMap, setCatalogMap] = useState<Record<string, Practice>>({})
+	const [modalOpen, setModalOpen] = useState(false)
+	const [modalMode, setModalMode] = useState<PracticeModalMode>('details')
+	const [modalPractice, setModalPractice] = useState<PracticeDetails | null>(null)
+	const [modalLoading, setModalLoading] = useState(false)
 
 	// Filter: only visible active/habit practices
 	const visiblePractices = practices.filter(p => !p.is_hidden && (p.is_active || p.is_habit))
 	const isEmpty = visiblePractices.length === 0
 
-	const handleCompletePractice = async (practiceId: string) => {
+	const ensureCatalogMap = async () => {
+		if (Object.keys(catalogMap).length > 0) {
+			return catalogMap
+		}
+		const data = await getPractices()
+		const map = buildPracticeCatalogMap(data.practices || [])
+		setCatalogMap(map)
+		return map
+	}
+
+	const handleOpenDetails = (details: PracticeDetails) => {
+		setModalPractice(details)
+		setModalMode('details')
+		setModalOpen(true)
+	}
+
+	const handleOpenExecute = async (practice: PracticeProgress) => {
+		setModalLoading(true)
 		try {
-			setPracticeLoading(practiceId)
-			await completePractice(practiceId)
-			// Перезагружаем практики чтобы обновить прогресс
-			const practicesData = await getPracticesProgress()
-			setPractices(practicesData.progress || [])
+			const map = await ensureCatalogMap()
+			const details = practiceDetailsFromProgress(practice, map)
+			setModalPractice(details)
+			setModalMode('execute')
+			setModalOpen(true)
 		} catch (error) {
-			console.error('Error completing practice:', error)
+			console.error('Error opening practice:', error)
 		} finally {
-			setPracticeLoading(null)
+			setModalLoading(false)
 		}
 	}
 
-	const handleStartPractice = async (id: string) => {
-		setPracticeLoading(id)
+	const handleStartFromModal = async (practiceId: string) => {
+		setModalLoading(true)
 		try {
-			await startPracticeTracking(id)
+			await startPracticeTracking(practiceId)
 			const practicesData = await getPracticesProgress()
 			setPractices(practicesData.progress || [])
-			setRecommendations(prev => prev.filter(r => r.id !== id))
+			setRecommendations(prev => prev.filter(r => r.id !== practiceId))
+			setModalMode('execute')
 		} catch (error) {
 			console.error('Error starting practice:', error)
 		} finally {
-			setPracticeLoading(null)
+			setModalLoading(false)
+		}
+	}
+
+	const handleCompleteFromModal = async (practiceId: string) => {
+		setModalLoading(true)
+		try {
+			await completePractice(practiceId)
+			const practicesData = await getPracticesProgress()
+			setPractices(practicesData.progress || [])
+			setModalOpen(false)
+		} catch (error) {
+			console.error('Error completing practice:', error)
+		} finally {
+			setModalLoading(false)
 		}
 	}
 
@@ -330,28 +388,13 @@ export default function Dashboard() {
 						</div>
 					</div>
 					<div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
-						{recommendations.slice(0, 4).map((r: any) => (
-							<Card key={`rec-${r.id}`}
-								className="border border-yellow-500/20 bg-yellow-500/5 backdrop-blur-main rounded-2xl p-5">
-								<div className="flex items-start gap-4 h-full">
-									<div className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-yellow-500/20 border-2 border-yellow-400/30 text-white font-bold">
-										🧘
-									</div>
-									<div className="flex-1 min-w-0">
-										<h3 className="font-semibold text-white mb-1">{r.name}</h3>
-										<p className="text-xs text-white/50 mb-2 line-clamp-2">{r.benefits || r.content}</p>
-										<Button size="sm" className="bg-yellow-500 hover:bg-yellow-600 text-white"
-											onClick={() => handleStartPractice(r.id)}
-											disabled={practiceLoading === r.id}>
-											{practiceLoading === r.id
-												? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin"/>
-												: <Plus className="h-3.5 w-3.5 mr-1"/>
-											}
-											Начать
-										</Button>
-									</div>
-								</div>
-							</Card>
+						{recommendations.slice(0, 4).map((r) => (
+							<PracticePreviewCard
+								key={`rec-${r.id}`}
+								practice={practiceDetailsFromRecommendation(r)}
+								variant="highlight"
+								onClick={() => handleOpenDetails(practiceDetailsFromRecommendation(r))}
+							/>
 						))}
 					</div>
 				</>
@@ -361,69 +404,12 @@ export default function Dashboard() {
 			{visiblePractices.length > 0 && (
 				<div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
 					{visiblePractices.slice(0, 4).map((practice) => (
-						<Card
+						<PracticeProgressCard
 							key={practice.practice_id}
-							className={cn(
-								"group relative overflow-hidden rounded-2xl border p-5 transition-all duration-300 cursor-pointer h-full backdrop-blur-main",
-								practice.is_habit
-									? "bg-green-500/20 border-green-400/30"
-									: "bg-white/10 hover:bg-white/20 border-white/30 shadow-sm hover:shadow-md hover:border-white/60",
-								practiceLoading === practice.practice_id && "opacity-70 pointer-events-none"
-							)}
-							onClick={() => practice.can_complete_today && handleCompletePractice(practice.practice_id)}
-						>
-							<div className="flex items-start gap-4 relative z-10 h-full">
-								{/* Practice Icon */}
-								<div className={cn(
-									"flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-white font-bold",
-									practice.is_habit 
-										? "bg-green-500/30 border-2 border-green-400/50" 
-										: "bg-white/20 border-2 border-white/40"
-								)}>
-									{practice.is_habit ? "🌿" : "🧘"}
-								</div>
-								
-								{/* Practice Content */}
-								<div className="flex-1 min-w-0">
-									<h3 className="font-semibold text-white mb-2">
-										{practice.practice_name}
-									</h3>
-									
-									{/* Progress */}
-									<div className="flex items-center gap-3 text-xs text-white/80">
-										{practice.streak_days > 0 && (
-											<span className="flex items-center gap-1">
-												<Flame className="h-3 w-3 text-orange-300"/>
-												{practice.streak_days} дней
-											</span>
-										)}
-										{practice.habit_score > 0 && (
-											<span className="flex items-center gap-1">
-												<TrendingUp className="h-3 w-3 text-blue-300"/>
-												{practice.habit_score}%
-											</span>
-										)}
-									</div>
-									
-									{practice.is_habit && (
-										<div className="mt-2 text-xs text-green-300 font-medium">
-											✅ Сформированная привычка
-										</div>
-									)}
-								</div>
-								
-								{/* Action Button */}
-								{!practice.is_habit && (
-									<div className="flex-shrink-0">
-										{practiceLoading === practice.practice_id ? (
-											<Loader2 className="h-5 w-5 text-white/60 animate-spin"/>
-										) : (
-											<Play className="h-5 w-5 text-white/60 group-hover:text-white transition-colors"/>
-										)}
-									</div>
-								)}
-							</div>
-						</Card>
+							practice={practice}
+							onExecute={handleOpenExecute}
+							showDuration={false}
+						/>
 					))}
 				</div>
 			)}
@@ -440,6 +426,16 @@ export default function Dashboard() {
 					</Button>
 				</div>
 			)}
+
+			<PracticeModal
+				open={modalOpen}
+				mode={modalMode}
+				practice={modalPractice}
+				onClose={() => setModalOpen(false)}
+				onStart={handleStartFromModal}
+				onComplete={handleCompleteFromModal}
+				isLoading={modalLoading}
+			/>
 		</div>
 	)
 }

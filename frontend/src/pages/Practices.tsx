@@ -2,38 +2,43 @@ import {useEffect, useState} from 'react'
 import {
 	getPracticesProgress, getPracticeRecommendations, startPracticeTracking,
 	completePractice, pausePractice, resumePractice, hidePractice, resetPractice, deletePractice,
-	getPractices, PracticeProgress, Practice
+	getPractices, PracticeProgress, Practice, PracticeRecommendation
 } from '../api/client'
 import {
-	Brain, Clock, Flame, Loader2, RefreshCw, Play, Plus, Target, TrendingUp,
+	Brain, Flame, Loader2, RefreshCw, Play, Target,
 	Sparkles, Pause, Eye, RotateCcw, Trash2, MoreHorizontal, ChevronDown, BookOpen
 } from 'lucide-react'
 import {cn} from '@/lib/utils'
-import {Card} from '@/components/ui/card'
 import {Button} from '@/components/ui/button'
 import PageHeader from "@/components/ui/PageHeader.tsx";
-
-interface RecommendationItem {
-	id: string
-	name: string
-	category: string
-	content: string
-	duration: number
-	benefits?: string
-	tags?: string[]
-}
+import PracticeModal, {PracticeModalMode} from '@/components/practices/PracticeModal'
+import PracticePreviewCard from '@/components/practices/PracticePreviewCard'
+import PracticeProgressCard from '@/components/practices/PracticeProgressCard'
+import {
+	buildPracticeCatalogMap,
+	practiceDetailsFromCatalog,
+	practiceDetailsFromProgress,
+	practiceDetailsFromRecommendation,
+	PracticeDetails
+} from '@/components/practices/practiceUtils'
 
 export default function Practices() {
 	const [loading, setLoading] = useState(true)
 	const [actionLoading, setActionLoading] = useState<string | null>(null)
 	const [progress, setProgress] = useState<PracticeProgress[]>([])
-	const [recommendations, setRecommendations] = useState<RecommendationItem[]>([])
+	const [recommendations, setRecommendations] = useState<PracticeRecommendation[]>([])
 	const [menuOpen, setMenuOpen] = useState<string | null>(null)
 	const [error, setError] = useState<string | null>(null)
 	const [catalog, setCatalog] = useState<Practice[]>([])
+	const [catalogSource, setCatalogSource] = useState<Practice[]>([])
+	const [catalogMap, setCatalogMap] = useState<Record<string, Practice>>({})
 	const [showCatalog, setShowCatalog] = useState(false)
 	const [catalogLoading, setCatalogLoading] = useState(false)
 	const [recsLoading, setRecsLoading] = useState(false)
+	const [modalOpen, setModalOpen] = useState(false)
+	const [modalMode, setModalMode] = useState<PracticeModalMode>('details')
+	const [modalPractice, setModalPractice] = useState<PracticeDetails | null>(null)
+	const [modalLoading, setModalLoading] = useState(false)
 
 	const load = async () => {
 		try {
@@ -52,6 +57,23 @@ export default function Practices() {
 		}
 	}
 
+	const buildCatalogState = (practices: Practice[], progressList: PracticeProgress[]) => {
+		const map = buildPracticeCatalogMap(practices)
+		setCatalogSource(practices)
+		setCatalogMap(map)
+		const tracked = new Set(progressList.map(p => p.practice_id))
+		setCatalog(practices.filter(p => !tracked.has(p.id)))
+		return map
+	}
+
+	const ensureCatalogMap = async () => {
+		if (Object.keys(catalogMap).length > 0) {
+			return catalogMap
+		}
+		const data = await getPractices()
+		return buildCatalogState(data.practices || [], progress)
+	}
+
 	const refreshRecommendations = async () => {
 		setRecsLoading(true)
 		try {
@@ -62,12 +84,11 @@ export default function Practices() {
 	}
 
 	const loadCatalog = async () => {
-		if (catalog.length > 0) { setShowCatalog(!showCatalog); return }
+		if (catalogSource.length > 0) { setShowCatalog(!showCatalog); return }
 		setCatalogLoading(true)
 		try {
 			const data = await getPractices()
-			const tracked = new Set(progress.map(p => p.practice_id))
-			setCatalog((data.practices || []).filter((p: Practice) => !tracked.has(p.id)))
+			buildCatalogState(data.practices || [], progress)
 			setShowCatalog(true)
 		} catch { setError('Не удалось загрузить каталог') }
 		finally { setCatalogLoading(false) }
@@ -75,22 +96,63 @@ export default function Practices() {
 
 	useEffect(() => { load() }, [])
 
+	useEffect(() => {
+		if (catalogSource.length === 0) {
+			return
+		}
+		const tracked = new Set(progress.map(p => p.practice_id))
+		setCatalog(catalogSource.filter(p => !tracked.has(p.id)))
+	}, [progress, catalogSource])
+
 	const habits = progress.filter(p => p.is_habit && !p.is_hidden)
 	const active = progress.filter(p => !p.is_habit && p.is_active && !p.is_hidden)
 	const paused = progress.filter(p => !p.is_active && !p.is_hidden)
 
-	const handleStart = async (id: string) => {
-		setActionLoading(id)
-		try { await startPracticeTracking(id); await load() }
-		catch { setError('Не удалось начать практику') }
-		finally { setActionLoading(null) }
+	const handleOpenDetails = (details: PracticeDetails) => {
+		setModalPractice(details)
+		setModalMode('details')
+		setModalOpen(true)
 	}
 
-	const handleComplete = async (id: string) => {
-		setActionLoading(id)
-		try { await completePractice(id); await load() }
-		catch { setError('Не удалось отметить выполнение') }
-		finally { setActionLoading(null) }
+	const handleOpenExecute = async (item: PracticeProgress) => {
+		setModalLoading(true)
+		try {
+			const map = await ensureCatalogMap()
+			const details = practiceDetailsFromProgress(item, map)
+			setModalPractice(details)
+			setModalMode('execute')
+			setModalOpen(true)
+		} catch {
+			setError('Не удалось открыть практику')
+		} finally {
+			setModalLoading(false)
+		}
+	}
+
+	const handleStartFromModal = async (practiceId: string) => {
+		setModalLoading(true)
+		try {
+			await startPracticeTracking(practiceId)
+			await load()
+			setModalMode('execute')
+		} catch {
+			setError('Не удалось начать практику')
+		} finally {
+			setModalLoading(false)
+		}
+	}
+
+	const handleCompleteFromModal = async (practiceId: string) => {
+		setModalLoading(true)
+		try {
+			await completePractice(practiceId)
+			await load()
+			setModalOpen(false)
+		} catch {
+			setError('Не удалось отметить выполнение')
+		} finally {
+			setModalLoading(false)
+		}
 	}
 
 	const handleAction = async (action: string, id: string) => {
@@ -121,15 +183,6 @@ export default function Practices() {
 			</div>
 		)
 	}
-
-	const ProgressBar = ({score, minScore}: {score: number; minScore: number}) => (
-		<div className="w-full h-1.5 bg-white/20 rounded-full overflow-hidden">
-			<div
-				className="h-full bg-gradient-to-r from-blue-400 to-green-400 transition-all duration-300"
-				style={{width: `${Math.min(100, (score / minScore) * 100)}%`}}
-			/>
-		</div>
-	)
 
 	const PracticeMenu = ({id, isActive}: {id: string; isActive: boolean}) => (
 		<div className="relative">
@@ -168,81 +221,16 @@ export default function Practices() {
 		</div>
 	)
 
-	const PracticeCard = ({p}: {p: PracticeProgress}) => {
-		const isLoading = actionLoading === p.practice_id
-		return (
-			<Card className={cn(
-				"group relative overflow-hidden rounded-2xl border p-4 transition-all duration-300 backdrop-blur-main",
-				p.is_habit
-					? "bg-green-500/15 border-green-400/30"
-					: !p.is_active
-					? "bg-white/5 border-white/10 opacity-60"
-					: "bg-white/10 border-white/20",
-				isLoading && "opacity-70 pointer-events-none"
-			)}>
-				<div className="flex items-start justify-between mb-2">
-					<div className="flex items-center gap-2 min-w-0 flex-1">
-						<span className="text-lg">{p.is_habit ? "🌿" : "🧘"}</span>
-						<h3 className="font-semibold text-white text-sm truncate">{p.practice_name}</h3>
-					</div>
-					<div className="flex items-center gap-1 flex-shrink-0">
-						<span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-white/10 text-white/50">
-							{p.practice_category}
-						</span>
-						<PracticeMenu id={p.practice_id} isActive={p.is_active}/>
-					</div>
-				</div>
+	const PracticeCard = ({p}: {p: PracticeProgress}) => (
+		<PracticeProgressCard
+			practice={p}
+			isLoading={actionLoading === p.practice_id}
+			onExecute={handleOpenExecute}
+			menu={<PracticeMenu id={p.practice_id} isActive={p.is_active}/>}
+		/>
+	)
 
-				{/* Stats */}
-				<div className="flex items-center gap-3 text-xs text-white/70 mb-2">
-					{p.streak_days > 0 && (
-						<span className="flex items-center gap-1">
-							<Flame className="h-3 w-3 text-orange-300"/>
-							{p.streak_days} дн.
-						</span>
-					)}
-					{p.habit_score > 0 && (
-						<span className="flex items-center gap-1">
-							<TrendingUp className="h-3 w-3 text-blue-300"/>
-							{p.habit_score}%
-						</span>
-					)}
-					<span className="flex items-center gap-1">
-						<Clock className="h-3 w-3"/>
-						{p.practice_duration} мин
-					</span>
-				</div>
-
-				{/* Habit progress bar */}
-				{!p.is_habit && p.habit_score > 0 && (
-					<div className="mb-3">
-						<ProgressBar score={p.habit_score} minScore={p.habit_min_score}/>
-						<p className="text-[10px] text-white/40 mt-1">
-							До привычки: {p.habit_score}/{p.habit_min_score}% · {p.streak_days}/{p.habit_min_streak_days} дн.
-						</p>
-					</div>
-				)}
-
-				{p.is_habit && (
-					<p className="text-xs text-green-300 font-medium mb-2">✅ Сформированная привычка</p>
-				)}
-
-				{!p.is_active && (
-					<p className="text-xs text-yellow-300/70 font-medium mb-2">⏸ На паузе</p>
-				)}
-
-				{/* Action button */}
-				{p.is_active && p.can_complete_today && !p.is_habit && (
-					<Button size="sm" className="w-full mt-1" onClick={() => handleComplete(p.practice_id)}>
-						{isLoading ? <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin"/> : <Play className="h-3.5 w-3.5 mr-2"/>}
-						Выполнить
-					</Button>
-				)}
-			</Card>
-		)
-	}
-
-	return (
+return (
 		<div className="flex flex-col gap-6 p-4 max-w-5xl mx-auto w-full pb-24" onClick={() => setMenuOpen(null)}>
 			<div className="space-y-1 mt-2 flex items-center justify-between">
 				<div>
@@ -303,45 +291,25 @@ export default function Practices() {
 						<h2 className="text-lg font-semibold flex items-center gap-2 text-white">
 							<Sparkles className="h-5 w-5 text-yellow-300"/> Рекомендации для тебя
 						</h2>
-						<Button variant="ghost" size="sm" className="text-yellow-300/70 hover:text-yellow-300 text-xs"
-							onClick={refreshRecommendations} disabled={recsLoading}>
+						<Button
+							variant="ghost"
+							size="sm"
+							className="text-yellow-300/70 hover:text-yellow-300 text-xs"
+							onClick={refreshRecommendations}
+							disabled={recsLoading}
+						>
 							<RefreshCw className={cn("h-3.5 w-3.5 mr-1", recsLoading && "animate-spin")}/>
 							Обновить подбор
 						</Button>
 					</div>
 					<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
 						{recommendations.map((r, idx) => (
-							<Card key={`rec-${r.id || idx}`}
-								className="border border-yellow-500/20 bg-yellow-500/5 backdrop-blur-main rounded-2xl p-4">
-								<div className="flex items-start justify-between mb-2">
-									<h3 className="font-semibold text-white text-sm">{r.name}</h3>
-									<span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300">
-										{r.category}
-									</span>
-								</div>
-								<div className="flex items-center gap-2 text-xs text-white/60 mb-2">
-									<Clock className="h-3 w-3"/>{r.duration} мин
-								</div>
-								{r.benefits && (
-									<p className="text-xs text-white/50 mb-3 line-clamp-2">{r.benefits}</p>
-								)}
-								{r.tags && r.tags.length > 0 && (
-									<div className="flex flex-wrap gap-1 mb-3">
-										{r.tags.slice(0, 4).map(t => (
-											<span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/40">{t}</span>
-										))}
-									</div>
-								)}
-								<Button size="sm" className="w-full bg-yellow-500 hover:bg-yellow-600 text-white"
-									onClick={() => handleStart(r.id)}
-									disabled={actionLoading === r.id}>
-									{actionLoading === r.id
-										? <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin"/>
-										: <Plus className="h-3.5 w-3.5 mr-2"/>
-									}
-									Начать практику
-								</Button>
-							</Card>
+							<PracticePreviewCard
+								key={`rec-${r.id || idx}`}
+								practice={practiceDetailsFromRecommendation(r)}
+								variant="highlight"
+								onClick={() => handleOpenDetails(practiceDetailsFromRecommendation(r))}
+							/>
 						))}
 					</div>
 				</section>
@@ -349,8 +317,12 @@ export default function Practices() {
 
 			{/* Catalog button + lazy catalog */}
 			<section>
-				<Button variant="outline" className="w-full border-white/20 text-white/70 hover:bg-white/10"
-					onClick={loadCatalog} disabled={catalogLoading}>
+				<Button
+					variant="outline"
+					className="w-full border-white/20 text-white/70 hover:bg-white/10"
+					onClick={loadCatalog}
+					disabled={catalogLoading}
+				>
 					{catalogLoading
 						? <Loader2 className="h-4 w-4 mr-2 animate-spin"/>
 						: <BookOpen className="h-4 w-4 mr-2"/>
@@ -362,27 +334,11 @@ export default function Practices() {
 				{showCatalog && catalog.length > 0 && (
 					<div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
 						{catalog.map(p => (
-							<Card key={`cat-${p.id}`}
-								className="border border-white/10 bg-white/5 backdrop-blur-main rounded-2xl p-4">
-								<div className="flex items-start justify-between mb-2">
-									<h3 className="font-semibold text-white text-sm">{p.name}</h3>
-									<span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-white/10 text-white/40">
-										{p.category}
-									</span>
-								</div>
-								<div className="flex items-center gap-2 text-xs text-white/50 mb-2">
-									<Clock className="h-3 w-3"/>{p.duration} мин
-								</div>
-								{p.benefits && <p className="text-xs text-white/40 mb-3 line-clamp-2">{p.benefits}</p>}
-								<Button size="sm" className="w-full" variant="outline"
-									onClick={() => handleStart(p.id)} disabled={actionLoading === p.id}>
-									{actionLoading === p.id
-										? <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin"/>
-										: <Plus className="h-3.5 w-3.5 mr-2"/>
-									}
-									Начать практику
-								</Button>
-							</Card>
+							<PracticePreviewCard
+								key={`cat-${p.id}`}
+								practice={practiceDetailsFromCatalog(p)}
+								onClick={() => handleOpenDetails(practiceDetailsFromCatalog(p))}
+							/>
 						))}
 					</div>
 				)}
@@ -400,6 +356,16 @@ export default function Practices() {
 					</p>
 				</div>
 			)}
+
+			<PracticeModal
+				open={modalOpen}
+				mode={modalMode}
+				practice={modalPractice}
+				onClose={() => setModalOpen(false)}
+				onStart={handleStartFromModal}
+				onComplete={handleCompleteFromModal}
+				isLoading={modalLoading}
+			/>
 		</div>
 	)
 }
