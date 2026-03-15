@@ -27,6 +27,17 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 from app.mock_bot import MockBot
 
+MENU_OPEN_APP = "📱 Открыть приложение"
+MENU_SOLVER = "💭 Проблемы"
+MENU_TODAY = "📋 План"
+MENU_SEED = "🌱 Записать семя"
+MENU_COFFEE = "☕️ Кофе-медитация"
+MENU_DONE = "✅ Отметить выполнение"
+MENU_SETTINGS = "⚙️ Настройки"
+MENU_PARTNERS = "🤝 Партнёры"
+MENU_PROJECTS = "🎯 Проекты"
+MENU_RESET = "🔄 Сброс прогресса"
+
 if settings.TELEGRAM_ENABLED:
     bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
 else:
@@ -116,23 +127,131 @@ STEP_STATE_MAP = {
 }
 
 
-async def show_main_menu(message: Message) -> None:
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(
-                    text="📱 Открыть приложение",
-                    web_app=WebAppInfo(url=settings.WEBAPP_URL),
-                )
-            ],
+def get_main_menu() -> ReplyKeyboardMarkup:
+    """Build the main reply keyboard menu.
+
+    Returns:
+        ReplyKeyboardMarkup: The main menu layout.
+    """
+    keyboard = [
+        [
+            KeyboardButton(
+                text=MENU_OPEN_APP,
+                web_app=WebAppInfo(url=settings.WEBAPP_URL),
+            )
         ],
-        resize_keyboard=True,
+        [KeyboardButton(text=MENU_SOLVER), KeyboardButton(text=MENU_TODAY)],
+        [KeyboardButton(text=MENU_SEED), KeyboardButton(text=MENU_COFFEE)],
+        [KeyboardButton(text=MENU_DONE), KeyboardButton(text=MENU_SETTINGS)],
+        [KeyboardButton(text=MENU_PARTNERS), KeyboardButton(text=MENU_PROJECTS)],
+    ]
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
+
+def _build_webapp_url(path: str) -> str:
+    base = settings.WEBAPP_URL.rstrip("/")
+    clean_path = path.lstrip("/")
+    return f"{base}/{clean_path}" if clean_path else base
+
+
+async def show_main_menu(message: Message) -> None:
+    """Show the main menu to the user."""
+    await message.answer(
+        "Я рядом. Выбирай, куда хочешь двигаться дальше.",
+        reply_markup=get_main_menu(),
     )
 
+
+async def _send_menu_hint(message: Message, hint: str) -> None:
+    """Send a hint message, then show the main menu.
+
+    Args:
+        message: Incoming Telegram message.
+        hint: Short supportive hint for the user.
+    """
+    await message.answer(hint)
+    await show_main_menu(message)
+
+
+def _build_today_view(
+    tasks: list[dict],
+    preface: str | None = None,
+) -> tuple[str, InlineKeyboardMarkup | None]:
+    lines: list[str] = []
+    buttons: list[list[InlineKeyboardButton]] = []
+
+    completed = sum(1 for task in tasks if task.get("completed"))
+    total = len(tasks)
+    remaining = max(total - completed, 0)
+    percent = int((completed / total) * 100) if total else 0
+
+    for idx, task in enumerate(tasks[:10], start=1):
+        mark = "✅" if task.get("completed") else "⬜️"
+        desc = task.get("desc", "")
+        lines.append(f"Шаг {idx}\n{mark} {desc}")
+
+        if not task.get("completed") and task.get("id"):
+            label = f"✅ {idx}"
+            buttons.append(
+                [InlineKeyboardButton(text=label, callback_data=f"task_done_{task['id']}")]
+            )
+
+    text = "📋 Твой план на сегодня\n"
+    text += "Ниже шаги, которые приближают тебя к цели.\n\n"
+    text += f"💛 Пульс дня: {completed}/{total} • {percent}% • осталось {remaining}\n\n"
+    text += "\n\n".join(lines)
+
+    if buttons:
+        text += "\n\nМожно отметить шаг прямо здесь — нажми кнопку нужного номера."
+    else:
+        text += "\n\nВсе шаги уже отмечены. Ты большой молодец!"
+
+    if preface:
+        text = f"{preface}\n\n{text}"
+
+    buttons.append([InlineKeyboardButton(text="Поделиться прогрессом ✨", callback_data="share_progress")])
+    buttons.append(
+        [
+            InlineKeyboardButton(
+                text="Открыть план в приложении 📲",
+                web_app=WebAppInfo(url=_build_webapp_url("/")),
+            )
+        ]
+    )
+
+    return text, InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def _build_share_progress_text(tasks: list[dict]) -> str:
+    completed_tasks = [t for t in tasks if t.get("completed")]
+    total = len(tasks)
+    completed = len(completed_tasks)
+    remaining = max(total - completed, 0)
+
+    lines = ["✨ Мой кармический прогресс сегодня", f"✅ Выполнено: {completed}/{total}"]
+    if remaining:
+        lines.append(f"⏳ Осталось: {remaining}")
+
+    if completed_tasks:
+        lines.append("\nСделал(а):")
+        for task in completed_tasks[:8]:
+            desc = task.get("desc", "")
+            lines.append(f"• {desc}")
+    else:
+        lines.append("\nСегодня только начинаю, но путь уже выбран 🌱")
+
+    lines.append("\nПродолжаю путь к цели. Пусть будет мягко и честно.")
+    return "\n".join(lines)
+
+
+async def _send_coffee_intro(message: Message) -> None:
+    """Send the coffee meditation intro with a start button."""
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Начать ☕️", callback_data="cf_start")]]
+    )
     await message.answer(
-        "Я рядом. Когда захочешь — продолжим.\n\n"
-        "Команды: /coffee /settings",
-        reply_markup=keyboard,
+        "Готов(а) к короткой тёплой практике? Нажми «Начать».",
+        reply_markup=kb,
     )
 
 
@@ -203,8 +322,373 @@ def _selected_labels(step: str, ids_or_custom: list[str]) -> str:
 
 
 @router.message(F.text == "🚀 Начать знакомство")
-async def start_onboarding(message: Message, state: FSMContext):
+async def start_onboarding(message: Message, state: FSMContext) -> None:
     await _start_onboarding(message, state)
+
+
+async def _handle_open_app(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await _send_menu_hint(
+        message,
+        "Я рядом. Нажми «Открыть приложение» — и продолжим там.",
+    )
+
+
+async def _handle_solver(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await _send_menu_hint(
+        message,
+        "Чтобы решить проблему глубоко и спокойно, лучше открыть приложение.",
+    )
+
+
+async def _handle_today(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    data = await _cf_load_data(message.from_user.id)
+    if not data:
+        await _send_menu_hint(
+            message,
+            "Сейчас нет активного проекта. Давай сначала соберём его в приложении.",
+        )
+        return
+
+    tasks = data.get("tasks", [])
+    if not tasks:
+        await _send_menu_hint(
+            message,
+            "Сегодня шагов пока нет. Это нормально. Если хочешь — открой приложение и выберем путь.",
+        )
+        return
+    text, reply_markup = _build_today_view(tasks)
+    await message.answer(text, reply_markup=reply_markup)
+    await show_main_menu(message)
+
+
+async def _handle_coffee(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await _send_coffee_intro(message)
+
+
+async def _start_seed_flow(message: Message, state: FSMContext) -> None:
+    await state.set_state(SeedState.waiting_for_description)
+    await message.answer(
+        "Опиши доброе действие одним коротким предложением.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+
+
+async def _start_done_flow(message: Message, state: FSMContext) -> None:
+    data = await _cf_load_data(message.from_user.id)
+    if not data:
+        await _send_menu_hint(
+            message,
+            "Сейчас нет активного проекта. Давай сначала соберём его в приложении.",
+        )
+        return
+
+    tasks = [t for t in data.get("tasks", []) if not t.get("completed")]
+    if not tasks:
+        await _send_menu_hint(
+            message,
+            "Все шаги на сегодня уже отмечены. Ты молодец!",
+        )
+        return
+
+    lines = []
+    action_tasks = []
+    for idx, task in enumerate(tasks[:10], start=1):
+        lines.append(f"{idx}. ⬜️ {task.get('desc', '')}")
+        action_tasks.append({"id": task.get("id"), "desc": task.get("desc", "")})
+
+    await state.set_state(ActionState.waiting_for_action_id)
+    await state.update_data(action_tasks=action_tasks)
+    await message.answer(
+        "Напиши номер шага, который хочешь отметить.\n\n"
+        + "\n".join(lines)
+        + "\n\nЕсли передумал(а), напиши «Отмена».",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+
+
+async def _handle_reset(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Да, сбросить", callback_data="reset_confirm")],
+            [InlineKeyboardButton(text="Нет, оставить", callback_data="reset_cancel")],
+        ]
+    )
+    await message.answer(
+        "Сброс удалит твои текущие шаги, семена и прогресс.\n"
+        "Если ты уверен(а) — нажми «Да, сбросить».",
+        reply_markup=kb,
+    )
+
+
+async def _handle_partners(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Открыть партнёров 🤝",
+                    web_app=WebAppInfo(url=_build_webapp_url("/partners")),
+                )
+            ]
+        ]
+    )
+    await message.answer(
+        "Хочешь увидеть своих партнёров и их роли? Открой раздел — там всё аккуратно разложено.",
+        reply_markup=kb,
+    )
+    await show_main_menu(message)
+
+
+async def _handle_projects(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Открыть проекты 🎯",
+                    web_app=WebAppInfo(url=_build_webapp_url("/problem")),
+                )
+            ]
+        ]
+    )
+    await message.answer(
+        "Готов(а) посмотреть или запустить проект? Открой раздел — там мягко проведём дальше.",
+        reply_markup=kb,
+    )
+    await show_main_menu(message)
+
+
+async def _show_settings_menu(message: Message, state: FSMContext) -> None:
+    from app.database import AsyncSessionLocal
+    from app.repositories.user import UserRepository
+
+    await state.clear()
+
+    try:
+        async with AsyncSessionLocal() as db:
+            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
+            email = user_db.email if user_db else None
+
+        buttons = []
+        if email:
+            buttons.append([InlineKeyboardButton(text=f"📧 Email: {email}", callback_data="noop")])
+        else:
+            buttons.append([InlineKeyboardButton(text="📧 Привязать email", callback_data="settings_email")])
+        buttons.append([InlineKeyboardButton(text="🔙 Закрыть", callback_data="settings_close")])
+
+        await message.answer(
+            "⚙️ Настройки\n\nЧто хочешь сделать?",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        )
+    except Exception as e:
+        logger.error(f"cmd_settings error: {e}", exc_info=True)
+        await message.answer("Не получилось открыть настройки. Попробуй чуть позже.")
+
+
+@router.message(StateFilter(None), F.text == MENU_OPEN_APP)
+async def menu_open_app(message: Message, state: FSMContext) -> None:
+    await _handle_open_app(message, state)
+
+
+@router.message(StateFilter(None), F.text == MENU_SOLVER)
+async def menu_solver(message: Message, state: FSMContext) -> None:
+    await _handle_solver(message, state)
+
+
+@router.message(StateFilter(None), F.text == MENU_TODAY)
+async def menu_today(message: Message, state: FSMContext) -> None:
+    await _handle_today(message, state)
+
+
+@router.message(StateFilter(None), F.text == MENU_COFFEE)
+async def menu_coffee(message: Message, state: FSMContext) -> None:
+    await _handle_coffee(message, state)
+
+
+@router.message(StateFilter(None), F.text == MENU_SEED)
+async def menu_seed(message: Message, state: FSMContext) -> None:
+    await _start_seed_flow(message, state)
+
+
+@router.message(StateFilter(None), F.text == MENU_DONE)
+async def menu_done(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await _start_done_flow(message, state)
+
+
+@router.message(StateFilter(None), F.text == MENU_SETTINGS)
+async def menu_settings(message: Message, state: FSMContext) -> None:
+    await _show_settings_menu(message, state)
+
+
+@router.message(StateFilter(None), F.text == MENU_PARTNERS)
+async def menu_partners(message: Message, state: FSMContext) -> None:
+    await _handle_partners(message, state)
+
+
+@router.message(StateFilter(None), F.text == MENU_PROJECTS)
+async def menu_projects(message: Message, state: FSMContext) -> None:
+    await _handle_projects(message, state)
+
+
+@router.message(StateFilter(None), F.text == MENU_RESET)
+async def menu_reset(message: Message, state: FSMContext) -> None:
+    await _handle_reset(message, state)
+
+
+@router.message(Command("app"))
+async def cmd_app(message: Message, state: FSMContext) -> None:
+    await _handle_open_app(message, state)
+
+
+@router.message(Command("solver"))
+async def cmd_solver(message: Message, state: FSMContext) -> None:
+    await _handle_solver(message, state)
+
+
+@router.message(Command("today"))
+async def cmd_today(message: Message, state: FSMContext) -> None:
+    await _handle_today(message, state)
+
+
+@router.message(Command("coffee"))
+async def cmd_coffee(message: Message, state: FSMContext) -> None:
+    await _handle_coffee(message, state)
+
+
+@router.message(Command("seed"))
+async def cmd_seed(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await _start_seed_flow(message, state)
+
+
+@router.message(Command("done"))
+async def cmd_done(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await _start_done_flow(message, state)
+
+
+@router.message(Command("reset"))
+async def cmd_reset(message: Message, state: FSMContext) -> None:
+    await _handle_reset(message, state)
+
+
+@router.message(SeedState.waiting_for_description)
+async def seed_receive_description(message: Message, state: FSMContext) -> None:
+    from app.database import AsyncSessionLocal
+    from app.models.seed import Seed
+    from app.repositories.karma_plan import KarmaPlanRepository
+    from app.repositories.user import UserRepository
+    from app.services.seed_service import SeedService
+
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Напиши пару слов — я бережно запишу их как семя.")
+        return
+
+    try:
+        async with AsyncSessionLocal() as db:
+            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
+            if not user_db:
+                await message.answer("Я тебя не вижу в системе. Нажми /start, и начнём мягко заново.")
+                await state.clear()
+                return
+
+            plan = await KarmaPlanRepository().get_active(db, user_db.id)
+            if not plan:
+                await message.answer(
+                    "Сейчас нет активного проекта. Давай сначала соберём его в приложении."
+                )
+                await state.clear()
+                await show_main_menu(message)
+                return
+
+            seed = Seed(
+                user_id=user_db.id,
+                action_type="kindness",
+                description=text,
+                partner_group="world",
+                intention_score=5,
+                emotion_level=5,
+                understanding=True,
+                estimated_maturation_days=21,
+                strength_multiplier=1.0,
+                karma_plan_id=plan.id,
+            )
+            seed_svc = SeedService()
+            await seed_svc.create_seed(db, seed)
+            await seed_svc.user_repo.increment_seeds_count(db, user_db.id)
+            await db.commit()
+
+        await state.clear()
+        await message.answer("✨ Семя сохранено. Спасибо за доброе действие.")
+        await show_main_menu(message)
+    except Exception as e:
+        logger.error(f"seed_receive_description error: {e}", exc_info=True)
+        await message.answer("Не получилось сохранить семя. Давай попробуем ещё раз чуть позже.")
+        await state.clear()
+        await show_main_menu(message)
+
+
+@router.message(ActionState.waiting_for_action_id)
+async def action_receive_number(message: Message, state: FSMContext) -> None:
+    from app.database import AsyncSessionLocal
+    from app.repositories.user import UserRepository
+    from app.services.daily_service import DailyService
+
+    text = (message.text or "").strip()
+    if text.lower() == "отмена":
+        await state.clear()
+        await message.answer("Хорошо, вернул тебя в меню.")
+        await show_main_menu(message)
+        return
+
+    if not text.isdigit():
+        await message.answer("Напиши номер шага из списка или «Отмена».")
+        return
+
+    idx = int(text)
+    data = await state.get_data()
+    tasks = list(data.get("action_tasks", []))
+    if idx < 1 or idx > len(tasks):
+        await message.answer("Такого номера нет. Выбери номер из списка или напиши «Отмена».")
+        return
+
+    task_id = tasks[idx - 1].get("id")
+    if not task_id:
+        await message.answer("Не смог найти этот шаг. Попробуй ещё раз.")
+        return
+
+    try:
+        async with AsyncSessionLocal() as db:
+            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
+            if not user_db:
+                await message.answer("Я тебя не вижу в системе. Нажми /start, и начнём мягко заново.")
+                await state.clear()
+                return
+
+            ok = await DailyService().toggle_task_completion(
+                db, user_id=user_db.id, task_id=int(task_id), completed=True
+            )
+            await db.commit()
+
+        if not ok:
+            await message.answer("Не получилось отметить шаг. Попробуй выбрать другой номер.")
+            return
+
+        await state.clear()
+        await message.answer("✅ Готово. Шаг отмечен, ты молодец!")
+        await show_main_menu(message)
+    except Exception as e:
+        logger.error(f"action_receive_number error: {e}", exc_info=True)
+        await message.answer("Что-то помешало отметить шаг. Давай попробуем позже.")
+        await state.clear()
+        await show_main_menu(message)
 
 
 @router.message(OnboardingState.occupation)
@@ -363,37 +847,15 @@ async def onb_partners(message: Message, state: FSMContext):
 
 
 @router.message(Command("settings"))
-async def cmd_settings(message: Message, state: FSMContext):
-    from app.database import AsyncSessionLocal
-    from app.repositories.user import UserRepository
-
-    await state.clear()
-
-    try:
-        async with AsyncSessionLocal() as db:
-            user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
-            email = user_db.email if user_db else None
-
-        buttons = []
-        if email:
-            buttons.append([InlineKeyboardButton(text=f"📧 Email: {email}", callback_data="noop")])
-        else:
-            buttons.append([InlineKeyboardButton(text="📧 Привязать email", callback_data="settings_email")])
-        buttons.append([InlineKeyboardButton(text="🔙 Закрыть", callback_data="settings_close")])
-
-        await message.answer(
-            "⚙️ Настройки\n\nЧто хочешь сделать?",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
-        )
-    except Exception as e:
-        logger.error(f"cmd_settings error: {e}", exc_info=True)
-        await message.answer("Не получилось открыть настройки. Попробуй чуть позже.")
+async def cmd_settings(message: Message, state: FSMContext) -> None:
+    await _show_settings_menu(message, state)
 
 
 @router.callback_query(F.data == "settings_close")
 async def cb_settings_close(callback: CallbackQuery):
     await callback.message.edit_text("Настройки закрыты ✅")
     await callback.answer()
+    await show_main_menu(callback.message)
 
 
 @router.callback_query(F.data == "noop")
@@ -510,6 +972,156 @@ async def process_settings_email(message: Message, state: FSMContext):
         logger.error(f"process_settings_email error: {e}", exc_info=True)
         await message.answer("Не получилось отправить письмо. Попробуй чуть позже.")
         await state.clear()
+        await show_main_menu(message)
+
+
+@router.callback_query(F.data == "reset_confirm")
+async def cb_reset_confirm(callback: CallbackQuery, state: FSMContext) -> None:
+    from app.database import AsyncSessionLocal
+    from app.repositories.user import UserRepository
+    from app.services.user_service import UserService
+
+    await state.clear()
+    try:
+        async with AsyncSessionLocal() as db:
+            user_db = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
+            if not user_db:
+                await callback.message.edit_text("Не вижу тебя в системе. Нажми /start.")
+                await callback.answer()
+                await show_main_menu(callback.message)
+                return
+
+            await UserService().reset_progress(db, user_db.id)
+            await db.commit()
+
+        await callback.message.edit_text(
+            "✅ Готово. Я бережно сбросил прогресс. Если хочешь, начнём заново."
+        )
+        await callback.answer()
+        await show_main_menu(callback.message)
+    except Exception as e:
+        logger.error(f"cb_reset_confirm error: {e}", exc_info=True)
+        await callback.message.edit_text("Не получилось сделать сброс. Попробуй чуть позже.")
+        await callback.answer()
+        await show_main_menu(callback.message)
+
+
+@router.callback_query(F.data == "reset_cancel")
+async def cb_reset_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await callback.message.edit_text("Сброс отменён. Всё осталось на месте.")
+    await callback.answer()
+    await show_main_menu(callback.message)
+
+
+@router.callback_query(F.data.startswith("task_done_"))
+async def cb_task_done(callback: CallbackQuery, state: FSMContext) -> None:
+    from app.database import AsyncSessionLocal
+    from app.repositories.user import UserRepository
+    from app.services.daily_service import DailyService
+
+    task_id = callback.data.replace("task_done_", "").strip() if callback.data else ""
+    if not task_id.isdigit():
+        await callback.answer("Не вижу номер шага. Попробуй ещё раз.")
+        return
+
+    try:
+        async with AsyncSessionLocal() as db:
+            user_db = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
+            if not user_db:
+                await callback.answer("Не вижу тебя в системе. Нажми /start.")
+                await show_main_menu(callback.message)
+                return
+
+            ok = await DailyService().toggle_task_completion(
+                db, user_id=user_db.id, task_id=int(task_id), completed=True
+            )
+            await db.commit()
+
+        if not ok:
+            await callback.answer("Не получилось отметить шаг. Попробуй ещё раз.")
+            return
+
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Показать обновлённый план",
+                        callback_data="task_done_show_plan",
+                    )
+                ],
+                [InlineKeyboardButton(text="Поделиться прогрессом ✨", callback_data="share_progress")],
+                [
+                    InlineKeyboardButton(
+                        text="Открыть план в приложении 📲",
+                        web_app=WebAppInfo(url=_build_webapp_url("/")),
+                    )
+                ],
+            ]
+        )
+
+        await callback.message.edit_text(
+            "✅ Шаг отмечен\n"
+            "Ты сделал(а) важный шаг сегодня. Пусть это будет тёплой опорой.\n\n"
+            "Хочешь увидеть обновлённый план?",
+            reply_markup=kb,
+        )
+        await callback.answer("✅ Готово!")
+        await show_main_menu(callback.message)
+    except Exception as e:
+        logger.error(f"cb_task_done error: {e}", exc_info=True)
+        await callback.answer("Не получилось отметить шаг. Попробуй позже.")
+        await show_main_menu(callback.message)
+
+
+@router.callback_query(F.data == "task_done_show_plan")
+async def cb_task_done_show_plan(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    data = await _cf_load_data(callback.from_user.id)
+    if not data:
+        await callback.message.edit_text(
+            "Сейчас нет активного проекта. Давай сначала соберём его в приложении."
+        )
+        await show_main_menu(callback.message)
+        return
+
+    tasks = data.get("tasks", [])
+    if not tasks:
+        await callback.message.edit_text(
+            "Сегодня шагов пока нет. Это нормально. Если хочешь — открой приложение и выберем путь."
+        )
+        await show_main_menu(callback.message)
+        return
+
+    text, reply_markup = _build_today_view(tasks, preface="Вот обновлённый план ✨")
+    await callback.message.edit_text(text, reply_markup=reply_markup)
+    await show_main_menu(callback.message)
+
+
+@router.callback_query(F.data == "share_progress")
+async def cb_share_progress(callback: CallbackQuery) -> None:
+    await callback.answer()
+    data = await _cf_load_data(callback.from_user.id)
+    if not data:
+        await callback.message.answer(
+            "Сейчас нет активного проекта. Давай сначала соберём его в приложении."
+        )
+        await show_main_menu(callback.message)
+        return
+
+    tasks = data.get("tasks", [])
+    if not tasks:
+        await callback.message.answer(
+            "Сегодня шагов пока нет. Это нормально. Если хочешь — открой приложение и выберем путь."
+        )
+        await show_main_menu(callback.message)
+        return
+
+    share_text = _build_share_progress_text(tasks)
+    await callback.message.answer(
+        "Вот текст, который можно переслать:\n\n" + share_text
+    )
+    await show_main_menu(callback.message)
 
 
 @router.message(CommandStart())
@@ -856,6 +1468,7 @@ async def cf_start(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text(
             "Сейчас у тебя нет активного проекта. Давай сначала спокойно соберём его."
         )
+        await show_main_menu(callback.message)
         return
 
     await state.update_data(
@@ -1116,6 +1729,7 @@ async def _cf_complete(message: Message, state: FSMContext, fsm: dict, notes: st
         await message.edit_text(text, parse_mode="Markdown")
     else:
         await message.answer(text, parse_mode="Markdown")
+    await show_main_menu(message)
 
 
 # Register router
