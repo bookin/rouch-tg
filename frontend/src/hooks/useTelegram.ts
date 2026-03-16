@@ -64,7 +64,7 @@ export const useTelegram = () => {
       tg.expand()
       
       // Enable closing confirmation
-      tg.enableClosingConfirmation()
+      // tg.enableClosingConfirmation()
       
       setWebApp(tg)
       setIsReady(true)
