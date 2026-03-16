@@ -9,6 +9,7 @@ from app.utils.typing_loader import broadcast_status
 
 logger = logging.getLogger(__name__)
 
+MAX_NUMBER_QUESTIONS = 7
 
 class DiagnosticHypothesis(BaseModel):
     """Single hypothesis about karmic cause"""
@@ -38,7 +39,7 @@ class DiagnosticState(BaseModel):
     asked_questions: List[DiagnosticQuestion] = Field(default_factory=list, description="Заданные вопросы")
     received_answers: List[Dict[str, Any]] = Field(default_factory=list, description="Полученные ответы")
     confidence_threshold: float = Field(default=0.7, description="Порог уверенности для завершения")
-    max_questions: int = Field(default=5, description="Максимум вопросов")
+    max_questions: int = Field(default=MAX_NUMBER_QUESTIONS, description="Максимум вопросов")
 
 
 class DiagnosticContext(BaseModel):
@@ -86,7 +87,7 @@ def create_diagnostic_agent() -> Agent[DiagnosticContext, DiagnosticResult]:
             "2. Формируешь гипотезы об отпечатках (imprints)\n"
             "3. Генерируешь ОДИН точный вопрос для проверки самой вероятной гипотезы\n"
             "4. Обновляешь гипотезы на основе ответа\n"
-            "5. Повторяешь пока не достигнешь уверенности 0.7+ или задашь максимум 5 вопросов\n\n"
+            "5. Повторяешь пока не достигнешь уверенности 0.7+ или задашь максимум "+ str(MAX_NUMBER_QUESTIONS) +" вопросов\n\n"
             "ВАЖНО: Твой ответ должен содержать ВСЕ обязательные поля DiagnosticResult:\n"
             "- is_complete (bool) - true если диагностика завершена, false если нужны ещё вопросы\n"
             "- sphere (str) - ОБЯЗАТЕЛЬНО!\n"
@@ -283,7 +284,7 @@ class DiagnosticSession:
         prompt = (
             f"Пользователь ответил на твой вопрос: '{answer}'. "
             "Обнови гипотезы на основе этого ответа. Если уверенность в какой-то гипотезе достигла 0.7+ "
-            "или задано уже 5 вопросов - заверши диагностику и дай финальную гипотезу. "
+            "или задано уже "+str(MAX_NUMBER_QUESTIONS)+" вопросов - заверши диагностику и дай финальную гипотезу. "
             "Иначе - задай следующий точный вопрос для проверки наиболее вероятной гипотезы. "
             "ВАЖНО: Ты должен вернуть структурированный ответ с полями DiagnosticResult."
         )

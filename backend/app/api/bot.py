@@ -161,23 +161,19 @@ def _build_webapp_url(path: str) -> str:
     return f"{base}/{clean_path}" if clean_path else base
 
 
-async def show_main_menu(message: Message) -> None:
-    """Show the main menu to the user."""
-    await message.answer(
-        "Я рядом. Выбирай, куда хочешь двигаться дальше.",
-        reply_markup=get_main_menu(),
-    )
+async def show_main_menu(message: Message, text: str) -> None:
+    """Show the main menu with a contextual message."""
+    await message.answer(text, reply_markup=get_main_menu())
 
 
 async def _send_menu_hint(message: Message, hint: str) -> None:
-    """Send a hint message, then show the main menu.
+    """Send a hint message with the main menu.
 
     Args:
         message: Incoming Telegram message.
         hint: Short supportive hint for the user.
     """
-    await message.answer(hint)
-    await show_main_menu(message)
+    await message.answer(hint, reply_markup=get_main_menu())
 
 
 def _format_problem_solution(solution: dict) -> str:
@@ -511,7 +507,6 @@ async def _send_practices_active(target: Message | CallbackQuery) -> None:
         await target.answer()
     else:
         await target.answer(text, reply_markup=markup)
-        await show_main_menu(target)
 
 
 async def _send_practices_recommendations(
@@ -665,7 +660,6 @@ async def _handle_open_app(message: Message, state: FSMContext) -> None:
         "Вот прямой вход в мини‑приложение. Нажми кнопку, и я буду рядом.",
         reply_markup=kb,
     )
-    await show_main_menu(message)
 
 
 async def _handle_solver(message: Message, state: FSMContext) -> None:
@@ -735,7 +729,10 @@ async def problem_receive_description(message: Message, state: FSMContext) -> No
         ]
     )
     await message.answer(_format_problem_solution({**solution, "history_id": history.id}), reply_markup=kb)
-    await show_main_menu(message)
+    await show_main_menu(
+        message,
+        "Готово. Если хочешь продолжить путь — выбери следующий шаг в меню ниже.",
+    )
 
 
 @router.message(ProblemState.waiting_for_diagnostic_answer)
@@ -801,7 +798,10 @@ async def problem_receive_answer(message: Message, state: FSMContext) -> None:
         ]
     )
     await message.answer(_format_problem_solution({**solution, "history_id": history.id}), reply_markup=kb)
-    await show_main_menu(message)
+    await show_main_menu(
+        message,
+        "Готово. Если хочешь продолжить путь — выбери следующий шаг в меню ниже.",
+    )
 
 
 async def _handle_today(message: Message, state: FSMContext) -> None:
@@ -823,7 +823,6 @@ async def _handle_today(message: Message, state: FSMContext) -> None:
         return
     text, reply_markup = _build_today_view(tasks)
     await message.answer(text, reply_markup=reply_markup)
-    await show_main_menu(message)
 
 
 async def _handle_day(message: Message, state: FSMContext) -> None:
@@ -924,7 +923,6 @@ async def _handle_day(message: Message, state: FSMContext) -> None:
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
 
     await message.answer("\n".join(lines), reply_markup=kb)
-    await show_main_menu(message)
 
 
 async def _handle_coffee(message: Message, state: FSMContext) -> None:
@@ -1043,7 +1041,6 @@ async def _handle_partners(message: Message, state: FSMContext) -> None:
         ]
     )
     await message.answer("\n".join(lines), reply_markup=kb)
-    await show_main_menu(message)
 
 
 async def _handle_projects(message: Message, state: FSMContext) -> None:
@@ -1101,7 +1098,6 @@ async def _handle_projects(message: Message, state: FSMContext) -> None:
         ]
     )
     await message.answer("\n".join(lines), reply_markup=kb)
-    await show_main_menu(message)
 
 
 async def _handle_practices(message: Message, state: FSMContext) -> None:
@@ -1426,10 +1422,10 @@ async def seed_receive_description(message: Message, state: FSMContext) -> None:
             plan = await KarmaPlanRepository().get_active(db, user_db.id)
             if not plan:
                 await message.answer(
-                    "Сейчас нет активного проекта. Давай сначала соберём его в приложении."
+                    "Сейчас нет активного проекта. Давай сначала соберём его в приложении.",
+                    reply_markup=get_main_menu(),
                 )
                 await state.clear()
-                await show_main_menu(message)
                 return
 
             seed = Seed(
@@ -1450,13 +1446,17 @@ async def seed_receive_description(message: Message, state: FSMContext) -> None:
             await db.commit()
 
         await state.clear()
-        await message.answer("✨ Семя сохранено. Спасибо за доброе действие.")
-        await show_main_menu(message)
+        await message.answer(
+            "✨ Семя сохранено. Спасибо за доброе действие.",
+            reply_markup=get_main_menu(),
+        )
     except Exception as e:
         logger.error(f"seed_receive_description error: {e}", exc_info=True)
-        await message.answer("Не получилось сохранить семя. Давай попробуем ещё раз чуть позже.")
+        await message.answer(
+            "Не получилось сохранить семя. Давай попробуем ещё раз чуть позже.",
+            reply_markup=get_main_menu(),
+        )
         await state.clear()
-        await show_main_menu(message)
 
 
 @router.message(ActionState.waiting_for_action_id)
@@ -1468,8 +1468,7 @@ async def action_receive_number(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
     if text.lower() == "отмена":
         await state.clear()
-        await message.answer("Хорошо, вернул тебя в меню.")
-        await show_main_menu(message)
+        await message.answer("Хорошо, вернул тебя в меню.", reply_markup=get_main_menu())
         return
 
     if not text.isdigit():
@@ -1506,13 +1505,14 @@ async def action_receive_number(message: Message, state: FSMContext) -> None:
             return
 
         await state.clear()
-        await message.answer("✅ Готово. Шаг отмечен, ты молодец!")
-        await show_main_menu(message)
+        await message.answer("✅ Готово. Шаг отмечен, ты молодец!", reply_markup=get_main_menu())
     except Exception as e:
         logger.error(f"action_receive_number error: {e}", exc_info=True)
-        await message.answer("Что-то помешало отметить шаг. Давай попробуем позже.")
+        await message.answer(
+            "Что-то помешало отметить шаг. Давай попробуем позже.",
+            reply_markup=get_main_menu(),
+        )
         await state.clear()
-        await show_main_menu(message)
 
 
 @router.message(OnboardingState.occupation)
@@ -1667,7 +1667,10 @@ async def onb_partners(message: Message, state: FSMContext):
     complete = get_step_data(OnboardingSteps.COMPLETE)
     await message.answer(complete["message"], reply_markup=ReplyKeyboardRemove())
     await state.clear()
-    await show_main_menu(message)
+    await show_main_menu(
+        message,
+        "Спасибо, я собрал твой профиль. Выбери, с чего начнём в меню ниже.",
+    )
 
 
 @router.message(Command("settings"))
@@ -1679,7 +1682,6 @@ async def cmd_settings(message: Message, state: FSMContext) -> None:
 async def cb_settings_close(callback: CallbackQuery):
     await callback.message.edit_text("Настройки закрыты ✅")
     await callback.answer()
-    await show_main_menu(callback.message)
 
 
 @router.callback_query(F.data == "noop")
@@ -1703,7 +1705,6 @@ async def cb_skip_email_prompt(callback: CallbackQuery, state: FSMContext):
         logger.error(f"cb_skip_email_prompt error: {e}", exc_info=True)
 
     await callback.answer()
-    await callback.message.answer("Хорошо. Я отложил это на позже.", reply_markup=ReplyKeyboardRemove())
 
     try:
         async with AsyncSessionLocal() as db:
@@ -1724,7 +1725,10 @@ async def cb_skip_email_prompt(callback: CallbackQuery, state: FSMContext):
         )
         return
 
-    await show_main_menu(callback.message)
+    await callback.message.answer(
+        "Хорошо. Я отложил это на позже.",
+        reply_markup=get_main_menu(),
+    )
 
 
 @router.callback_query(F.data == "settings_email")
@@ -1771,12 +1775,12 @@ async def process_settings_email(message: Message, state: FSMContext):
         if sent:
             await message.answer(
                 f"📬 Письмо отправлено на {email}\n\nОткрой почту и нажми на ссылку.",
-                reply_markup=ReplyKeyboardRemove(),
+                reply_markup=get_main_menu(),
             )
         else:
             await message.answer(
                 f"Я сохранил email {email}, но письмо сейчас не отправилось. Попробуй позже через /settings.",
-                reply_markup=ReplyKeyboardRemove(),
+                reply_markup=get_main_menu(),
             )
 
         if needs_onboarding:
@@ -1791,12 +1795,13 @@ async def process_settings_email(message: Message, state: FSMContext):
             )
             return
 
-        await show_main_menu(message)
     except Exception as e:
         logger.error(f"process_settings_email error: {e}", exc_info=True)
-        await message.answer("Не получилось отправить письмо. Попробуй чуть позже.")
+        await message.answer(
+            "Не получилось отправить письмо. Попробуй чуть позже.",
+            reply_markup=get_main_menu(),
+        )
         await state.clear()
-        await show_main_menu(message)
 
 
 @router.callback_query(F.data == "reset_confirm")
@@ -1812,7 +1817,6 @@ async def cb_reset_confirm(callback: CallbackQuery, state: FSMContext) -> None:
             if not user_db:
                 await callback.message.edit_text("Не вижу тебя в системе. Нажми /start.")
                 await callback.answer()
-                await show_main_menu(callback.message)
                 return
 
             await UserService().reset_progress(db, user_db.id)
@@ -1822,12 +1826,10 @@ async def cb_reset_confirm(callback: CallbackQuery, state: FSMContext) -> None:
             "✅ Готово. Я бережно сбросил прогресс. Если хочешь, начнём заново."
         )
         await callback.answer()
-        await show_main_menu(callback.message)
     except Exception as e:
         logger.error(f"cb_reset_confirm error: {e}", exc_info=True)
         await callback.message.edit_text("Не получилось сделать сброс. Попробуй чуть позже.")
         await callback.answer()
-        await show_main_menu(callback.message)
 
 
 @router.callback_query(F.data == "reset_cancel")
@@ -1835,7 +1837,6 @@ async def cb_reset_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await callback.message.edit_text("Сброс отменён. Всё осталось на месте.")
     await callback.answer()
-    await show_main_menu(callback.message)
 
 
 @router.callback_query(F.data.startswith("task_done_"))
@@ -1854,7 +1855,6 @@ async def cb_task_done(callback: CallbackQuery, state: FSMContext) -> None:
             user_db = await UserRepository().get_by_telegram_id(db, callback.from_user.id)
             if not user_db:
                 await callback.answer("Не вижу тебя в системе. Нажми /start.")
-                await show_main_menu(callback.message)
                 return
 
             ok = await DailyService().toggle_task_completion(
@@ -1891,11 +1891,9 @@ async def cb_task_done(callback: CallbackQuery, state: FSMContext) -> None:
             reply_markup=kb,
         )
         await callback.answer("✅ Готово!")
-        await show_main_menu(callback.message)
     except Exception as e:
         logger.error(f"cb_task_done error: {e}", exc_info=True)
         await callback.answer("Не получилось отметить шаг. Попробуй позже.")
-        await show_main_menu(callback.message)
 
 
 @router.callback_query(F.data == "task_done_show_plan")
@@ -1906,7 +1904,6 @@ async def cb_task_done_show_plan(callback: CallbackQuery, state: FSMContext) -> 
         await callback.message.edit_text(
             "Сейчас нет активного проекта. Давай сначала соберём его в приложении."
         )
-        await show_main_menu(callback.message)
         return
 
     tasks = data.get("tasks", [])
@@ -1914,12 +1911,10 @@ async def cb_task_done_show_plan(callback: CallbackQuery, state: FSMContext) -> 
         await callback.message.edit_text(
             "Сегодня шагов пока нет. Это нормально. Если хочешь — открой приложение и выберем путь."
         )
-        await show_main_menu(callback.message)
         return
 
     text, reply_markup = _build_today_view(tasks, preface="Вот обновлённый план ✨")
     await callback.message.edit_text(text, reply_markup=reply_markup)
-    await show_main_menu(callback.message)
 
 
 @router.callback_query(F.data == "share_progress")
@@ -1930,7 +1925,6 @@ async def cb_share_progress(callback: CallbackQuery) -> None:
         await callback.message.answer(
             "Сейчас нет активного проекта. Давай сначала соберём его в приложении."
         )
-        await show_main_menu(callback.message)
         return
 
     tasks = data.get("tasks", [])
@@ -1938,14 +1932,12 @@ async def cb_share_progress(callback: CallbackQuery) -> None:
         await callback.message.answer(
             "Сегодня шагов пока нет. Это нормально. Если хочешь — открой приложение и выберем путь."
         )
-        await show_main_menu(callback.message)
         return
 
     share_text = _build_share_progress_text(tasks)
     await callback.message.answer(
         "Вот текст, который можно переслать:\n\n" + share_text
     )
-    await show_main_menu(callback.message)
 
 
 @router.message(CommandStart())
@@ -2051,7 +2043,6 @@ async def cmd_start(message: Message, state: FSMContext):
                             "открой приложение → Настройки → «Привязать Telegram» и создай новый код, "
                             "а потом снова перейди по новой ссылке."
                         )
-                        await show_main_menu(message)
                         return
 
                     if not web_user.telegram_id:
@@ -2060,14 +2051,12 @@ async def cmd_start(message: Message, state: FSMContext):
                             "Открой приложение → Настройки → «Привязать Telegram» и создай новый код, "
                             "а потом снова перейди по новой ссылке."
                         )
-                        await show_main_menu(message)
                         return
 
                     await message.answer(
                         "✅ Telegram успешно привязан к твоему аккаунту!\n\n"
                         "Теперь ты можешь пользоваться и ботом, и приложением — всё синхронизировано."
                     )
-                    await show_main_menu(message)
                     return
 
             # ── Onboarding check ──
@@ -2119,7 +2108,10 @@ async def cmd_start(message: Message, state: FSMContext):
         logger.error(f"Error in cmd_start: {e}", exc_info=True)
 
     # Standard welcome for existing users
-    await show_main_menu(message)
+    await show_main_menu(
+        message,
+        f"С возвращением, {user.first_name}! Выбери, с чего хочется начать.",
+    )
 
 
 @router.callback_query(F.data.in_({"merge_keep_target", "merge_keep_source"}))
@@ -2292,7 +2284,6 @@ async def cf_start(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text(
             "Сейчас у тебя нет активного проекта. Давай сначала спокойно соберём его."
         )
-        await show_main_menu(callback.message)
         return
 
     await state.update_data(
@@ -2553,7 +2544,10 @@ async def _cf_complete(message: Message, state: FSMContext, fsm: dict, notes: st
         await message.edit_text(text, parse_mode="Markdown")
     else:
         await message.answer(text, parse_mode="Markdown")
-    await show_main_menu(message)
+    await show_main_menu(
+        message,
+        "Если захочешь продолжить — выбери следующий шаг в меню ниже.",
+    )
 
 
 # Register router
