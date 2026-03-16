@@ -357,3 +357,7 @@
     radial-gradient(900px 750px at 18% 82%, #79aa77 0%, transparent 64%),
     radial-gradient(900px 800px at 50% 55%, #0F2A1D 0%, transparent 60%);
 }
+
+.nav-bottom{
+    padding-bottom: var(--tg-content-safe-area-inset-bottom, 0px);
+}
