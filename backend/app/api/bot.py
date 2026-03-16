@@ -2,6 +2,7 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import uuid4
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.types import (
@@ -32,6 +33,7 @@ from app.mock_bot import MockBot
 
 MENU_OPEN_APP = "📱 Открыть приложение"
 MENU_SOLVER = "💭 Проблемы"
+MENU_DAY = "☀️ Мой день"
 MENU_TODAY = "📋 План"
 MENU_SEED = "🌱 Записать семя"
 MENU_COFFEE = "☕️ Кофе-медитация"
@@ -144,11 +146,11 @@ def get_main_menu() -> ReplyKeyboardMarkup:
                 web_app=WebAppInfo(url=settings.WEBAPP_URL),
             )
         ],
-        [KeyboardButton(text=MENU_SOLVER), KeyboardButton(text=MENU_TODAY)],
-        [KeyboardButton(text=MENU_SEED), KeyboardButton(text=MENU_COFFEE)],
-        [KeyboardButton(text=MENU_DONE), KeyboardButton(text=MENU_SETTINGS)],
+        [KeyboardButton(text=MENU_SOLVER), KeyboardButton(text=MENU_DAY)],
+        [KeyboardButton(text=MENU_TODAY), KeyboardButton(text=MENU_SEED)],
+        [KeyboardButton(text=MENU_COFFEE), KeyboardButton(text=MENU_DONE)],
+        [KeyboardButton(text=MENU_SETTINGS), KeyboardButton(text=MENU_PRACTICES)],
         [KeyboardButton(text=MENU_PARTNERS), KeyboardButton(text=MENU_PROJECTS)],
-        [KeyboardButton(text=MENU_PRACTICES)],
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
@@ -176,6 +178,48 @@ async def _send_menu_hint(message: Message, hint: str) -> None:
     """
     await message.answer(hint)
     await show_main_menu(message)
+
+
+def _format_problem_solution(solution: dict) -> str:
+    problem = solution.get("problem") or "Твоя ситуация"
+    root = solution.get("root_cause")
+    stop_action = solution.get("stop_action")
+    start_action = solution.get("start_action")
+    grow_action = solution.get("grow_action")
+    success_tip = solution.get("success_tip")
+
+    lines = [
+        "💭 Я услышал(а) тебя",
+        f"Ситуация: {problem}",
+        "",
+        "Вот мягкий ориентир, с которого можно начать:",
+    ]
+
+    if root:
+        lines.append(f"🔍 Причина: {root}")
+    if stop_action:
+        lines.append(f"🛑 Что отпустить: {stop_action}")
+    if start_action:
+        lines.append(f"🌱 Что начать: {start_action}")
+    if grow_action:
+        lines.append(f"✨ Что развивать: {grow_action}")
+    if success_tip:
+        lines.append("")
+        lines.append(f"💡 Подсказка: {success_tip}")
+
+    lines.append("")
+    lines.append("Если хочешь, продолжим путь в разделе «Проблема».")
+    return "\n".join(lines)
+
+
+def _extract_clarifying_question(solution: dict) -> str:
+    questions = solution.get("clarifying_questions") or []
+    if questions:
+        return str(questions[0])
+    summary = solution.get("diagnostic_summary")
+    if summary:
+        return f"Хочешь уточнить вот это: {summary}?"
+    return "Можешь добавить пару деталей? Это поможет точнее разобраться."
 
 
 def _build_today_view(
@@ -607,18 +651,157 @@ async def start_onboarding(message: Message, state: FSMContext) -> None:
 
 async def _handle_open_app(message: Message, state: FSMContext) -> None:
     await state.clear()
-    await _send_menu_hint(
-        message,
-        "Я рядом. Нажми «Открыть приложение» — и продолжим там.",
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Открыть приложение 📲",
+                    web_app=WebAppInfo(url=_build_webapp_url("/")),
+                )
+            ]
+        ]
     )
+    await message.answer(
+        "Вот прямой вход в мини‑приложение. Нажми кнопку, и я буду рядом.",
+        reply_markup=kb,
+    )
+    await show_main_menu(message)
 
 
 async def _handle_solver(message: Message, state: FSMContext) -> None:
     await state.clear()
-    await _send_menu_hint(
-        message,
-        "Чтобы решить проблему глубоко и спокойно, лучше открыть приложение.",
+    await state.set_state(ProblemState.waiting_for_description)
+    await message.answer(
+        "Опиши, что тревожит или где застрял(а). Одного‑двух предложений достаточно.",
+        reply_markup=ReplyKeyboardRemove(),
     )
+
+
+@router.message(ProblemState.waiting_for_description)
+async def problem_receive_description(message: Message, state: FSMContext) -> None:
+    from app.api.deps import user_db_to_profile
+    from app.database import AsyncSessionLocal
+    from app.repositories.problem import ProblemHistoryRepository
+    from app.repositories.user import UserRepository
+    from app.knowledge.qdrant import QdrantKnowledgeBase
+    from app.agents.problem_solver import ProblemSolverAgent
+
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Напиши пару слов, и я начну разбор.")
+        return
+
+    await message.answer("Секунду, я слушаю и собираю картину...")
+
+    async with AsyncSessionLocal() as db:
+        user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
+        if not user_db:
+            await message.answer("Я пока не вижу тебя в системе. Нажми /start — и начнём мягко заново.")
+            await state.clear()
+            return
+
+        session_id = f"tg_{user_db.id}_{uuid4().hex[:8]}"
+        qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
+        agent = ProblemSolverAgent(qdrant)
+        solution = await agent.analyze_problem(
+            user_db_to_profile(user_db),
+            text,
+            session_id=session_id,
+        )
+
+        if solution.get("needs_clarification"):
+            await state.set_state(ProblemState.waiting_for_diagnostic_answer)
+            await state.update_data(problem_text=text, problem_session_id=session_id)
+            await message.answer(_extract_clarifying_question(solution))
+            return
+
+        history = await ProblemHistoryRepository().save(
+            db,
+            user_id=user_db.id,
+            problem_text=text,
+            solution_json=solution,
+        )
+        await db.commit()
+
+    await state.clear()
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Открыть раздел «Проблема»",
+                    web_app=WebAppInfo(url=_build_webapp_url("/problem")),
+                )
+            ]
+        ]
+    )
+    await message.answer(_format_problem_solution({**solution, "history_id": history.id}), reply_markup=kb)
+    await show_main_menu(message)
+
+
+@router.message(ProblemState.waiting_for_diagnostic_answer)
+async def problem_receive_answer(message: Message, state: FSMContext) -> None:
+    from app.api.deps import user_db_to_profile
+    from app.database import AsyncSessionLocal
+    from app.repositories.problem import ProblemHistoryRepository
+    from app.repositories.user import UserRepository
+    from app.knowledge.qdrant import QdrantKnowledgeBase
+    from app.agents.problem_solver import ProblemSolverAgent
+
+    answer = (message.text or "").strip()
+    if not answer:
+        await message.answer("Напиши ответ, и я продолжу разбор.")
+        return
+
+    data = await state.get_data()
+    problem_text = data.get("problem_text") or ""
+    session_id = data.get("problem_session_id")
+
+    async with AsyncSessionLocal() as db:
+        user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
+        if not user_db:
+            await message.answer("Я пока не вижу тебя в системе. Нажми /start — и начнём мягко заново.")
+            await state.clear()
+            return
+
+        if not session_id:
+            session_id = f"tg_{user_db.id}_{uuid4().hex[:8]}"
+
+        qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
+        agent = ProblemSolverAgent(qdrant)
+        solution = await agent.analyze_problem(
+            user_db_to_profile(user_db),
+            problem_text or answer,
+            session_id=session_id,
+            diagnostic_answer=answer,
+        )
+
+        if solution.get("needs_clarification"):
+            await state.set_state(ProblemState.waiting_for_diagnostic_answer)
+            await state.update_data(problem_text=problem_text or answer, problem_session_id=session_id)
+            await message.answer(_extract_clarifying_question(solution))
+            return
+
+        history = await ProblemHistoryRepository().save(
+            db,
+            user_id=user_db.id,
+            problem_text=problem_text or answer,
+            solution_json=solution,
+        )
+        await db.commit()
+
+    await state.clear()
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Открыть раздел «Проблема»",
+                    web_app=WebAppInfo(url=_build_webapp_url("/problem")),
+                )
+            ]
+        ]
+    )
+    await message.answer(_format_problem_solution({**solution, "history_id": history.id}), reply_markup=kb)
+    await show_main_menu(message)
 
 
 async def _handle_today(message: Message, state: FSMContext) -> None:
@@ -640,6 +823,107 @@ async def _handle_today(message: Message, state: FSMContext) -> None:
         return
     text, reply_markup = _build_today_view(tasks)
     await message.answer(text, reply_markup=reply_markup)
+    await show_main_menu(message)
+
+
+async def _handle_day(message: Message, state: FSMContext) -> None:
+    from app.database import AsyncSessionLocal
+    from app.repositories.user import UserRepository
+    from app.knowledge.qdrant import QdrantKnowledgeBase
+    from app.agents.daily_manager import DailyManagerAgent
+    from app.services.practice_service import PracticeService
+
+    await state.clear()
+
+    async with AsyncSessionLocal() as db:
+        user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
+        if not user_db:
+            await message.answer("Я пока не вижу тебя в системе. Нажми /start — и начнём мягко заново.")
+            return
+
+        practice_progress = await PracticeService().get_user_progress(db, user_db.id)
+
+    qdrant = QdrantKnowledgeBase(settings.QDRANT_URL)
+    agent = DailyManagerAgent(qdrant)
+    quote = await qdrant.get_daily_quote(None)
+    actions = await agent.get_daily_actions(
+        user_id=user_db.id,
+        first_name=user_db.first_name,
+        streak_days=user_db.streak_days,
+        total_seeds=user_db.total_seeds,
+    )
+
+    actionable = [a for a in actions if str(a.get("id", "")).isdigit()]
+    completed = sum(1 for a in actionable if a.get("completed"))
+    total = len(actionable)
+    remaining = max(total - completed, 0)
+    percent = int((completed / total) * 100) if total else 0
+
+    active_practices = [
+        p for p in practice_progress if not p.is_hidden and p.is_active
+    ]
+    paused_practices = [
+        p for p in practice_progress if not p.is_hidden and not p.is_active
+    ]
+
+    lines = [
+        f"☀️ {user_db.first_name}, твой день",
+        "Я рядом и помогу увидеть главное.",
+        "",
+    ]
+
+    quote_text = (quote or {}).get("text")
+    if quote_text:
+        lines.append("💭 Цитата дня:")
+        lines.append(f"«{quote_text}»")
+        lines.append("")
+
+    if actions:
+        lines.append("🌱 Шаги на сегодня:")
+        for idx, action in enumerate(actions[:5], start=1):
+            partner = action.get("partner_name") or "Шаг"
+            desc = action.get("description", "")
+            lines.append(f"{idx}. {partner}: {desc}")
+    else:
+        lines.append(
+            "Сегодня шагов пока нет. Если хочешь — я помогу собрать проект и начать путь."
+        )
+
+    if total:
+        lines.append("")
+        lines.append(
+            f"💛 Пульс дня: {completed}/{total} • {percent}% • осталось {remaining}"
+        )
+
+    if active_practices or paused_practices:
+        lines.append("")
+        lines.append("🧘 Практики рядом:")
+        for practice in active_practices[:3]:
+            name = practice.practice.name if practice.practice else "Практика"
+            status = "привычка" if practice.is_habit else "в работе"
+            lines.append(f"• {name} — {status}")
+        if paused_practices:
+            lines.append(f"• На паузе: {len(paused_practices)}")
+
+    buttons: list[list[InlineKeyboardButton]] = []
+    for idx, action in enumerate(actions[:5], start=1):
+        action_id = str(action.get("id", ""))
+        if not action_id.isdigit() or action.get("completed"):
+            continue
+        buttons.append(
+            [InlineKeyboardButton(text=f"✅ Шаг {idx}", callback_data=f"task_done_{action_id}")]
+        )
+    buttons.append(
+        [
+            InlineKeyboardButton(
+                text="Открыть мой день в приложении 📲",
+                web_app=WebAppInfo(url=_build_webapp_url("/")),
+            )
+        ]
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    await message.answer("\n".join(lines), reply_markup=kb)
     await show_main_menu(message)
 
 
@@ -706,39 +990,117 @@ async def _handle_reset(message: Message, state: FSMContext) -> None:
 
 async def _handle_partners(message: Message, state: FSMContext) -> None:
     await state.clear()
+    from app.database import AsyncSessionLocal
+    from app.repositories.user import UserRepository
+    from app.services.partner_service import PartnerService
+
+    async with AsyncSessionLocal() as db:
+        user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
+        if not user_db:
+            await message.answer("Я пока не вижу тебя в системе. Нажми /start — и начнём мягко заново.")
+            return
+
+        partner_svc = PartnerService()
+        await partner_svc.ensure_default_groups(db, user_db.id)
+        groups = await partner_svc.get_groups(db, user_db.id)
+        partners = await partner_svc.get_partners(db, user_db.id)
+
+    group_map = {g.id: g.universal_category or "world" for g in groups}
+    by_category: dict[str, list[str]] = {"source": [], "ally": [], "protege": [], "world": []}
+    for partner in partners:
+        cat = group_map.get(partner.group_id, "world")
+        by_category.setdefault(cat, []).append(partner.name)
+
+    labels = {
+        "source": "Источник",
+        "ally": "Соратник",
+        "protege": "Подопечный",
+        "world": "Внешний мир",
+    }
+
+    lines = [
+        "🤝 Твои партнёры",
+        "Это люди, через которых мы выращиваем перемены. Я разложил(а) их по ролям:",
+        "",
+    ]
+    for key in ["source", "ally", "protege", "world"]:
+        items = by_category.get(key, [])
+        if not items:
+            lines.append(f"• {labels[key]}: пока никого нет")
+            continue
+        names = ", ".join(items[:5])
+        tail = "" if len(items) <= 5 else f" …и ещё {len(items) - 5}"
+        lines.append(f"• {labels[key]}: {names}{tail}")
+
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Открыть партнёров 🤝",
+                    text="Открыть партнёров в приложении 📲",
                     web_app=WebAppInfo(url=_build_webapp_url("/partners")),
                 )
             ]
         ]
     )
-    await message.answer(
-        "Хочешь увидеть своих партнёров и их роли? Открой раздел — там всё аккуратно разложено.",
-        reply_markup=kb,
-    )
+    await message.answer("\n".join(lines), reply_markup=kb)
     await show_main_menu(message)
 
 
 async def _handle_projects(message: Message, state: FSMContext) -> None:
     await state.clear()
+    from app.database import AsyncSessionLocal
+    from app.repositories.karma_plan import KarmaPlanRepository
+    from app.repositories.user import UserRepository
+
+    async with AsyncSessionLocal() as db:
+        user_db = await UserRepository().get_by_telegram_id(db, message.from_user.id)
+        if not user_db:
+            await message.answer("Я пока не вижу тебя в системе. Нажми /start — и начнём мягко заново.")
+            return
+
+        plan = await KarmaPlanRepository().get_active(db, user_db.id)
+
+    if not plan:
+        await state.set_state(ProblemState.waiting_for_description)
+        await message.answer(
+            "🎯 Активного проекта пока нет.\n"
+            "Если хочешь — опиши проблему, и я помогу запустить путь.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        return
+
+    problem_text = ""
+    if getattr(plan, "problem_history", None) and plan.problem_history:
+        problem_text = plan.problem_history.problem_text
+    if not problem_text:
+        problem_text = (plan.strategy_snapshot or {}).get("problem_text", "")
+
+    strategy = plan.strategy_snapshot or {}
+    stop_action = strategy.get("stop_action")
+    start_action = strategy.get("start_action")
+    grow_action = strategy.get("grow_action")
+
+    lines = ["🎯 Активный проект", f"Проблема: {problem_text or '—'}", ""]
+    if stop_action:
+        lines.append(f"🛑 Что отпускаем: {stop_action}")
+    if start_action:
+        lines.append(f"🌱 Что начинаем: {start_action}")
+    if grow_action:
+        lines.append(f"✨ Что развиваем: {grow_action}")
+    lines.append("")
+    lines.append("Хочешь продолжить? Я рядом.")
+
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Открыть проекты 🎯",
+                    text="Открыть проект в приложении 📲",
                     web_app=WebAppInfo(url=_build_webapp_url("/problem")),
                 )
             ]
         ]
     )
-    await message.answer(
-        "Готов(а) посмотреть или запустить проект? Открой раздел — там мягко проведём дальше.",
-        reply_markup=kb,
-    )
+    await message.answer("\n".join(lines), reply_markup=kb)
     await show_main_menu(message)
 
 
@@ -782,6 +1144,11 @@ async def menu_open_app(message: Message, state: FSMContext) -> None:
 @router.message(StateFilter(None), F.text == MENU_SOLVER)
 async def menu_solver(message: Message, state: FSMContext) -> None:
     await _handle_solver(message, state)
+
+
+@router.message(StateFilter(None), F.text == MENU_DAY)
+async def menu_day(message: Message, state: FSMContext) -> None:
+    await _handle_day(message, state)
 
 
 @router.message(StateFilter(None), F.text == MENU_TODAY)
@@ -843,6 +1210,11 @@ async def cmd_solver(message: Message, state: FSMContext) -> None:
 @router.message(Command("today"))
 async def cmd_today(message: Message, state: FSMContext) -> None:
     await _handle_today(message, state)
+
+
+@router.message(Command("day"))
+async def cmd_day(message: Message, state: FSMContext) -> None:
+    await _handle_day(message, state)
 
 
 @router.message(Command("coffee"))
@@ -2211,6 +2583,7 @@ async def start_bot():
                     BotCommand(command="app", description="📱 Открыть приложение"),
                     BotCommand(command="solver", description="💭 Решить проблему"),
                     BotCommand(command="today", description="📋 Действия на сегодня"),
+                    BotCommand(command="day", description="☀️ Мой день"),
                     BotCommand(command="coffee", description="☕️ Кофе-медитация"),
                     BotCommand(command="seed", description="🌱 Записать семя"),
                     BotCommand(command="done", description="✅ Отметить выполнение"),
