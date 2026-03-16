@@ -370,7 +370,7 @@ export default function Dashboard() {
 					</div>
 					<Button
 						variant="outline"
-						className="rounded-full px-4 text-xs border-white/30 text-white hover:bg-white/10"
+						className="rounded-full px-4 text-xs border-white/30 text-white hover:bg-white/10 hover:text-white"
 						asChild
 					>
 						<Link to="/practices">Все практики</Link>
@@ -417,7 +417,7 @@ export default function Dashboard() {
 			{/* CTA when has practices */}
 			{!isEmpty && (
 				<div className="mt-2">
-					<Button variant="outline" className="w-full rounded-full border-white/20 text-white/60 hover:bg-white/10 text-xs" asChild>
+					<Button variant="outline" className="w-full rounded-full border-white/20 text-white/60 hover:bg-white/10 text-xs hover:text-white" asChild>
 						<Link to="/practices">
 							<Sparkles className="h-3.5 w-3.5 mr-2 text-yellow-300"/>
 							Хочу новые практики

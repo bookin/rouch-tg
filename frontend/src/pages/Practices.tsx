@@ -319,7 +319,7 @@ return (
 			<section>
 				<Button
 					variant="outline"
-					className="w-full border-white/20 text-white/70 hover:bg-white/10"
+					className="w-full border-white/20 text-white/70 hover:bg-white/10 hover:text-white"
 					onClick={loadCatalog}
 					disabled={catalogLoading}
 				>

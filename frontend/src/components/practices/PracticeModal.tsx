@@ -40,10 +40,10 @@ export default function PracticeModal({
   const showDetails = mode === 'details'
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 px-4">
-      <div className="relative w-full max-w-xl rounded-3xl border border-white/20 bg-zinc-950/90 p-6 text-white shadow-xl backdrop-blur-xl">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 px-4">
+      <div className="relative w-full max-w-xl rounded-3xl border border-white/20 bg-white/10 p-6 text-white shadow-xl backdrop-blur-xl">
         <button
-          className="absolute right-4 top-4 text-white/50 transition hover:text-white"
+          className="absolute right-4 top-4 text-white/50 transition hover:text-white cursor-pointer"
           onClick={onClose}
           aria-label="Закрыть"
         >
